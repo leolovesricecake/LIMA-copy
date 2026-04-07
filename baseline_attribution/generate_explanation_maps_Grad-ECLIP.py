@@ -83,6 +83,42 @@ def parse_args():
     return parser.parse_args()
 
 
+def map_physical_to_visible_device_index(requested_device_index):
+    if requested_device_index < 0:
+        return requested_device_index
+
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if cuda_visible == "":
+        return requested_device_index
+
+    visible_tokens = [x.strip() for x in cuda_visible.split(",") if x.strip() != ""]
+    if len(visible_tokens) == 0:
+        return requested_device_index
+
+    if all(token.isdigit() for token in visible_tokens):
+        requested_str = str(requested_device_index)
+        if requested_str not in visible_tokens:
+            raise ValueError(
+                "Requested physical --device={} is not in CUDA_VISIBLE_DEVICES={}".format(
+                    requested_device_index, cuda_visible
+                )
+            )
+        logical_index = visible_tokens.index(requested_str)
+        print(
+            "Detected CUDA_VISIBLE_DEVICES={}, map physical GPU {} -> visible logical GPU {}".format(
+                cuda_visible, requested_device_index, logical_index
+            )
+        )
+        return logical_index
+
+    print(
+        "Detected non-numeric CUDA_VISIBLE_DEVICES={}, treat --device as visible logical index.".format(
+            cuda_visible
+        )
+    )
+    return requested_device_index
+
+
 def resolve_device(device_index):
     if device_index < 0 or not torch.cuda.is_available():
         return "cpu"
@@ -98,8 +134,10 @@ def resolve_device(device_index):
 
 
 def main(args):
-    print("Requested --device={}".format(args.device))
-    device = resolve_device(args.device)
+    print("Requested physical --device={}".format(args.device))
+    visible_device_index = map_physical_to_visible_device_index(args.device)
+    device = resolve_device(visible_device_index)
+    print("Selected visible logical GPU index={}".format(visible_device_index))
     print("Torch device={}".format(device))
     # Load model
     clipmodel, preprocess = clip.load("ViT-L/14", device=device, download_root=".checkpoints/CLIP")
