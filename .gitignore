@@ -1,0 +1,10 @@
+**cache**
+*.png
+*.JPEG
+*.jpg
+
+*.npy
+*.pt
+
+datasets
+dev
