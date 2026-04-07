@@ -7,7 +7,7 @@ Created on 2024/6/3
 """
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import numpy as np
 import cv2
@@ -34,6 +34,7 @@ tf.config.run_functions_eagerly(True)
 
 gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
 if len(gpus) > 0:
+    print(f'^v^ gpus available: {gpus}')
     tf.config.experimental.set_virtual_device_configuration(
         gpus[0],
         [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=2048)]
@@ -173,7 +174,7 @@ def main():
         # Saliency(model),
         # GradientInput(model),
         # GuidedBackprop(model),
-        IntegratedGradients(wrapped_model, steps=80, batch_size=batch_size),
+        # IntegratedGradients(wrapped_model, steps=80, batch_size=batch_size),
         # SmoothGrad(model, nb_samples=80, batch_size=batch_size),
         # SquareGrad(model, nb_samples=80, batch_size=batch_size),
         # VarGrad(model, nb_samples=80, batch_size=batch_size),
@@ -182,10 +183,10 @@ def main():
         # Occlusion(model, patch_size=10, patch_stride=5, batch_size=batch_size),
         # Rise(model, nb_samples=500, batch_size=batch_size),
         # SobolAttributionMethod(model, batch_size=batch_size),
-        # HsicAttributionMethod(wrapped_model, batch_size=batch_size),
+        HsicAttributionMethod(wrapped_model, batch_size=batch_size),
         # Rise(wrapped_model, nb_samples=500, batch_size=batch_size),
         # Lime(model, nb_samples = 1000),
-        KernelShap(wrapped_model, nb_samples = 1000, batch_size=32)
+        # KernelShap(wrapped_model, nb_samples = 1000, batch_size=32)
     ]
     
     # data preproccess
