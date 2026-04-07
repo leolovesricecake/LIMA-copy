@@ -9,8 +9,9 @@ Created on 2024/6/3
 import os
 # NOTE:
 # Do not hardcode CUDA_VISIBLE_DEVICES here.
-# Respect the value passed from shell, e.g.:
-# CUDA_VISIBLE_DEVICES=1 python -m baseline_attribution.generate_explanation_maps_clip_vitl
+# Select GPU by --device, e.g.:
+# python -m baseline_attribution.generate_explanation_maps_clip_vitl --device 1
+import argparse
 
 import numpy as np
 import cv2
@@ -34,16 +35,6 @@ import tensorflow as tf
 from utils import *
 
 tf.config.run_functions_eagerly(True)
-
-gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
-if len(gpus) > 0:
-    print(f'^v^ gpus available: {gpus}')
-    tf.config.experimental.set_virtual_device_configuration(
-        gpus[0],
-        [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=2048)]
-    )
-else:
-    print("Warning: no TensorFlow GPU device found, skip TF GPU memory limit setup.")
 
 SAVE_PATH = "explanation_results/"
 mkdir(SAVE_PATH)
@@ -154,9 +145,72 @@ def load_or_build_semantic_feature(model, device, semantic_path):
     print("semantic feature saved to {}".format(semantic_path))
     return semantic_feature
 
-def main():
-    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate CLIP attribution maps.")
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="GPU index to use. Set -1 for CPU.",
+    )
+    parser.add_argument(
+        "--tf-memory-limit",
+        type=int,
+        default=2048,
+        help="TensorFlow per-process GPU memory limit in MB.",
+    )
+    return parser.parse_args()
+
+
+def resolve_device(device_index):
+    if device_index < 0 or not torch.cuda.is_available():
+        return "cpu"
+    gpu_count = torch.cuda.device_count()
+    if device_index >= gpu_count:
+        raise ValueError(
+            "Invalid --device {}. Available CUDA devices: 0..{}.".format(
+                device_index, gpu_count - 1
+            )
+        )
+    torch.cuda.set_device(device_index)
+    return "cuda:{}".format(device_index)
+
+
+def configure_tensorflow_gpu(device_index, tf_memory_limit):
+    gpus = tf.config.experimental.list_physical_devices(device_type="GPU")
+    if len(gpus) == 0:
+        print("Warning: no TensorFlow GPU device found, skip TF GPU config.")
+        return
+
+    if device_index < 0:
+        tf.config.set_visible_devices([], "GPU")
+        print("TensorFlow GPU disabled (CPU mode).")
+        return
+
+    if device_index >= len(gpus):
+        raise ValueError(
+            "TensorFlow sees {} GPUs, but --device={} was requested.".format(
+                len(gpus), device_index
+            )
+        )
+
+    target_gpu = gpus[device_index]
+    try:
+        tf.config.set_visible_devices(target_gpu, "GPU")
+        tf.config.experimental.set_virtual_device_configuration(
+            target_gpu,
+            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=tf_memory_limit)],
+        )
+        print("TensorFlow target GPU index: {}".format(device_index))
+    except RuntimeError as err:
+        print("Warning: TensorFlow GPU visibility was already initialized: {}".format(err))
+
+
+def main(args):
+    print("Requested --device={}".format(args.device))
+    device = resolve_device(args.device)
+    configure_tensorflow_gpu(args.device, args.tf_memory_limit)
+    print("Torch device={}".format(device))
     # Load model
     vis_model = CLIPModel_Super("ViT-L/14", download_root=".checkpoints/CLIP", device=device)
     vis_model.eval()
@@ -230,4 +284,7 @@ def main():
     
     return
 
-main()
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)

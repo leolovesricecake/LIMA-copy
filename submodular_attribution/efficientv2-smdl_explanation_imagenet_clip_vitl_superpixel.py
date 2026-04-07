@@ -91,6 +91,10 @@ def parse_args():
     parser.add_argument('--save-dir', 
                         type=str, default='./submodular_results/imagenet-clip-vitl-efficientv2/',
                         help='output directory to save results')
+    parser.add_argument('--device',
+                        type=int,
+                        default=0,
+                        help='GPU index to use. Set -1 for CPU.')
     args = parser.parse_args()
     return args
 
@@ -160,10 +164,25 @@ def transform_vision_data(image):
     image = data_transform(image)
     return image
 
+
+def resolve_device(device_index):
+    if device_index < 0 or not torch.cuda.is_available():
+        return "cpu"
+    gpu_count = torch.cuda.device_count()
+    if device_index >= gpu_count:
+        raise ValueError(
+            "Invalid --device {}. Available CUDA devices: 0..{}.".format(
+                device_index, gpu_count - 1
+            )
+        )
+    torch.cuda.set_device(device_index)
+    return "cuda:{}".format(device_index)
+
 def main(args):
     # Model Init
-    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("Requested --device={}".format(args.device))
+    device = resolve_device(args.device)
+    print("Torch device={}".format(device))
     # Instantiate model
     vis_model = CLIPModel_Super("ViT-L/14", download_root=".checkpoints/CLIP", device=device)
     vis_model.eval()

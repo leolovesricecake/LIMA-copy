@@ -1,4 +1,5 @@
 import os
+import argparse
 import cv2
 import math
 import numpy as np
@@ -130,9 +131,35 @@ def perturbed(image, mask, rate = 0.5, mode = "insertion"):
     perturbed_image = image * new_mask
     return perturbed_image.astype(np.uint8)
 
-def main():
-    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Debug insertion/deletion curves for CLIP ViT-L.")
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="GPU index to use. Set -1 for CPU.",
+    )
+    return parser.parse_args()
+
+
+def resolve_device(device_index):
+    if device_index < 0 or not torch.cuda.is_available():
+        return "cpu"
+    gpu_count = torch.cuda.device_count()
+    if device_index >= gpu_count:
+        raise ValueError(
+            "Invalid --device {}. Available CUDA devices: 0..{}.".format(
+                device_index, gpu_count - 1
+            )
+        )
+    torch.cuda.set_device(device_index)
+    return "cuda:{}".format(device_index)
+
+
+def main(args):
+    print("Requested --device={}".format(args.device))
+    device = resolve_device(args.device)
+    print("Torch device={}".format(device))
     
     mkdir(results_save_root)
     save_dir = os.path.join(results_save_root, save_doc)
@@ -209,4 +236,7 @@ def main():
         
     return
 
-main()
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)

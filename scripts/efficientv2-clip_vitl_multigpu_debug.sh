@@ -9,25 +9,9 @@ lambda3=10
 lambda4=1
 pending_samples=8
 
-# Respect external CUDA_VISIBLE_DEVICES if provided.
-# Example:
-# CUDA_VISIBLE_DEVICES=1 bash scripts/efficientv2-clip_vitl_multigpu_debug.sh
-if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
-    IFS=',' read -r -a cuda_devices <<< "${CUDA_VISIBLE_DEVICES}"
-else
-    declare -a cuda_devices=("0" "1")
-fi
-
-# trim spaces and drop empty items
-filtered_devices=()
-for device in "${cuda_devices[@]}"
-do
-    device="${device//[[:space:]]/}"
-    if [[ -n "$device" ]]; then
-        filtered_devices+=("$device")
-    fi
-done
-cuda_devices=("${filtered_devices[@]}")
+# Select target GPU indices for subprocesses.
+# Example single GPU: declare -a cuda_devices=("1")
+declare -a cuda_devices=("0" "1")
 
 if [[ ${#cuda_devices[@]} -eq 0 ]]; then
     echo "No valid CUDA devices found."
@@ -37,7 +21,7 @@ fi
 # GPU numbers
 gpu_numbers=${#cuda_devices[@]}
 echo "The number of GPUs is $gpu_numbers."
-echo "CUDA device list: ${cuda_devices[*]}"
+echo "Device list: ${cuda_devices[*]}"
 
 # text length
 line_count=$(wc -l < "$eval_list")
@@ -56,7 +40,7 @@ do
         end=$((begin + line_count_per_gpu))
     fi
 
-    CUDA_VISIBLE_DEVICES=$device python -m submodular_attribution.efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel \
+    python -m submodular_attribution.efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel \
     --Datasets $dataset \
     --eval-list $eval_list \
     --lambda1 $lambda1 \
@@ -64,6 +48,7 @@ do
     --lambda3 $lambda3 \
     --lambda4 $lambda4 \
     --pending-samples $pending_samples \
+    --device $device \
     --begin $begin \
     --end $end &
 

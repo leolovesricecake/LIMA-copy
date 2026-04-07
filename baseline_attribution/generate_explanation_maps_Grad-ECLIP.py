@@ -4,6 +4,7 @@ Created on 2024/8/19
 @author: Ruoyu Chen
 """
 import os
+import argparse
 from torch.autograd import Variable
 from .Grad_Eclip.grad_eclip import *
 
@@ -71,9 +72,35 @@ def load_or_build_semantic_feature(model, device, semantic_path):
     print("semantic feature saved to {}".format(semantic_path))
     return semantic_feature
 
-def main():
-    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate Grad-ECLIP attribution maps.")
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="GPU index to use. Set -1 for CPU.",
+    )
+    return parser.parse_args()
+
+
+def resolve_device(device_index):
+    if device_index < 0 or not torch.cuda.is_available():
+        return "cpu"
+    gpu_count = torch.cuda.device_count()
+    if device_index >= gpu_count:
+        raise ValueError(
+            "Invalid --device {}. Available CUDA devices: 0..{}.".format(
+                device_index, gpu_count - 1
+            )
+        )
+    torch.cuda.set_device(device_index)
+    return "cuda:{}".format(device_index)
+
+
+def main(args):
+    print("Requested --device={}".format(args.device))
+    device = resolve_device(args.device)
+    print("Torch device={}".format(device))
     # Load model
     clipmodel, preprocess = clip.load("ViT-L/14", device=device, download_root=".checkpoints/CLIP")
     
@@ -109,14 +136,18 @@ def main():
 
         Y_true = label[step]
         
-        torch.cuda.empty_cache() 
+        if device != "cpu":
+            torch.cuda.empty_cache()
         explanation = explainer(
             X_raw,
             Y_true
             )
-        torch.cuda.empty_cache() 
+        if device != "cpu":
+            torch.cuda.empty_cache()
         
-        np.save(os.path.join(exp_save_path, img_path.split("/")[-1].replace(".JPEG", "")), 
+        np.save(os.path.join(exp_save_path, img_path.split("/")[-1].replace(".JPEG", "")),
                 cv2.resize(explanation.astype(np.float32), (224,224)))
 
-main()
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)
