@@ -72,6 +72,7 @@ def load_or_build_semantic_feature(model, device, semantic_path):
     return semantic_feature
 
 def main():
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Load model
     clipmodel, preprocess = clip.load("ViT-L/14", device=device, download_root=".checkpoints/CLIP")

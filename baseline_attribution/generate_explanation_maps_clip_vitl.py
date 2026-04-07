@@ -7,7 +7,10 @@ Created on 2024/6/3
 """
 
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# NOTE:
+# Do not hardcode CUDA_VISIBLE_DEVICES here.
+# Respect the value passed from shell, e.g.:
+# CUDA_VISIBLE_DEVICES=1 python -m baseline_attribution.generate_explanation_maps_clip_vitl
 
 import numpy as np
 import cv2
@@ -152,6 +155,7 @@ def load_or_build_semantic_feature(model, device, semantic_path):
     return semantic_feature
 
 def main():
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Load model
     vis_model = CLIPModel_Super("ViT-L/14", download_root=".checkpoints/CLIP", device=device)

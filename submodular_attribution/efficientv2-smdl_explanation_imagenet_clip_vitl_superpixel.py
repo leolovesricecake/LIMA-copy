@@ -162,6 +162,7 @@ def transform_vision_data(image):
 
 def main(args):
     # Model Init
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Instantiate model
     vis_model = CLIPModel_Super("ViT-L/14", download_root=".checkpoints/CLIP", device=device)

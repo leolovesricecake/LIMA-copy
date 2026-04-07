@@ -131,6 +131,7 @@ def perturbed(image, mask, rate = 0.5, mode = "insertion"):
     return perturbed_image.astype(np.uint8)
 
 def main():
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     mkdir(results_save_root)
