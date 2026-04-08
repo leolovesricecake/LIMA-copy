@@ -1,8 +1,18 @@
 import os
-# Keep CUDA runtime device order consistent with nvidia-smi indices.
+# Use PCI_BUS_ID order to align CUDA ordinal with nvidia-smi bus ordering as much as possible.
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# The user wants to select physical GPU by --device while seeing all devices.
+# Remove inherited visibility masks before importing torch/CUDA libs.
+_inherited_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+if _inherited_visible not in ("", "-1"):
+    print("[bootstrap] Clear inherited CUDA_VISIBLE_DEVICES={}.".format(_inherited_visible))
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+
 import argparse
 import subprocess
+import ctypes
+import ctypes.util
+import re
 import cv2
 import math
 import numpy as np
@@ -10,63 +20,13 @@ import matplotlib
 from PIL import Image
 from matplotlib import pyplot as plt
 
-import torch
-from torchvision import transforms
-
-import clip
-
 from tqdm import tqdm
 import json
 from utils import *
 
-
-def _query_physical_gpu_indices_from_nvidia_smi():
-    try:
-        result = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader,nounits"],
-            stderr=subprocess.STDOUT,
-        )
-        lines = result.decode("utf-8").strip().splitlines()
-        indices = [int(x.strip()) for x in lines if x.strip() != ""]
-        return indices
-    except Exception:
-        return []
-
-
-def _bootstrap_device_from_argv():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--device", type=int, default=0)
-    args, _ = parser.parse_known_args()
-
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-
-    inherited = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
-    if args.device >= 0:
-        all_physical = _query_physical_gpu_indices_from_nvidia_smi()
-        if len(all_physical) > 0 and args.device in all_physical:
-            reordered = [args.device] + [idx for idx in all_physical if idx != args.device]
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(x) for x in reordered)
-            if inherited != "" and inherited != os.environ["CUDA_VISIBLE_DEVICES"]:
-                print(
-                    "[bootstrap] Override inherited CUDA_VISIBLE_DEVICES={} -> {} (requested physical --device={}).".format(
-                        inherited, os.environ["CUDA_VISIBLE_DEVICES"], args.device
-                    )
-                )
-            else:
-                print(
-                    "[bootstrap] Set CUDA_VISIBLE_DEVICES={} (requested physical --device={}).".format(
-                        os.environ["CUDA_VISIBLE_DEVICES"], args.device
-                    )
-                )
-        elif inherited == "":
-            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-    else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-    return args.device
-
-
-_BOOTSTRAP_DEVICE = _bootstrap_device_from_argv()
+import torch
+from torchvision import transforms
+import clip
 
 results_save_root = "./explanation_insertion_results"
 # TODO 手动修改explanation_method为需要调试的解释方法
@@ -189,69 +149,129 @@ def parse_args():
     parser.add_argument(
         "--device",
         type=int,
-        default=_BOOTSTRAP_DEVICE,
+        default=0,
         help="Physical GPU index from nvidia-smi. Set -1 for CPU.",
     )
     return parser.parse_args()
 
 
-def map_physical_to_visible_device_index(requested_device_index):
-    if requested_device_index < 0:
-        return requested_device_index
-
-    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
-    if cuda_visible == "":
-        return requested_device_index
-
-    visible_tokens = [x.strip() for x in cuda_visible.split(",") if x.strip() != ""]
-    if len(visible_tokens) == 0:
-        return requested_device_index
-
-    if all(token.isdigit() for token in visible_tokens):
-        requested_str = str(requested_device_index)
-        if requested_str not in visible_tokens:
-            raise ValueError(
-                "Requested physical --device={} is not in CUDA_VISIBLE_DEVICES={}".format(
-                    requested_device_index, cuda_visible
-                )
-            )
-        logical_index = visible_tokens.index(requested_str)
-        print(
-            "Detected CUDA_VISIBLE_DEVICES={}, map physical GPU {} -> visible logical GPU {}".format(
-                cuda_visible, requested_device_index, logical_index
-            )
-        )
-        return logical_index
-
-    print(
-        "Detected non-numeric CUDA_VISIBLE_DEVICES={}, treat --device as visible logical index.".format(
-            cuda_visible
-        )
+def _normalize_pci_bus_id(bus_id):
+    if bus_id is None:
+        return None
+    text = bus_id.strip().upper()
+    match = re.match(r"^([0-9A-F]+):([0-9A-F]+):([0-9A-F]+)\.([0-9A-F]+)$", text)
+    if match is None:
+        return text
+    domain, bus, device, function = match.groups()
+    return "{:04X}:{:02X}:{:02X}.{:1X}".format(
+        int(domain, 16), int(bus, 16), int(device, 16), int(function, 16)
     )
-    return requested_device_index
 
 
-def resolve_device(device_index):
-    if device_index < 0 or not torch.cuda.is_available():
+def _query_nvidia_smi_bus_map():
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,pci.bus_id", "--format=csv,noheader,nounits"],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
+    except Exception:
+        return {}
+
+    result = {}
+    for line in output.strip().splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) != 2:
+            continue
+        if not parts[0].isdigit():
+            continue
+        result[int(parts[0])] = _normalize_pci_bus_id(parts[1])
+    return result
+
+
+def _load_cudart():
+    candidates = [
+        ctypes.util.find_library("cudart"),
+        "libcudart.so",
+        "libcudart.so.12",
+        "libcudart.so.11.0",
+    ]
+    for name in candidates:
+        if not name:
+            continue
+        try:
+            return ctypes.CDLL(name)
+        except OSError:
+            continue
+    return None
+
+
+def _query_cuda_ordinal_bus_map():
+    cudart = _load_cudart()
+    if cudart is None:
+        return {}
+
+    device_count = ctypes.c_int(0)
+    if cudart.cudaGetDeviceCount(ctypes.byref(device_count)) != 0:
+        return {}
+
+    mapping = {}
+    get_bus_id = cudart.cudaDeviceGetPCIBusId
+    get_bus_id.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+    get_bus_id.restype = ctypes.c_int
+
+    for ordinal in range(device_count.value):
+        buffer = ctypes.create_string_buffer(64)
+        if get_bus_id(buffer, 64, ordinal) == 0:
+            mapping[ordinal] = _normalize_pci_bus_id(buffer.value.decode("utf-8"))
+    return mapping
+
+
+def resolve_device(physical_device_index):
+    if physical_device_index < 0 or not torch.cuda.is_available():
         return "cpu"
-    gpu_count = torch.cuda.device_count()
-    if device_index >= gpu_count:
-        raise ValueError(
-            "Invalid --device {}. Available CUDA devices: 0..{}.".format(
-                device_index, gpu_count - 1
+
+    nvidia_bus = _query_nvidia_smi_bus_map()
+    cuda_bus = _query_cuda_ordinal_bus_map()
+    target_bus = nvidia_bus.get(physical_device_index)
+
+    mapped_ordinal = None
+    if target_bus is not None and len(cuda_bus) > 0:
+        for ordinal, bus in cuda_bus.items():
+            if bus == target_bus:
+                mapped_ordinal = ordinal
+                break
+
+    if mapped_ordinal is None:
+        mapped_ordinal = physical_device_index
+        print(
+            "Warning: failed to map by PCI bus-id; fallback to ordinal mapping physical {} -> ordinal {}.".format(
+                physical_device_index, mapped_ordinal
             )
         )
-    torch.cuda.set_device(device_index)
-    return "cuda:{}".format(device_index)
+    else:
+        print(
+            "PCI bus-id mapping: physical GPU {} (bus {}) -> CUDA ordinal {}.".format(
+                physical_device_index, target_bus, mapped_ordinal
+            )
+        )
+
+    gpu_count = torch.cuda.device_count()
+    if mapped_ordinal >= gpu_count:
+        raise ValueError(
+            "Mapped CUDA ordinal {} out of range, available ordinals: 0..{}.".format(
+                mapped_ordinal, gpu_count - 1
+            )
+        )
+
+    torch.cuda.set_device(mapped_ordinal)
+    return "cuda:{}".format(mapped_ordinal)
 
 
 def main(args):
     print("Requested physical --device={}".format(args.device))
     print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
     print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    visible_device_index = map_physical_to_visible_device_index(args.device)
-    device = resolve_device(visible_device_index)
-    print("Selected visible logical GPU index={}".format(visible_device_index))
+    device = resolve_device(args.device)
     print("Torch device={}".format(device))
     
     mkdir(results_save_root)
