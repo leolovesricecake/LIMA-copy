@@ -1,0 +1,6 @@
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod
+
+explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:20<00:00, 240.74it/s]
+Insertion AUC Score: 0.4698
+Deletion AUC Score: 0.4698
