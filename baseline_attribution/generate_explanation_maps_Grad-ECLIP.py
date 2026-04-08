@@ -39,11 +39,11 @@ mkdir(SAVE_PATH)
 
 img_size = 224
 
-# dataset_index = "datasets/imagenet/val_clip_vitl_5k_true.txt"
-# SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
+dataset_index = "datasets/imagenet/val_clip_vitl_5k_true.txt"
+SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
 
-dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
-SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
+# dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
+# SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
     
 dataset_path = "datasets/imagenet/ILSVRC2012_img_val"
 class_number = 1000

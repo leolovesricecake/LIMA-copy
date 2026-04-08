@@ -30,7 +30,8 @@ import clip
 
 results_save_root = "./explanation_insertion_results"
 # TODO 手动修改explanation_method为需要调试的解释方法
-explanation_method = "explanation_results/imagenet-clip-vitl-true/HsicAttributionMethod"
+# explanation_method = "explanation_results/imagenet-clip-vitl-true/HsicAttributionMethod"
+explanation_method = "explanation_results/imagenet-clip-vitl-true/GradECLIP"
 image_root_path = "datasets/imagenet/ILSVRC2012_img_val"
 eval_list = "datasets/imagenet/val_clip_vitl_5k_true.txt"
 save_doc = "imagenet-clip-vitl-true"
