@@ -11,13 +11,15 @@ import argparse
 
 import scipy
 import os
+# Keep CUDA runtime device order consistent with nvidia-smi indices.
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+import subprocess
 import cv2
 import json
 import imageio
 import numpy as np
 from PIL import Image
 
-import subprocess
 from scipy.ndimage import gaussian_filter
 import matplotlib
 from matplotlib import pyplot as plt
@@ -35,6 +37,55 @@ from torchvision import transforms
 red_tr = get_alpha_cmap('Reds')
 
 from models.submodular_vit_efficient import MultiModalSubModularExplanationEfficientV2
+
+
+def _query_physical_gpu_indices_from_nvidia_smi():
+    try:
+        result = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader,nounits"],
+            stderr=subprocess.STDOUT,
+        )
+        lines = result.decode("utf-8").strip().splitlines()
+        indices = [int(x.strip()) for x in lines if x.strip() != ""]
+        return indices
+    except Exception:
+        return []
+
+
+def _bootstrap_device_from_argv():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--device", type=int, default=0)
+    args, _ = parser.parse_known_args()
+
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+    inherited = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if args.device >= 0:
+        all_physical = _query_physical_gpu_indices_from_nvidia_smi()
+        if len(all_physical) > 0 and args.device in all_physical:
+            reordered = [args.device] + [idx for idx in all_physical if idx != args.device]
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(x) for x in reordered)
+            if inherited != "" and inherited != os.environ["CUDA_VISIBLE_DEVICES"]:
+                print(
+                    "[bootstrap] Override inherited CUDA_VISIBLE_DEVICES={} -> {} (requested physical --device={}).".format(
+                        inherited, os.environ["CUDA_VISIBLE_DEVICES"], args.device
+                    )
+                )
+            else:
+                print(
+                    "[bootstrap] Set CUDA_VISIBLE_DEVICES={} (requested physical --device={}).".format(
+                        os.environ["CUDA_VISIBLE_DEVICES"], args.device
+                    )
+                )
+        elif inherited == "":
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+    return args.device
+
+
+_BOOTSTRAP_DEVICE = _bootstrap_device_from_argv()
 
 data_transform = transforms.Compose(
     [
@@ -93,8 +144,8 @@ def parse_args():
                         help='output directory to save results')
     parser.add_argument('--device',
                         type=int,
-                        default=0,
-                        help='GPU index to use. Set -1 for CPU.')
+                        default=_BOOTSTRAP_DEVICE,
+                        help='Physical GPU index from nvidia-smi. Set -1 for CPU.')
     args = parser.parse_args()
     return args
 
@@ -217,6 +268,8 @@ def resolve_device(device_index):
 def main(args):
     # Model Init
     print("Requested physical --device={}".format(args.device))
+    print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     visible_device_index = map_physical_to_visible_device_index(args.device)
     device = resolve_device(visible_device_index)
     print("Selected visible logical GPU index={}".format(visible_device_index))

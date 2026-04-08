@@ -11,7 +11,69 @@ import os
 # Do not hardcode CUDA_VISIBLE_DEVICES here.
 # Select GPU by --device, e.g.:
 # python -m baseline_attribution.generate_explanation_maps_clip_vitl --device 1
+# Keep CUDA runtime device order consistent with nvidia-smi indices.
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 import argparse
+import subprocess
+
+
+def _query_physical_gpu_indices_from_nvidia_smi():
+    try:
+        result = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader,nounits"],
+            stderr=subprocess.STDOUT,
+        )
+        lines = result.decode("utf-8").strip().splitlines()
+        indices = [int(x.strip()) for x in lines if x.strip() != ""]
+        return indices
+    except Exception:
+        return []
+
+
+def _bootstrap_device_from_argv():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--device", type=int, default=0)
+    args, _ = parser.parse_known_args()
+
+    # Align CUDA index order with nvidia-smi (physical index order).
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+    # Reorder visible devices so requested physical GPU appears as logical GPU 0.
+    # This avoids runtime enumeration mismatch across frameworks.
+    inherited = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if args.device >= 0:
+        all_physical = _query_physical_gpu_indices_from_nvidia_smi()
+        if len(all_physical) > 0 and args.device in all_physical:
+            reordered = [args.device] + [idx for idx in all_physical if idx != args.device]
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(x) for x in reordered)
+            if inherited != "" and inherited != os.environ["CUDA_VISIBLE_DEVICES"]:
+                print(
+                    "[bootstrap] Override inherited CUDA_VISIBLE_DEVICES={} -> {} (requested physical --device={}).".format(
+                        inherited, os.environ["CUDA_VISIBLE_DEVICES"], args.device
+                    )
+                )
+            else:
+                print(
+                    "[bootstrap] Set CUDA_VISIBLE_DEVICES={} (requested physical --device={}).".format(
+                        os.environ["CUDA_VISIBLE_DEVICES"], args.device
+                    )
+                )
+        else:
+            if inherited != "":
+                print(
+                    "[bootstrap] Keep inherited CUDA_VISIBLE_DEVICES={} (nvidia-smi query unavailable).".format(
+                        inherited
+                    )
+                )
+            else:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+    return args.device
+
+
+_BOOTSTRAP_DEVICE = _bootstrap_device_from_argv()
 
 import numpy as np
 import cv2
@@ -150,8 +212,8 @@ def parse_args():
     parser.add_argument(
         "--device",
         type=int,
-        default=0,
-        help="GPU index to use. Set -1 for CPU.",
+        default=_BOOTSTRAP_DEVICE,
+        help="Physical GPU index from nvidia-smi. Set -1 for CPU.",
     )
     parser.add_argument(
         "--tf-memory-limit",
@@ -244,6 +306,8 @@ def configure_tensorflow_gpu(device_index, tf_memory_limit):
 
 def main(args):
     print("Requested physical --device={}".format(args.device))
+    print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
+    print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     visible_device_index = map_physical_to_visible_device_index(args.device)
     device = resolve_device(visible_device_index)
     configure_tensorflow_gpu(visible_device_index, args.tf_memory_limit)
