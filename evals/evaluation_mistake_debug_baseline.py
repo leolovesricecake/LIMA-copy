@@ -5,8 +5,13 @@ from tqdm import tqdm
 import numpy as np
 
 
-explanation_method = "explanation_insertion_results/cub-fair-efficientnet/KernelShap"
-eval_list = "datasets/CUB/eval_fair-efficientnet.txt"
+# explanation_method = "explanation_insertion_results/cub-fair-efficientnet/KernelShap"
+# eval_list = "datasets/CUB/eval_fair-efficientnet.txt"
+# TODO 手动修改
+explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod"
+# explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/GradECLIP"
+eval_list = "datasets/imagenet/val_clip_vitl_5k_true.txt"
+
 # steps = 49
 # percentage = 0.25
 # number = int(percentage * steps)
@@ -60,7 +65,7 @@ def main(percentage):
 
     mean_region_area = np.array(region_area).mean()
     std_region_area = np.array(region_area).std()
-    print("When percentage is {}, the avg. highest confidence is {}, std:{}, the retention percentage at highest confidence is {}, std:{}".format(
+    print("percentage: {}, avg. highest confidence: {}, std:{}, retention percentage at highest confidence: {}, std: {}".format(
         percentage, mean_highest_acc, std_highest_acc, mean_region_area, std_region_area
     ))
     return

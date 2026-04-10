@@ -64,8 +64,8 @@ class Grad_ECLIP(object):
     
     def clip_encode_dense(self, x,n):
         vision_width = self.clipmodel.visual.transformer.width
-        vision_heads = vision_width // 64
-        print("[vision_width and vision_heads]:", vision_width, vision_heads)
+        # vision_heads = vision_width // 64
+        # print("[vision_width and vision_heads]:", vision_width, vision_heads)
         
         # modified from CLIP
         x = x.half()
@@ -84,7 +84,7 @@ class Grad_ECLIP(object):
         pos_w = self.clip_inres // self.clip_ksize[1]
         assert img_pos.size(0) == (pos_h * pos_w), f"the size of pos_embedding ({img_pos.size(0)}) does not match resolution shape pos_h ({pos_h}) * pos_w ({pos_w})"
         img_pos = img_pos.reshape(1, pos_h, pos_w, img_pos.shape[1]).permute(0, 3, 1, 2)
-        print("[POS shape]:", img_pos.shape, (feah, feaw))
+        # print("[POS shape]:", img_pos.shape, (feah, feaw))
         img_pos = torch.nn.functional.interpolate(img_pos, size=(feah, feaw), mode='bicubic', align_corners=False)
         img_pos = img_pos.reshape(1, img_pos.shape[1], -1).permute(0, 2, 1)
         pos_embedding = torch.cat((tok_pos[None, ...], img_pos), dim=1)
@@ -156,7 +156,7 @@ class Grad_ECLIP(object):
     
     def self_attn(self, attns, map_size):
         attn_patch = attns[-1][0,:1,1:].reshape(*map_size)
-        print("[attn of cls token on lastv]:", attn_patch.shape)
+        # print("[attn of cls token on lastv]:", attn_patch.shape)
         return attn_patch
     
     def __call__(self, img_preprocessed, id = None):

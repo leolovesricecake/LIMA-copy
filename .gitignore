@@ -2,6 +2,7 @@ datasets
 dev
 explanation_results
 explanation_insertion_results
+submodular_results
 
 **cache**
 

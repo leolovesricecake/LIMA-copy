@@ -1,6 +1,83 @@
+# ---------
+# HsicAttributionMethod
+# ---------
 (lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod
-
 explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod
 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:20<00:00, 240.74it/s]
 Insertion AUC Score: 0.4698
 Deletion AUC Score: 0.4698
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.evaluation_mistake_debug_baseline
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:09<00:00, 501.62it/s]
+percentage: 0.25, avg. highest confidence: 0.5103268204742452, std:0.3720849419985458, retention percentage at highest confidence: 0.18996524228174197, std: 0.05658497461441205
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 685.49it/s]
+percentage: 0.5, avg. highest confidence: 0.6753677350201018, std:0.3208995502179716, retention percentage at highest confidence: 0.32220404825189125, std: 0.133669596017867
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 695.84it/s]
+percentage: 0.75, avg. highest confidence: 0.7498467854380095, std:0.2781829602551461, retention percentage at highest confidence: 0.47431609077898185, std: 0.2272531552925105
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 685.86it/s]
+percentage: 1.0, avg. highest confidence: 0.8541933854063506, std:0.18999922247457626, retention percentage at highest confidence: 0.781149049274177, std: 0.29628557950288686
+
+
+# ---------
+# GradECLIP
+# ---------
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ bash run_GradECLIP.sh
+Requested physical --device=0
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 0 (bus 0000:4F:00.0) -> CUDA ordinal 0.
+Selected CUDA ordinal=0
+Torch device=cuda:0
+GradECLIP: 100%|██████████████████████████████████████████████████████████████████████████████████| 4891/4891 [23:51<00:00,  3.42it/s]
+Requested physical --device=0
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 0 (bus 0000:4F:00.0) -> CUDA ordinal 0.
+Torch device=cuda:0
+100%|██████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [10:31:34<00:00,  7.75s/it]
+explanation_insertion_results/imagenet-clip-vitl-true/GradECLIP
+100%|████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:18<00:00, 269.76it/s]
+Insertion AUC Score: 0.5083
+Deletion AUC Score: 0.5083
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.evaluation_mistake_debug_baseline
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:09<00:00, 494.79it/s]
+percentage: 0.25, the avg. highest confidence: 0.4130166349565049, std:0.3811171280125372, retention percentage at highest confidence: 0.19605806583520752, std: 0.057470712068993846
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 678.46it/s]
+percentage: 0.5, the avg. highest confidence: 0.6944984499844177, std:0.32486482703885394, retention percentage at highest confidence: 0.3838069924350848, std: 0.11869107728038392
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 669.30it/s]
+percentage: 0.75, the avg. highest confidence: 0.7838111357975532, std:0.26483468423810835, retention percentage at highest confidence: 0.5221304436720506, std: 0.1893892522092241
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 666.01it/s]
+percentage: 1.0, the avg. highest confidence: 0.8640556951603551, std:0.1840797611949987, retention percentage at highest confidence: 0.7415293396033531, std: 0.2826551970965136
+
+
+# ---------
+# LIMA
+# ---------
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ scripts/efficientv2-clip_vitl_multigpu.sh
+The number of GPUs is 2.
+Device list: 0 1
+Evaluation on 4890 instances.
+Each GPU should process at least 2445 lines.
+/mnt/huawei/nsq/LIMA-copy/submodular_attribution/efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel.py:35: MatplotlibDeprecationWarning: The seaborn styles shipped by Matplotlib are deprecated since 3.6, as they no longer correspond to the styles shipped by seaborn. However, they will remain available as 'seaborn-v0_8-<style>'. Alternatively, directly use the seaborn API instead.
+  plt.style.use('seaborn')
+/mnt/huawei/nsq/LIMA-copy/submodular_attribution/efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel.py:35: MatplotlibDeprecationWarning: The seaborn styles shipped by Matplotlib are deprecated since 3.6, as they no longer correspond to the styles shipped by seaborn. However, they will remain available as 'seaborn-v0_8-<style>'. Alternatively, directly use the seaborn API instead.
+  plt.style.use('seaborn')
+Requested physical --device=1
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+Requested physical --device=0
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
+PCI bus-id mapping: physical GPU 0 (bus 0000:4F:00.0) -> CUDA ordinal 0.
+Selected CUDA ordinal=1
+Torch device=cuda:1
+Selected CUDA ordinal=0
+Torch device=cuda:0
+load CLIP model
+load CLIP model
+already exist
+already exist
+already exist
+ 11%|████████████▉                                                                                                            | 3/28 [00:50<06:57, 16.69s/it]

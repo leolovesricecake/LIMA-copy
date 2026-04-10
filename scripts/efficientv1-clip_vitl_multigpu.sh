@@ -7,7 +7,7 @@ lambda2=0.05
 lambda3=1
 lambda4=1
 
-declare -a cuda_devices=("0" "1")
+declare -a cuda_devices=("0")
 
 # GPU numbers
 gpu_numbers=${#cuda_devices[@]}
