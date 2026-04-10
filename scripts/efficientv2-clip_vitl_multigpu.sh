@@ -10,8 +10,12 @@ superpixel_algorithm="seeds"
 pending_samples=8
 
 # Select target GPU indices for subprocesses.
-# Example single GPU: declare -a cuda_devices=("1")
+# 1) default: declare -a cuda_devices=("0" "1")
+# 2) override by env: LIMA_CUDA_DEVICES="0 1 2 3" bash scripts/efficientv2-clip_vitl_multigpu.sh
 declare -a cuda_devices=("0" "1")
+if [[ -n "${LIMA_CUDA_DEVICES:-}" ]]; then
+    read -r -a cuda_devices <<< "${LIMA_CUDA_DEVICES}"
+fi
 
 if [[ ${#cuda_devices[@]} -eq 0 ]]; then
     echo "No valid CUDA devices found."
@@ -50,6 +54,7 @@ do
     --superpixel-algorithm $superpixel_algorithm \
     --pending-samples $pending_samples \
     --device $device \
+    --resume-check strict \
     --begin $begin \
     --end $end &
 

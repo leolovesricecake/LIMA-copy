@@ -27,6 +27,7 @@ import cv2
 import json
 import imageio
 import numpy as np
+import uuid
 from PIL import Image
 
 from scipy.ndimage import gaussian_filter
@@ -104,6 +105,11 @@ def parse_args():
                         type=int,
                         default=0,
                         help='Physical GPU index from nvidia-smi. Set -1 for CPU.')
+    parser.add_argument('--resume-check',
+                        type=str,
+                        default='strict',
+                        choices=['strict', 'exists-only'],
+                        help="Resume mode: strict checks json+npy readability, exists-only only checks json existence.")
     args = parser.parse_args()
     return args
 
@@ -289,6 +295,73 @@ def resolve_device(cuda_ordinal):
     torch.cuda.set_device(cuda_ordinal)
     return "cuda:{}".format(cuda_ordinal)
 
+
+def _build_output_paths(save_npy_root_path, save_json_root_path, gt_id, image_relative_path):
+    npy_path = os.path.join(
+        os.path.join(save_npy_root_path, gt_id), image_relative_path.replace(".JPEG", ".npy")
+    )
+    json_path = os.path.join(
+        os.path.join(save_json_root_path, gt_id), image_relative_path.replace(".JPEG", ".json")
+    )
+    return npy_path, json_path
+
+
+def _is_valid_json(json_path):
+    try:
+        with open(json_path, "r") as f:
+            json.load(f)
+        return True
+    except Exception:
+        return False
+
+
+def _is_valid_npy(npy_path):
+    try:
+        arr = np.load(npy_path, mmap_mode="r")
+        _ = arr.shape
+        return True
+    except Exception:
+        return False
+
+
+def is_sample_completed(npy_path, json_path, resume_check_mode):
+    if resume_check_mode == "exists-only":
+        return os.path.exists(json_path)
+
+    if not (os.path.exists(npy_path) and os.path.exists(json_path)):
+        return False
+    if not _is_valid_json(json_path):
+        return False
+    if not _is_valid_npy(npy_path):
+        return False
+    return True
+
+
+def atomic_save_json(json_path, payload):
+    parent = os.path.dirname(json_path)
+    mkdir(parent)
+    tmp_path = "{}.tmp.{}".format(json_path, uuid.uuid4().hex)
+    try:
+        with open(tmp_path, "w") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=4, separators=(',', ':')))
+        os.replace(tmp_path, json_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def atomic_save_npy(npy_path, array):
+    parent = os.path.dirname(npy_path)
+    mkdir(parent)
+    tmp_path = "{}.tmp.{}".format(npy_path, uuid.uuid4().hex)
+    try:
+        with open(tmp_path, "wb") as f:
+            np.save(f, array)
+        os.replace(tmp_path, npy_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 def main(args):
     # Model Init
     print("Requested physical --device={}".format(args.device))
@@ -318,7 +391,7 @@ def main(args):
         pending_samples=args.pending_samples)
     
     with open(args.eval_list, "r") as f:
-        infos = f.read().split('\n')
+        infos = [line.strip() for line in f if line.strip() != ""]
     
     mkdir(args.save_dir)
     save_dir = os.path.join(args.save_dir, "{}-{}-{}-{}-{}-pending-samples-{}".format(args.superpixel_algorithm, args.lambda1, args.lambda2, args.lambda3, args.lambda4, args.pending_samples))  
@@ -336,14 +409,17 @@ def main(args):
         end = None
     select_infos = infos[args.begin : end]
     for info in tqdm(select_infos):
-        gt_id = info.split(" ")[1]
-        
-        image_relative_path = info.split(" ")[0]
-        
-        if os.path.exists(
-            os.path.join(
-            os.path.join(save_json_root_path, gt_id), image_relative_path.replace(".JPEG", ".json"))
-        ):
+        parts = info.split()
+        if len(parts) < 2:
+            print("Warning: malformed eval-list line, skip: {}".format(info))
+            continue
+        image_relative_path = parts[0]
+        gt_id = parts[1]
+
+        npy_path, json_path = _build_output_paths(
+            save_npy_root_path, save_json_root_path, gt_id, image_relative_path
+        )
+        if is_sample_completed(npy_path, json_path, args.resume_check):
             continue
         
         # Ground Truth Label
@@ -371,18 +447,10 @@ def main(args):
         # cv2.imwrite(save_image_path, submodular_image)
 
         # Save npy file
-        mkdir(os.path.join(save_npy_root_path, gt_id))
-        np.save(
-            os.path.join(
-                os.path.join(save_npy_root_path, gt_id), image_relative_path.replace(".JPEG", ".npy")),
-            np.array(submodular_image_set)
-        )
+        atomic_save_npy(npy_path, np.array(submodular_image_set))
 
         # Save json file
-        mkdir(os.path.join(save_json_root_path, gt_id))
-        with open(os.path.join(
-            os.path.join(save_json_root_path, gt_id), image_relative_path.replace(".JPEG", ".json")), "w") as f:
-            f.write(json.dumps(saved_json_file, ensure_ascii=False, indent=4, separators=(',', ':')))
+        atomic_save_json(json_path, saved_json_file)
 
     #     # Save GIF
     #     save_gif_root_path = os.path.join(save_dir, "gif")
