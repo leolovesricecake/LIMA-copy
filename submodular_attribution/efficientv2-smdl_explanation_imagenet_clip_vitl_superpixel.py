@@ -110,6 +110,9 @@ def parse_args():
                         default='strict',
                         choices=['strict', 'exists-only'],
                         help="Resume mode: strict checks json+npy readability, exists-only only checks json existence.")
+    parser.add_argument('--allow-device-fallback',
+                        action='store_true',
+                        help='Allow fallback to ordinal==physical index when PCI bus-id mapping is unavailable.')
     args = parser.parse_args()
     return args
 
@@ -251,21 +254,48 @@ def _query_cuda_ordinal_bus_map():
     return mapping
 
 
-def resolve_cuda_ordinal(physical_device_index):
+def resolve_cuda_ordinal(physical_device_index, allow_fallback=False):
     if physical_device_index < 0:
         return -1
 
     nvidia_bus = _query_nvidia_smi_bus_map()
     cuda_bus = _query_cuda_ordinal_bus_map()
+    available_physical = sorted(list(nvidia_bus.keys()))
+    if physical_device_index not in nvidia_bus:
+        raise ValueError(
+            "Requested physical GPU {} not found. nvidia-smi available indices: {}.".format(
+                physical_device_index, available_physical
+            )
+        )
+
     target_bus = nvidia_bus.get(physical_device_index)
+    if len(cuda_bus) == 0:
+        if not allow_fallback:
+            raise RuntimeError(
+                "Failed to query CUDA runtime PCI bus map; refuse fallback to avoid wrong GPU binding. "
+                "Use --allow-device-fallback only if you accept ordinal-based best effort."
+            )
+        mapped_ordinal = physical_device_index
+        print(
+            "Warning: CUDA runtime PCI bus map unavailable; fallback physical {} -> ordinal {}.".format(
+                physical_device_index, mapped_ordinal
+            )
+        )
+        return mapped_ordinal
 
     mapped_ordinal = None
-    if target_bus is not None and len(cuda_bus) > 0:
-        for ordinal, bus in cuda_bus.items():
-            if bus == target_bus:
-                mapped_ordinal = ordinal
-                break
+    for ordinal, bus in cuda_bus.items():
+        if bus == target_bus:
+            mapped_ordinal = ordinal
+            break
 
+    if mapped_ordinal is None and not allow_fallback:
+        raise RuntimeError(
+            "No CUDA ordinal matches physical GPU {} (bus {}). CUDA ordinal->bus map: {}. "
+            "Refuse fallback to avoid wrong GPU binding. Use --allow-device-fallback if needed.".format(
+                physical_device_index, target_bus, cuda_bus
+            )
+        )
     if mapped_ordinal is None:
         mapped_ordinal = physical_device_index
         print(
@@ -367,7 +397,7 @@ def main(args):
     print("Requested physical --device={}".format(args.device))
     print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
     print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
-    cuda_ordinal = resolve_cuda_ordinal(args.device)
+    cuda_ordinal = resolve_cuda_ordinal(args.device, allow_fallback=args.allow_device_fallback)
     device = resolve_device(cuda_ordinal)
     print("Selected CUDA ordinal={}".format(cuda_ordinal))
     print("Torch device={}".format(device))
