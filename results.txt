@@ -49,3 +49,14 @@ percentage: 0.5, the avg. highest confidence: 0.6944984499844177, std:0.32486482
 percentage: 0.75, the avg. highest confidence: 0.7838111357975532, std:0.26483468423810835, retention percentage at highest confidence: 0.5221304436720506, std: 0.1893892522092241
 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 666.01it/s]
 percentage: 1.0, the avg. highest confidence: 0.8640556951603551, std:0.1840797611949987, retention percentage at highest confidence: 0.7415293396033531, std: 0.2826551970965136
+
+
+# ---------
+LIMA
+# ---------
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.eval_AUC_faithfulness --explanation-dir submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8
+submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 989/989 [27:45<00:00,  1.68s/it]
+Insertion AUC Score: 0.7590
+Deletion AUC Score: 0.1464
+

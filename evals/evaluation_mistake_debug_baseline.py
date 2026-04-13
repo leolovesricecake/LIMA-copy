@@ -8,9 +8,12 @@ import numpy as np
 # explanation_method = "explanation_insertion_results/cub-fair-efficientnet/KernelShap"
 # eval_list = "datasets/CUB/eval_fair-efficientnet.txt"
 # TODO 手动修改
-explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod"
-# explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/GradECLIP"
 eval_list = "datasets/imagenet/val_clip_vitl_5k_true.txt"
+# eval_list = "datasets/imagenet/val_clip_vitl_5k_false.txt"
+
+explanation_method = "submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8"
+# explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/HsicAttributionMethod"
+# explanation_method = "explanation_insertion_results/imagenet-clip-vitl-true/GradECLIP"
 
 # steps = 49
 # percentage = 0.25

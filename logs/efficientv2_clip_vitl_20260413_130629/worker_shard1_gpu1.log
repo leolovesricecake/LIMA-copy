@@ -1,13 +1,0 @@
-Requested physical --device=1
-CUDA_DEVICE_ORDER=PCI_BUS_ID
-CUDA_VISIBLE_DEVICES=<not set>
-PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
-Selected CUDA ordinal=1
-Torch device=cuda:1
-load CLIP model
-[time] model_init=12.56s
-[time] semantic_ready=0.01s
-[shard] shard-id=1/5 selected 978 samples after sharding.
-[resume] mode=strict selected=978 completed=434 pending=544 malformed=0.
-[time] resume_scan=10.01s
-gpu1-pending:   0%|          | 0/544 [00:00<?, ?it/s]gpu1-pending:   0%|          | 1/544 [00:18<2:49:48, 18.76s/it]gpu1-pending:   0%|          | 2/544 [00:36<2:44:02, 18.16s/it]gpu1-pending:   1%|          | 3/544 [00:55<2:45:58, 18.41s/it]gpu1-pending:   1%|          | 4/544 [01:13<2:46:43, 18.52s/it]gpu1-pending:   1%|          | 5/544 [01:32<2:46:41, 18.56s/it]gpu1-pending:   1%|          | 6/544 [01:50<2:45:09, 18.42s/it]gpu1-pending:   1%|▏         | 7/544 [02:09<2:45:26, 18.49s/it]gpu1-pending:   1%|▏         | 8/544 [02:29<2:50:12, 19.05s/it]gpu1-pending:   2%|▏         | 9/544 [02:48<2:50:36, 19.13s/it]gpu1-pending:   2%|▏         | 10/544 [03:07<2:49:30, 19.05s/it]gpu1-pending:   2%|▏         | 11/544 [03:26<2:49:35, 19.09s/it]gpu1-pending:   2%|▏         | 12/544 [03:46<2:49:22, 19.10s/it]gpu1-pending:   2%|▏         | 13/544 [04:05<2:50:12, 19.23s/it]gpu1-pending:   3%|▎         | 14/544 [04:23<2:47:37, 18.98s/it]gpu1-pending:   3%|▎         | 15/544 [04:42<2:46:33, 18.89s/it]gpu1-pending:   3%|▎         | 16/544 [05:02<2:48:36, 19.16s/it]gpu1-pending:   3%|▎         | 17/544 [05:22<2:49:24, 19.29s/it]gpu1-pending:   3%|▎         | 18/544 [05:41<2:50:25, 19.44s/it]gpu1-pending:   3%|▎         | 19/544 [06:00<2:46:46, 19.06s/it]gpu1-pending:   4%|▎         | 20/544 [06:18<2:43:56, 18.77s/it]gpu1-pending:   4%|▍         | 21/544 [06:38<2:46:48, 19.14s/it]gpu1-pending:   4%|▍         | 22/544 [06:57<2:48:00, 19.31s/it]

@@ -4,9 +4,9 @@ import json
 from tqdm import tqdm
 import numpy as np
 
-explanation_method = "./submodular_results_iclr_baseline/imagenet-languagebind-false/grad-10x10-4"
+explanation_method = "submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8"
 # explanation_method = "explanation_insertion_results/imagenet-fair-clip-vitl/Rise"
-eval_list = "datasets/imagenet/val_languagebind_2k_false.txt"
+eval_list = "datasets/imagenet/val_clip_vitl_5k_true.txt"
 
 # percentage = 1.
 
