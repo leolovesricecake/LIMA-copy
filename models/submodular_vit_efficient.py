@@ -46,21 +46,14 @@ class MultiModalSubModularExplanationEfficientV1(MultiModalSubModularExplanation
         """
         Given a subset, return a best sample index
         """
-        sub_index_sets = []
-        for candidate_ in candidate_set:
-            sub_index_sets.append(
-                np.concatenate((main_set, np.array([candidate_]))).astype(int))
-
-        sub_index_sets_decrease = []
-        for candidate_ in candidate_set:
-            sub_index_sets_decrease.append(
-                np.concatenate((decrease_set, np.array([candidate_]))).astype(int))
+        sub_index_sets = self.build_index_sets(main_set, candidate_set)
+        sub_index_sets_decrease = self.build_index_sets(decrease_set, candidate_set)
 
         # merge images / 组合图像
+        merged_images = self.merge_images(sub_index_sets, partition_image_set)
         sub_images = torch.stack([
-            self.preproccessing_function(
-                self.merge_image(sub_index_set, partition_image_set)
-            ) for sub_index_set in sub_index_sets])
+            self.preproccessing_function(image_) for image_ in merged_images
+        ])
         
         batch_input_images = sub_images.to(self.device)
         
@@ -73,10 +66,10 @@ class MultiModalSubModularExplanationEfficientV1(MultiModalSubModularExplanation
             score_consistency = self.proccess_compute_consistency_score(batch_input_images)
             
             # 4. Collaboration Score
+            reversed_images = self.org_img - merged_images
             sub_images_reverse = torch.stack([
-                self.preproccessing_function(
-                    self.org_img - self.merge_image(sub_index_set, partition_image_set)
-                ) for sub_index_set in sub_index_sets])
+                self.preproccessing_function(image_) for image_ in reversed_images
+            ])
         
             batch_input_images_reverse = sub_images_reverse.to(self.device)
             
@@ -93,12 +86,13 @@ class MultiModalSubModularExplanationEfficientV1(MultiModalSubModularExplanation
             arg_min_index = smdl_score_decrease.argmin().cpu().item()
             
             if len(candidate_set) != 1:
+                merged_decrease = self.merge_image(sub_index_sets_decrease[arg_min_index], partition_image_set)
                 sub_images_decrease = torch.stack([
                     self.preproccessing_function(
-                        self.org_img - self.merge_image(sub_index_sets_decrease[arg_min_index], partition_image_set)
+                        self.org_img - merged_decrease
                     ),
                     self.preproccessing_function(
-                        self.merge_image(sub_index_sets_decrease[arg_min_index], partition_image_set)
+                        merged_decrease
                     ),
                 ])
                 scores_decrease = self.proccess_compute_consistency_score(sub_images_decrease.to(self.device))
@@ -249,21 +243,14 @@ class MultiModalSubModularExplanationEfficientV2(MultiModalSubModularExplanation
         """
         Given a subset, return a best sample index
         """
-        sub_index_sets = []
-        for candidate_ in candidate_set:
-            sub_index_sets.append(
-                np.concatenate((main_set, np.array([candidate_]))).astype(int))
-
-        sub_index_sets_decrease = []
-        for candidate_ in candidate_set:
-            sub_index_sets_decrease.append(
-                np.concatenate((decrease_set, np.array([candidate_]))).astype(int))
+        sub_index_sets = self.build_index_sets(main_set, candidate_set)
+        sub_index_sets_decrease = self.build_index_sets(decrease_set, candidate_set)
 
         # merge images / 组合图像
+        merged_images = self.merge_images(sub_index_sets, partition_image_set)
         sub_images = torch.stack([
-            self.preproccessing_function(
-                self.merge_image(sub_index_set, partition_image_set)
-            ) for sub_index_set in sub_index_sets])
+            self.preproccessing_function(image_) for image_ in merged_images
+        ])
         
         batch_input_images = sub_images.to(self.device)
         
@@ -279,10 +266,10 @@ class MultiModalSubModularExplanationEfficientV2(MultiModalSubModularExplanation
             score_confidence = self.proccess_compute_confidence_score()
             
             # 4. Collaboration Score
+            reversed_images = self.org_img - merged_images
             sub_images_reverse = torch.stack([
-                self.preproccessing_function(
-                    self.org_img - self.merge_image(sub_index_set, partition_image_set)
-                ) for sub_index_set in sub_index_sets])
+                self.preproccessing_function(image_) for image_ in reversed_images
+            ])
         
             batch_input_images_reverse = sub_images_reverse.to(self.device)
             
@@ -311,18 +298,18 @@ class MultiModalSubModularExplanationEfficientV2(MultiModalSubModularExplanation
                     negtive_sampels_indexes.remove(arg_max_index)
                     negtive_sampels_indexes = np.array(negtive_sampels_indexes)
                 
-                sub_index_negtive_sets = np.array(sub_index_sets_decrease)[negtive_sampels_indexes]
+                sub_index_negtive_sets = sub_index_sets_decrease[negtive_sampels_indexes]
                 
                 # merge images / 组合图像
+                merged_images_decrease = self.merge_images(sub_index_negtive_sets, partition_image_set)
                 sub_images_decrease = torch.stack([
-                    self.preproccessing_function(
-                        self.merge_image(sub_index_set, partition_image_set)
-                    ) for sub_index_set in sub_index_negtive_sets])
+                    self.preproccessing_function(image_) for image_ in merged_images_decrease
+                ])
                 
+                reversed_images_decrease = self.org_img - merged_images_decrease
                 sub_images_decrease_reverse = torch.stack([
-                    self.preproccessing_function(
-                        self.org_img - self.merge_image(sub_index_set, partition_image_set)
-                    ) for sub_index_set in sub_index_negtive_sets])
+                    self.preproccessing_function(image_) for image_ in reversed_images_decrease
+                ])
                 
                 # 2. Effectiveness Score
                 score_effectiveness_decrease_ = score_effectiveness_decrease[negtive_sampels_indexes]

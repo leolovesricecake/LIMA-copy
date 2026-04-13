@@ -62,10 +62,39 @@ class MultiModalSubModularExplanation(object):
         """
         merge image
         """
-        sub_image_set_ = np.array(partition_image_set)[sub_index_set]
+        sub_image_set_ = np.asarray(partition_image_set)[sub_index_set]
         image = sub_image_set_.sum(0)
 
         return image.astype(np.uint8)
+
+    def build_index_sets(self, base_set, candidate_set):
+        """
+        Build candidate index matrix with shape [num_candidates, len(base_set)+1].
+        The row order matches candidate_set order exactly.
+        """
+        base = np.asarray(base_set, dtype=np.int64).reshape(-1)
+        candidates = np.asarray(candidate_set, dtype=np.int64).reshape(-1)
+
+        if candidates.size == 0:
+            return np.empty((0, base.size + 1), dtype=np.int64)
+        if base.size == 0:
+            return candidates[:, np.newaxis]
+
+        repeated_base = np.broadcast_to(base, (candidates.size, base.size))
+        return np.concatenate((repeated_base, candidates[:, np.newaxis]), axis=1)
+
+    def merge_images(self, sub_index_sets, partition_image_set):
+        """
+        Batch merge for multiple subsets.
+            sub_index_sets: [B, L]
+            output: [B, H, W, C]
+        """
+        index_matrix = np.asarray(sub_index_sets, dtype=np.int64)
+        partition_array = np.asarray(partition_image_set)
+        if index_matrix.size == 0:
+            return np.empty((0, ) + tuple(partition_array.shape[1:]), dtype=np.uint8)
+        merged = partition_array[index_matrix].sum(axis=1)
+        return merged.astype(np.uint8)
     
     # def compute_effectiveness_score(self, features):
     #     """
@@ -117,19 +146,19 @@ class MultiModalSubModularExplanation(object):
         """
         Compute each S's effectiveness score
         """
-        e_scores = []
-        
-        for sub_index in sub_index_sets:
-            cosine_dist = self.effectiveness_dist[:, np.array(sub_index)]    # [len(element) , len(main_set)]
-            cosine_dist = cosine_dist[np.array(sub_index), :]
-            
-            eye = torch.eye(cosine_dist.shape[0], device=self.device)
-            adjusted_cosine_dist = cosine_dist + eye
-            e_score = torch.sum(torch.min(adjusted_cosine_dist, dim=1).values)
-            e_scores.append(e_score)
-        
-        effectiveness_score = torch.stack(e_scores)
-        if len(sub_index_sets[0]) == 1:
+        index_matrix = np.asarray(sub_index_sets, dtype=np.int64)
+        if index_matrix.ndim == 1:
+            index_matrix = index_matrix[np.newaxis, :]
+        if index_matrix.shape[0] == 0:
+            return torch.empty(0, device=self.device)
+
+        index_tensor = torch.as_tensor(index_matrix, device=self.device, dtype=torch.long)
+        sub_dist = self.effectiveness_dist[index_tensor.unsqueeze(2), index_tensor.unsqueeze(1)]
+        eye = torch.eye(sub_dist.shape[-1], device=self.device, dtype=sub_dist.dtype).unsqueeze(0)
+        adjusted = sub_dist + eye
+        effectiveness_score = torch.min(adjusted, dim=2).values.sum(dim=1)
+
+        if index_matrix.shape[1] == 1:
             effectiveness_score = effectiveness_score * 0
         return effectiveness_score
     
@@ -151,16 +180,13 @@ class MultiModalSubModularExplanation(object):
         """
         Given a subset, return a best sample index
         """
-        sub_index_sets = []
-        for candidate_ in candidate_set:
-            sub_index_sets.append(
-                np.concatenate((main_set, np.array([candidate_]))).astype(int))
+        sub_index_sets = self.build_index_sets(main_set, candidate_set)
        
         # merge images / 组合图像
+        merged_images = self.merge_images(sub_index_sets, partition_image_set)
         sub_images = torch.stack([
-            self.preproccessing_function(
-                self.merge_image(sub_index_set, partition_image_set)
-            ) for sub_index_set in sub_index_sets])
+            self.preproccessing_function(image_) for image_ in merged_images
+        ])
         
         batch_input_images = sub_images.to(self.device)
         
@@ -176,10 +202,10 @@ class MultiModalSubModularExplanation(object):
             score_confidence = self.proccess_compute_confidence_score()
             
             # 4. Collaboration Score
+            reversed_images = self.org_img - merged_images
             sub_images_reverse = torch.stack([
-                self.preproccessing_function(
-                    self.org_img - self.merge_image(sub_index_set, partition_image_set)
-                ) for sub_index_set in sub_index_sets])
+                self.preproccessing_function(image_) for image_ in reversed_images
+            ])
         
             batch_input_images_reverse = sub_images_reverse.to(self.device)
             
