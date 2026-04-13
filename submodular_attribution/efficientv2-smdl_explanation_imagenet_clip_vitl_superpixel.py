@@ -408,6 +408,7 @@ def atomic_save_npy(npy_path, array):
             os.remove(tmp_path)
 
 def main(args):
+    start_time_all = time.time()
     # Model Init
     print("Requested physical --device={}".format(args.device))
     print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
@@ -421,11 +422,15 @@ def main(args):
     vis_model.eval()
     vis_model.to(device)
     print("load CLIP model")
+    model_ready_time = time.time()
+    print("[time] model_init={:.2f}s".format(model_ready_time - start_time_all))
     
     semantic_path = "ckpt/semantic_features/clip_vitl_imagenet_zeroweights.pt"
     semantic_feature = load_or_build_semantic_feature(
         vis_model, device, semantic_path
     )
+    semantic_ready_time = time.time()
+    print("[time] semantic_ready={:.2f}s".format(semantic_ready_time - model_ready_time))
     
     smdl = MultiModalSubModularExplanationEfficientV2(
         vis_model, semantic_feature, transform_vision_data, device=device, 
@@ -497,6 +502,8 @@ def main(args):
             malformed_count,
         )
     )
+    resume_scan_done_time = time.time()
+    print("[time] resume_scan={:.2f}s".format(resume_scan_done_time - semantic_ready_time))
 
     if len(pending_infos) == 0:
         print("[resume] no pending samples, worker exits.")
@@ -569,6 +576,9 @@ def main(args):
             args.shard_id, processed_count, len(pending_infos)
         )
     )
+    print("[time] main_loop={:.2f}s total={:.2f}s".format(
+        time.time() - resume_scan_done_time, time.time() - start_time_all
+    ))
 
 
 if __name__ == "__main__":

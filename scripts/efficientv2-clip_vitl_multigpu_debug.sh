@@ -9,6 +9,7 @@ lambda2=0.05
 lambda3=10
 lambda4=1
 pending_samples=8
+resume_check=${LIMA_RESUME_CHECK:-strict}
 
 # Select target GPU indices for subprocesses.
 # 1) default: declare -a cuda_devices=("0" "1")
@@ -28,6 +29,38 @@ fi
 
 declare -a worker_pids=()
 declare -a worker_logs=()
+THREADS_PER_WORKER=${LIMA_THREADS_PER_WORKER:-1}
+ENABLE_NUMA_BIND=${LIMA_ENABLE_NUMA_BIND:-1}
+
+find_numa_node_for_gpu() {
+    local gpu_index="$1"
+    local bus_id
+    bus_id=$(
+        nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader,nounits 2>/dev/null \
+        | awk -F',' -v gpu="$gpu_index" '
+            {
+                gsub(/^[ \t]+|[ \t]+$/, "", $1)
+                gsub(/^[ \t]+|[ \t]+$/, "", $2)
+                if ($1 == gpu) {
+                    print tolower($2)
+                    exit
+                }
+            }'
+    )
+    if [[ -z "${bus_id}" ]]; then
+        return 1
+    fi
+    local numa_file="/sys/bus/pci/devices/${bus_id}/numa_node"
+    if [[ ! -r "${numa_file}" ]]; then
+        return 1
+    fi
+    local node
+    node=$(cat "${numa_file}" 2>/dev/null || true)
+    if [[ -z "${node}" || "${node}" == "-1" ]]; then
+        return 1
+    fi
+    echo "${node}"
+}
 
 cleanup_workers() {
     if [[ ${#worker_pids[@]} -eq 0 ]]; then
@@ -63,6 +96,9 @@ echo "Log directory: $log_root"
 gpu_numbers=${#cuda_devices[@]}
 echo "The number of GPUs is $gpu_numbers."
 echo "Device list: ${cuda_devices[*]}"
+echo "Resume check mode: ${resume_check}"
+echo "Threads per worker: ${THREADS_PER_WORKER}"
+echo "NUMA bind enabled: ${ENABLE_NUMA_BIND}"
 
 # text length
 line_count=$(wc -l < "$eval_list")
@@ -80,7 +116,28 @@ do
 
     echo "Launch worker shard=${gpu_index}/${gpu_numbers} on physical GPU ${device}"
     echo "  log: ${log_file}"
-    setsid python -m submodular_attribution.efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel \
+    launch_prefix=()
+    if [[ "${ENABLE_NUMA_BIND}" == "1" ]] && command -v numactl >/dev/null 2>&1; then
+        numa_node=$(find_numa_node_for_gpu "$device" || true)
+        if [[ -n "${numa_node}" ]]; then
+            launch_prefix=(numactl --cpunodebind="${numa_node}" --membind="${numa_node}")
+            echo "  numa bind: node ${numa_node}"
+        else
+            echo "  numa bind: skipped (numa node not found for gpu ${device})"
+        fi
+    else
+        echo "  numa bind: disabled"
+    fi
+
+    setsid env \
+    OMP_NUM_THREADS="${THREADS_PER_WORKER}" \
+    MKL_NUM_THREADS="${THREADS_PER_WORKER}" \
+    OPENBLAS_NUM_THREADS="${THREADS_PER_WORKER}" \
+    NUMEXPR_NUM_THREADS="${THREADS_PER_WORKER}" \
+    VECLIB_MAXIMUM_THREADS="${THREADS_PER_WORKER}" \
+    PYTHONUNBUFFERED=1 \
+    "${launch_prefix[@]}" \
+    python -m submodular_attribution.efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel \
     --Datasets $dataset \
     --eval-list $eval_list \
     --lambda1 $lambda1 \
@@ -89,7 +146,7 @@ do
     --lambda4 $lambda4 \
     --pending-samples $pending_samples \
     --device $device \
-    --resume-check strict \
+    --resume-check $resume_check \
     --num-shards $gpu_numbers \
     --shard-id $gpu_index \
     --begin $begin \
