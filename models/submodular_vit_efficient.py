@@ -387,7 +387,8 @@ class MultiModalSubModularExplanationEfficientV2(MultiModalSubModularExplanation
         self.smdl_score_best = 0
         
         loop_times = int((self.k-self.pending_samples)/2) + self.pending_samples
-        for j in tqdm(range(loop_times)):
+        # for j in tqdm(range(loop_times)):
+        for j in range(loop_times):
             diff = np.setdiff1d(indexes, np.concatenate((Subset, Subset_decrease)))  # in indexes but not in Subset
             
             sub_candidate_indexes = diff
