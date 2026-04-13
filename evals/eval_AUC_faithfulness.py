@@ -34,12 +34,16 @@ def main(args):
 
     insertion_aucs = []
     deletion_aucs = []
+    sample_count = 0
+    class_folder_count = 0
+    format_name = ""
 
     json_root_file = os.path.join(args.explanation_dir, "json")
     npy_root_file = os.path.join(args.explanation_dir, "npy")
 
     # Format-1 (ours): explanation_dir/{json,npy}/class_id/*.json|*.npy
     if os.path.isdir(json_root_file) and os.path.isdir(npy_root_file):
+        format_name = "format-1(ours)"
         class_ids = os.listdir(npy_root_file)
         for class_id in tqdm(class_ids):
             json_id_files_path = os.path.join(json_root_file, class_id)
@@ -47,6 +51,7 @@ def main(args):
 
             if not os.path.isdir(json_id_files_path):
                 continue
+            class_folder_count += 1
 
             json_file_names = os.listdir(json_id_files_path)
             for json_file_name in json_file_names:
@@ -89,8 +94,10 @@ def main(args):
                 deletion_auc = metrics.auc(1-np.array(deletion_area), deletion_score)
                 insertion_aucs.append(insertion_auc)
                 deletion_aucs.append(deletion_auc)
+                sample_count += 1
     else:
         # Format-2 (baseline): explanation_dir/*.json
+        format_name = "format-2(baseline)"
         json_file_names = [f for f in os.listdir(args.explanation_dir) if f.endswith(".json")]
         if len(json_file_names) == 0:
             raise ValueError(
@@ -118,12 +125,21 @@ def main(args):
             deletion_auc = metrics.auc(deletion_area, deletion_score)
             insertion_aucs.append(insertion_auc)
             deletion_aucs.append(deletion_auc)
+            sample_count += 1
 
     if len(insertion_aucs) == 0 or len(deletion_aucs) == 0:
         raise ValueError("No AUC values were computed. Please check explanation files.")
 
     insertion_auc_score = np.array(insertion_aucs).mean()
     deletion_auc_score = np.array(deletion_aucs).mean()
+    if format_name == "format-1(ours)":
+        print(
+            "AUC evaluated on {} samples across {} class folders ({})".format(
+                sample_count, class_folder_count, format_name
+            )
+        )
+    else:
+        print("AUC evaluated on {} samples ({})".format(sample_count, format_name))
     print("Insertion AUC Score: {:.4f}\nDeletion AUC Score: {:.4f}".format(insertion_auc_score, deletion_auc_score))
     return
 

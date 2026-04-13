@@ -9,6 +9,7 @@ submodular_results
 *.png
 *.JPEG
 *.jpg
+*.pdf
 
 *.npy
 *.pt
