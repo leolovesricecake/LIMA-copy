@@ -49,35 +49,3 @@ percentage: 0.5, the avg. highest confidence: 0.6944984499844177, std:0.32486482
 percentage: 0.75, the avg. highest confidence: 0.7838111357975532, std:0.26483468423810835, retention percentage at highest confidence: 0.5221304436720506, std: 0.1893892522092241
 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [00:07<00:00, 666.01it/s]
 percentage: 1.0, the avg. highest confidence: 0.8640556951603551, std:0.1840797611949987, retention percentage at highest confidence: 0.7415293396033531, std: 0.2826551970965136
-
-
-# ---------
-# LIMA
-# ---------
-(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ scripts/efficientv2-clip_vitl_multigpu.sh
-The number of GPUs is 2.
-Device list: 0 1
-Evaluation on 4890 instances.
-Each GPU should process at least 2445 lines.
-/mnt/huawei/nsq/LIMA-copy/submodular_attribution/efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel.py:35: MatplotlibDeprecationWarning: The seaborn styles shipped by Matplotlib are deprecated since 3.6, as they no longer correspond to the styles shipped by seaborn. However, they will remain available as 'seaborn-v0_8-<style>'. Alternatively, directly use the seaborn API instead.
-  plt.style.use('seaborn')
-/mnt/huawei/nsq/LIMA-copy/submodular_attribution/efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel.py:35: MatplotlibDeprecationWarning: The seaborn styles shipped by Matplotlib are deprecated since 3.6, as they no longer correspond to the styles shipped by seaborn. However, they will remain available as 'seaborn-v0_8-<style>'. Alternatively, directly use the seaborn API instead.
-  plt.style.use('seaborn')
-Requested physical --device=1
-CUDA_DEVICE_ORDER=PCI_BUS_ID
-CUDA_VISIBLE_DEVICES=<not set>
-Requested physical --device=0
-CUDA_DEVICE_ORDER=PCI_BUS_ID
-CUDA_VISIBLE_DEVICES=<not set>
-PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
-PCI bus-id mapping: physical GPU 0 (bus 0000:4F:00.0) -> CUDA ordinal 0.
-Selected CUDA ordinal=1
-Torch device=cuda:1
-Selected CUDA ordinal=0
-Torch device=cuda:0
-load CLIP model
-load CLIP model
-already exist
-already exist
-already exist
- 11%|████████████▉                                                                                                            | 3/28 [00:50<06:57, 16.69s/it]

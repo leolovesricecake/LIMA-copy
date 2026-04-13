@@ -1,0 +1,10 @@
+Requested physical --device=0
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 0 (bus 0000:4F:00.0) -> CUDA ordinal 0.
+Selected CUDA ordinal=0
+Torch device=cuda:0
+load CLIP model
+[shard] shard-id=0/5 selected 979 samples after sharding.
+[resume] mode=strict selected=979 completed=425 pending=554 malformed=0.
+gpu0-pending:   0%|          | 0/554 [00:00<?, ?it/s]gpu0-pending:   0%|          | 1/554 [15:28<142:42:04, 928.98s/it]gpu0-pending:   0%|          | 2/554 [31:34<145:45:13, 950.57s/it]gpu0-pending:   1%|          | 3/554 [46:25<141:19:19, 923.34s/it]gpu0-pending:   1%|          | 4/554 [1:01:13<138:54:13, 909.19s/it]gpu0-pending:   1%|          | 5/554 [1:18:31<145:45:32, 955.80s/it]gpu0-pending:   1%|          | 6/554 [1:37:00<153:26:43, 1008.04s/it]gpu0-pending:   1%|▏         | 7/554 [1:54:18<154:37:33, 1017.65s/it]gpu0-pending:   1%|▏         | 8/554 [2:09:35<149:30:16, 985.74s/it] gpu0-pending:   2%|▏         | 9/554 [2:21:34<136:36:23, 902.35s/it]

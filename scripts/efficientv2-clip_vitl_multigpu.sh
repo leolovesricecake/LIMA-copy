@@ -14,7 +14,7 @@ resume_check=${LIMA_RESUME_CHECK:-strict}
 # Select target GPU indices for subprocesses.
 # 1) default: declare -a cuda_devices=("0" "1")
 # 2) override by env: LIMA_CUDA_DEVICES="0 1 2 3" bash scripts/efficientv2-clip_vitl_multigpu.sh
-declare -a cuda_devices=("0" "1" "3" "5" "6")
+declare -a cuda_devices=("0" "1" "3" "6" "7")
 if [[ -n "${LIMA_CUDA_DEVICES:-}" ]]; then
     echo "Use devices from env LIMA_CUDA_DEVICES=${LIMA_CUDA_DEVICES}"
     read -r -a cuda_devices <<< "${LIMA_CUDA_DEVICES}"
