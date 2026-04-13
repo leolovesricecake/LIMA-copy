@@ -113,6 +113,14 @@ def parse_args():
     parser.add_argument('--allow-device-fallback',
                         action='store_true',
                         help='Allow fallback to ordinal==physical index when PCI bus-id mapping is unavailable.')
+    parser.add_argument('--num-shards',
+                        type=int,
+                        default=1,
+                        help='Total number of workers for data-level sharding.')
+    parser.add_argument('--shard-id',
+                        type=int,
+                        default=-1,
+                        help='Current worker id in [0, num-shards). -1 disables sharding.')
     args = parser.parse_args()
     return args
 
@@ -336,6 +344,13 @@ def _build_output_paths(save_npy_root_path, save_json_root_path, gt_id, image_re
     return npy_path, json_path
 
 
+def _parse_eval_info_line(info_line):
+    parts = info_line.split()
+    if len(parts) < 2:
+        return None, None
+    return parts[0], parts[1]
+
+
 def _is_valid_json(json_path):
     try:
         with open(json_path, "r") as f:
@@ -438,19 +453,69 @@ def main(args):
     if end == -1:
         end = None
     select_infos = infos[args.begin : end]
-    for info in tqdm(select_infos):
-        parts = info.split()
-        if len(parts) < 2:
-            print("Warning: malformed eval-list line, skip: {}".format(info))
-            continue
-        image_relative_path = parts[0]
-        gt_id = parts[1]
 
+    if args.num_shards <= 0:
+        raise ValueError("--num-shards must be >= 1.")
+    if args.shard_id >= 0:
+        if args.shard_id >= args.num_shards:
+            raise ValueError("--shard-id must be in [0, --num-shards).")
+        sharded_infos = []
+        for idx, info in enumerate(select_infos):
+            if idx % args.num_shards == args.shard_id:
+                sharded_infos.append(info)
+        select_infos = sharded_infos
+        print(
+            "[shard] shard-id={}/{} selected {} samples after sharding.".format(
+                args.shard_id, args.num_shards, len(select_infos)
+            )
+        )
+    else:
+        print("[shard] disabled, selected {} samples.".format(len(select_infos)))
+
+    pending_infos = []
+    completed_count = 0
+    malformed_count = 0
+    for info in select_infos:
+        image_relative_path, gt_id = _parse_eval_info_line(info)
+        if image_relative_path is None:
+            malformed_count += 1
+            continue
         npy_path, json_path = _build_output_paths(
             save_npy_root_path, save_json_root_path, gt_id, image_relative_path
         )
         if is_sample_completed(npy_path, json_path, args.resume_check):
+            completed_count += 1
+        else:
+            pending_infos.append(info)
+
+    print(
+        "[resume] mode={} selected={} completed={} pending={} malformed={}.".format(
+            args.resume_check,
+            len(select_infos),
+            completed_count,
+            len(pending_infos),
+            malformed_count,
+        )
+    )
+
+    if len(pending_infos) == 0:
+        print("[resume] no pending samples, worker exits.")
+        return
+
+    processed_count = 0
+    for info in tqdm(
+        pending_infos,
+        desc="gpu{}-pending".format(args.device),
+        dynamic_ncols=True,
+    ):
+        image_relative_path, gt_id = _parse_eval_info_line(info)
+        if image_relative_path is None:
+            print("Warning: malformed eval-list line, skip: {}".format(info))
             continue
+
+        npy_path, json_path = _build_output_paths(
+            save_npy_root_path, save_json_root_path, gt_id, image_relative_path
+        )
         
         # Ground Truth Label
         gt_label = int(gt_id)
@@ -481,6 +546,7 @@ def main(args):
 
         # Save json file
         atomic_save_json(json_path, saved_json_file)
+        processed_count += 1
 
     #     # Save GIF
     #     save_gif_root_path = os.path.join(save_dir, "gif")
@@ -496,7 +562,13 @@ def main(args):
         #     frames.append(img_frame)
 
         # imageio.mimsave(os.path.join(save_gif_root_path, image_relative_path.replace(".jpg", ".gif")), 
-        #                       frames, 'GIF', duration=0.0085)  
+        #                       frames, 'GIF', duration=0.0085)
+
+    print(
+        "[done] shard-id={} processed={} samples (pending at start={}).".format(
+            args.shard_id, processed_count, len(pending_infos)
+        )
+    )
 
 
 if __name__ == "__main__":
