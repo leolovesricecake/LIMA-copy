@@ -60,3 +60,31 @@ submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pendin
 Insertion AUC Score: 0.7590
 Deletion AUC Score: 0.1464
 
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.evaluation_mistake_debug_ours \
+>   --explanation-method submodular_results/imagenet-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8 \
+>   --eval-list datasets/imagenet/val_clip_vitl_5k_true.txt
+
+scan: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4891/4891 [22:07<00:00,  3.69it/s]
+[scan] eval_list=4891 valid=4891 missing=0 broken=0 missing_key=0 malformed=0.
+When percentage is 0.25, the avg. highest confidence is 0.7514831825185958, std:0.32435247988832744, the retention percentage at highest confidence is 0.21549270672731882, std:0.04304758405658052, used=4891, empty_curve=0.
+When percentage is 0.5, the avg. highest confidence is 0.9092076274910433, std:0.1749877317541095, the retention percentage at highest confidence is 0.3729249325343509, std:0.10475889790036165, used=4891, empty_curve=0.
+When percentage is 0.75, the avg. highest confidence is 0.9452307495791058, std:0.10814860199421601, the retention percentage at highest confidence is 0.4645008881760126, std:0.18016531277488185, used=4891, empty_curve=0.
+When percentage is 1.0, the avg. highest confidence is 0.9552047127376815, std:0.08758548656990565, the retention percentage at highest confidence is 0.5628298346882967, std:0.2637952480673188, used=4891, empty_curve=0.
+
+## 错分类样本
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.eval_AUC_faithfulness --explanation-dir submodular_results/imagenet-clip-vitl-efficientv2/slico-0.0-0.05-10.0-1.0-pending-samples-8
+submodular_results/imagenet-clip-vitl-efficientv2/slico-0.0-0.05-10.0-1.0-pending-samples-8
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 990/990 [11:36<00:00,  1.42it/s]
+AUC evaluated on 1958 samples across 990 class folders (format-1(ours))
+Insertion AUC Score: 0.4770
+Deletion AUC Score: 0.0267
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.evaluation_mistake_debug_baseline \
+>   --explanation-method submodular_results/imagenet-clip-vitl-efficientv2/slico-0.0-0.05-10.0-1.0-pending-samples-8 \
+>   --eval-list datasets/imagenet/val_clip_vitl_2k_false.txt
+scan: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1958/1958 [00:06<00:00, 283.41it/s]
+[scan] mode=format-1-with-json-subdir eval_list=1958 valid=1958 missing=0 broken=0 missing_key=0 empty=0 malformed=0.
+percentage: 0.25, avg. highest confidence: 0.5688101347608148, std:0.35572816738101876, retention percentage at highest confidence: 0.20965791832565506, std: 0.052978453053646485, used=1958, empty_curve=0.
+percentage: 0.5, avg. highest confidence: 0.70079512901764, std:0.3109726795364227, retention percentage at highest confidence: 0.3430718559129474, std: 0.11745594703115209, used=1958, empty_curve=0.
+percentage: 0.75, avg. highest confidence: 0.7462275203572352, std:0.2837458737967892, retention percentage at highest confidence: 0.42058743824393907, std: 0.18331313507979877, used=1958, empty_curve=0.
+percentage: 1.0, avg. highest confidence: 0.7573359494798639, std:0.276698612056459, retention percentage at highest confidence: 0.45814137708198704, std: 0.22860719549945566, used=1958, empty_curve=0.
