@@ -33,7 +33,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 import matplotlib
 from matplotlib import pyplot as plt
-plt.style.use('seaborn')
+# plt.style.use('seaborn')
 
 from tqdm import tqdm
 from utils import *
