@@ -1,9 +1,9 @@
 #!/bin/bash
 set -u
 
-dataset="/dev/shm/imagenet_val_fast"
-eval_list="datasets/imagenet/val_clip_vitl_5k_true.txt"
-save_dir="submodular_results/imagenet-clip-vitl-efficientv2"
+dataset="datasets/ImageNet-A/sample/image"
+eval_list="datasets/ImageNet-A/imagenet-a_list.txt"
+save_dir="submodular_results/imagenet-a-clip-vitl-efficientv2"
 lambda1=0
 lambda2=0.05
 lambda3=20
@@ -15,7 +15,7 @@ resume_check=${LIMA_RESUME_CHECK:-strict}
 # Select target GPU indices for subprocesses.
 # 1) default: declare -a cuda_devices=("0" "1")
 # 2) override by env: LIMA_CUDA_DEVICES="0 1 2 3" bash scripts/efficientv2-clip_vitl_multigpu.sh
-declare -a cuda_devices=("0" "1" "3" "6" "7")
+declare -a cuda_devices=("0" "4" "6" "7")
 if [[ -n "${LIMA_CUDA_DEVICES:-}" ]]; then
     echo "Use devices from env LIMA_CUDA_DEVICES=${LIMA_CUDA_DEVICES}"
     read -r -a cuda_devices <<< "${LIMA_CUDA_DEVICES}"
@@ -89,7 +89,7 @@ on_interrupt() {
 trap on_interrupt INT TERM
 
 timestamp=$(date +"%Y%m%d_%H%M%S")
-log_root=${LIMA_LOG_DIR:-"./logs/efficientv2_clip_vitl_${timestamp}"}
+log_root=${LIMA_LOG_DIR:-"./logs/scripts_imagenet-a_${timestamp}"}
 mkdir -p "$log_root"
 echo "Log directory: $log_root"
 

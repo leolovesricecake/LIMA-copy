@@ -18,7 +18,7 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 _inherited_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
 if _inherited_visible not in ("", "-1"):
     print("[bootstrap] Clear inherited CUDA_VISIBLE_DEVICES={}.".format(_inherited_visible))
-    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+#    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 import subprocess
 import ctypes
 import ctypes.util
@@ -99,7 +99,7 @@ def parse_args():
                         type=int, default=None,
                         help='')
     parser.add_argument('--save-dir', 
-                        type=str, default='./submodular_results/imagenet-clip-vitl-efficientv2/',
+                        type=str, default=None,
                         help='output directory to save results')
     parser.add_argument('--device',
                         type=int,
@@ -335,11 +335,12 @@ def resolve_device(cuda_ordinal):
 
 
 def _build_output_paths(save_npy_root_path, save_json_root_path, gt_id, image_relative_path):
+    base_name = os.path.splitext(image_relative_path)[0]
     npy_path = os.path.join(
-        os.path.join(save_npy_root_path, gt_id), image_relative_path.replace(".JPEG", ".npy")
+        os.path.join(save_npy_root_path, gt_id), f"{base_name}.npy"
     )
     json_path = os.path.join(
-        os.path.join(save_json_root_path, gt_id), image_relative_path.replace(".JPEG", ".json")
+        os.path.join(save_json_root_path, gt_id), f"{base_name}.json"
     )
     return npy_path, json_path
 
@@ -443,8 +444,11 @@ def main(args):
     with open(args.eval_list, "r") as f:
         infos = [line.strip() for line in f if line.strip() != ""]
     
-    mkdir(args.save_dir)
-    save_dir = os.path.join(args.save_dir, "{}-{}-{}-{}-{}-pending-samples-{}".format(args.superpixel_algorithm, args.lambda1, args.lambda2, args.lambda3, args.lambda4, args.pending_samples))  
+    save_dir = args.save_dir
+    if not save_dir:
+        dataset_name = os.path.basename(args.eval_list).split(".")[0]
+        save_dir = f'./submodular_results/{dataset_name}-clip-vitl-efficientv2'
+    save_dir = os.path.join(save_dir, "{}-{}-{}-{}-{}-pending-samples-{}".format(args.superpixel_algorithm, args.lambda1, args.lambda2, args.lambda3, args.lambda4, args.pending_samples))  
     
     mkdir(save_dir)
     

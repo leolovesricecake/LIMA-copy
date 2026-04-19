@@ -88,3 +88,24 @@ percentage: 0.25, avg. highest confidence: 0.5688101347608148, std:0.35572816738
 percentage: 0.5, avg. highest confidence: 0.70079512901764, std:0.3109726795364227, retention percentage at highest confidence: 0.3430718559129474, std: 0.11745594703115209, used=1958, empty_curve=0.
 percentage: 0.75, avg. highest confidence: 0.7462275203572352, std:0.2837458737967892, retention percentage at highest confidence: 0.42058743824393907, std: 0.18331313507979877, used=1958, empty_curve=0.
 percentage: 1.0, avg. highest confidence: 0.7573359494798639, std:0.276698612056459, retention percentage at highest confidence: 0.45814137708198704, std: 0.22860719549945566, used=1958, empty_curve=0.
+
+# ---------
+LIMA _ ImageNet-a
+# ---------
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.eval_AUC_faithfulness --explanation-dir submodular_results/imagenet-a-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8
+
+submodular_results/imagenet-a-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [15:48<00:00, 948.70s/it]
+AUC evaluated on 3995 samples across 1 class folders (format-1(ours))
+Insertion AUC Score: 0.0168
+Deletion AUC Score: 0.0002
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy$ python -m evals.evaluation_mistake_debug_ours \
+>   --explanation-method submodular_results/imagenet-a-clip-vitl-efficientv2/seeds-0.0-0.05-20.0-1.0-pending-samples-8 \
+>   --eval-list datasets/ImageNet-A/imagenet-a_list.txt
+scan: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [04:14<00:00, 15.67it/s]
+[scan] eval_list=3995 valid=3995 missing=0 broken=0 missing_key=0 malformed=0.
+When percentage is 0.25, the avg. highest confidence is 0.052925162977808256, std:0.08868032359041561, the retention percentage at highest confidence is 0.15930836097736967, std:0.06817626525198123, used=3995, empty_curve=0.
+When percentage is 0.5, the avg. highest confidence is 0.06585375304812932, std:0.11279107536046498, the retention percentage at highest confidence is 0.20644912386497152, std:0.11344554107670839, used=3995, empty_curve=0.
+When percentage is 0.75, the avg. highest confidence is 0.06834300629636075, std:0.11826707102207704, the retention percentage at highest confidence is 0.21558344414893618, std:0.1320775899137139, used=3995, empty_curve=0.
+When percentage is 1.0, the avg. highest confidence is 0.06976656382612054, std:0.12060278044657091, the retention percentage at highest confidence is 0.22641843140181603, std:0.1598776825375667, used=3995, empty_curve=0.
