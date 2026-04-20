@@ -1,4 +1,67 @@
-# 背景
+# 全流程计划
+
+## Phase 0：仓库与工程基线（已完成）
+- 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
+- 当前仓库主入口为 `lima_llm/`，原始 LIMA 代码归档在 `lima_origin/`。
+- 统一运行入口、断点恢复、日志输出与评估产物格式。
+
+## Phase 1：判别式任务可复现闭环（v1，当前）
+- 数据：`SST-2`（烟测/回归） + `ERASER Movie Reviews`（faithfulness 主评估）。
+- 模型：本地 HF 7B（默认 `Qwen2.5-7B-Instruct`），支持 `mock-backbone`。
+- 子区域划分：`sentence` 为主、`fixed_token` 兜底，强制覆盖率与无重叠。
+- 子模评分：`confidence/effectiveness/consistency/collaboration` + `F(S)`。
+- 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
+- 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
+
+## Phase 2：稳定性与规模化（下一阶段）
+- 提升多卡与长任务稳定性：统一 GPU 映射策略、启动前 GPU 可用性探测、失败重试/熔断策略。
+- 增强数据适配：补齐更多 ERASER 子任务与中文判别数据集适配。
+- 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
+- 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
+
+## Phase 3：效率优化（严格等价优先）
+- 样本内向量化与批量候选打分（保持结果与 v1 等价）。
+- 引入 KV cache 复用（仅在等价校验通过后启用）。
+- 引入候选预筛（如 attention/uncertainty 先验）并提供可关闭开关，默认关闭。
+- 为每项优化提供 equivalence test（子集选择序列与分数轨迹一致性校验）。
+
+## Phase 4：生成式任务扩展（最终目标）
+- 从判别式标签目标扩展到“目标输出 token/span”解释。
+- 扩展评分定义到生成任务（基于目标序列 logprob 与隐藏态轨迹）。
+- 支持多轮对话与超长上下文的解释稳定性评估。
+- 引入人类评审与任务级指标（正确性、可读性、实用性）联合报告。
+
+# v1
+
+## 已实现模块
+- `lima_llm/data`：`SST-2` 与 `ERASER Movie Reviews` 数据适配。
+- `lima_llm/chunking`：`sentence` 与 `fixed_token` 两种切分策略，覆盖率校验。
+- `lima_llm/backbone`：`HFBackbone`（logprob 分类 + 中间层池化 embedding）与 `MockBackbone`。
+- `lima_llm/scoring`：四分数独立实现。
+- `lima_llm/objective`：子模目标函数 `F(S)` 与子集缓存。
+- `lima_llm/search`：`greedy` 与 `bidirectional` 搜索。
+- `lima_llm/pipeline`：CLI、dry-run、断点恢复、产物写盘、trace 保存。
+- `lima_llm/eval`：faithfulness 与 plausibility 指标计算，支持 `random/gradient` baseline。
+
+## 已实现产物
+- `samples/*.json`：每样本完整解释轨迹。
+- `samples/*.txt`：最终解释文本。
+- `summary.csv`：样本级汇总。
+- `eval_report.json`：指标报告。
+- `run_config.json`：运行配置快照。
+
+## 运行方式
+- 主入口：`python -m lima_llm ...`
+- 一键脚本：`scripts/run_lima_llm_v1.sh`
+- 文档：根目录 `README.md` 与 `说明.md`
+
+## 当前边界
+- 任务范围：判别式解释为主。
+- 优化策略：默认不启用近似优化（无 UHeads、无随机贪心）。
+- 生成式迁移（输出 token 级解释）尚未进入 v1。
+
+# 前言
+## 背景
 现代 LLM 拥有数千亿参数，其推理过程涉及复杂的注意力机制与专家混合架构（MoE），这使得传统基于梯度或单一注意力的解释方法在面对长文本输入与自回归输出时，往往表现出显著的噪声干扰、计算瓶颈以及保真度不足等缺陷。现有的文本归因方法主要可以归纳为梯度基方法、扰动基方法和博弈论基方法三类，但它们在迁移到如 DeepSeek 或 Qwen 等模型时均面临特定局限。
 
 为了构建可信赖的 AI 系统，归因方法必须能够精确识别输入中对决策影响最大的核心区域。LIMA 框架通过将归因问题重新表述为子模函数优化下的子集选择问题，在图像模态中展现了卓越的效率与保真度。子模性本质上反映了“边际收益递减”的特性，这与文本逻辑中关键语义点的分布规律高度契合：一旦识别出最核心的因果片段，增加冗余的背景文本对模型输出概率的提升将迅速饱和。通过将归因转化为一个受限基数下的子模最大化问题，可以在保证保真度的前提下，寻找能够激活模型响应的最精简输入子集。
@@ -6,7 +69,7 @@
 在判别式图像任务中，归因通常表现为像素级别的显著性地图。而在生成式文本大模型中，归因的目标是解释输入提示词（Prompt）中的哪些片段导致了特定输出序列（Response）的生成。为了将 LIMA 的核心思想——子区域划分、子模目标函数、以及双向贪心搜索——迁移至文本大模型，需重点解决文本序列的模态适配、超大规模参数量下的时空开销平衡以及特征提取层级的选择等核心挑战。
 
 
-# 文本子区域划分
+## 文本子区域划分
 
 ### 句子级/段落级划分
 
@@ -21,7 +84,7 @@
 
 > Meta-Chunking: Learning Text Segmentation and Semantic Completion via Logical Perception
 
-# 文本化子模目标函数
+## 文本化子模目标函数
 
 ### 置信度分数：从 EDL 到 LogU 转换
 原论文利用证据深度学习（EDL）产生证据向量，并计算 $1 - K / \sum(e+1)$ 作为置信度。在 LLM 中，输出概率分布并非简单的分类层，而是经过 Softmax 归一化后的词表概率。
@@ -54,7 +117,7 @@ $s_{colla}(S) = \text{softmax\_entropy}(\text{Full\_Input}) - \text{softmax\_ent
 $s_{eff}(S) = \sum_{T_i \in S} \min_{T_j \in S, T_j \neq T_i} dist(Emb(T_i), Emb(T_j))$
 其中 $dist$ 为余弦距离。该项能确保选出的子区域在语义上尽可能互补，从而用最少的词汇量覆盖最广的语义维度。
 
-# 特征提取器与 EDL 模型
+## 特征提取器与 EDL 模型
 将 ResNet101、ViT 替换为千亿参数的 LLM 后，特征提取与置信度估计面临计算效率与特征定位的双重挑战。DeepSeek 和 Qwen 这类解码器架构（Decoder-only）逐 Token 输出的特性要求我们必须重新思考特征向量的获取方式。
 
 ### 隐藏状态的层级选择理论
@@ -80,7 +143,7 @@ $s_{eff}(S) = \sum_{T_i \in S} \min_{T_j \in S, T_j \neq T_i} dist(Emb(T_i), Emb
 - 置信度模型 (EDL)使用 Logit-Dirichlet 模型，提取 Top-K Logits 作为证据强度。
 - 语义锚点 ($f_s$)使用原文本生成的中间层均值，作为归一化一致性参考。
 
-# 基于机理的高效搜索优化：KV Cache 复用与 UHeads
+## 基于机理的高效搜索优化：KV Cache 复用与 UHeads
 在 LIMA 原流程中，贪心搜索需要频繁调用模型以计算边际增益。对于千亿参数 LLM，每次前向传播的预填充（Prefill）阶段开销巨大，直接迁移会导致归因速度极慢。
 
 ### 跨段 KV Cache 复用技术（KVLink/SemShare）
@@ -95,7 +158,7 @@ $s_{eff}(S) = \sum_{T_i \in S} \min_{T_j \in S, T_j \neq T_i} dist(Emb(T_i), Emb
 > Reasoning with Confidence: Efficient Verification of LLM Reasoning Steps via Uncertainty Heads
 > A Head to Predict and a Head to Question: Pre-trained Uncertainty Quantification Heads for Hallucination Detection in LLM Outputs
 
-# 改进的双向贪心搜索算法
+## 改进的双向贪心搜索算法
 
 针对 LLM 巨大的调用开销，LIMA 提出的双向贪心搜索（Bidirectional Greedy Search）必须进行工程化适配。该算法的核心优势在于同时识别“最有影响力”和“最无关紧要”的片段，从而加速子集收敛。
 

@@ -1,11 +1,36 @@
-<h2 align="center"> <a href="https://openreview.net/forum?id=jKTUlxo5zy">Less is More: Efficient Black-box Attribution via Minimal Interpretable Subset Selection</a></h2>
-<h5 align="center"> If you like our project, please give us a star ⭐ on GitHub for latest update.  </h2>
+# LIMA-main (LLM Transfer v1)
 
-[![arXiv](https://img.shields.io/badge/Arxiv-2504.00470-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2504.00470)
+当前分支以文本 LLM 迁移实现为主，核心代码在 `lima_llm/`。
 
-## 📰 News & Update
+## 目录结构
 
-- **[2025.04.02]** We have published our paper as a preprint at https://arxiv.org/abs/2504.00470.
+- `lima_llm/`: 文本版 LIMA v1（数据适配、chunking、backbone、子模目标、搜索、评估、pipeline）
+- `scripts/run_lima_llm_v1.sh`: 文本版统一启动脚本
+- `tests/`: 文本版单测与集成测试
+- `lima_origin/`: 原始图像版 LIMA 代码与历史脚本（归档）
 
+## 快速开始
 
-The official code is being updated. You can first experience the algorithm from the repository https://github.com/RuoyuChen10/SMDL-Attribution/.
+```bash
+# 1) Dry-run（无需大模型）
+python -m lima_llm --dataset sst2 --split validation --mock-backbone --dry-run 10
+
+# 2) 端到端（mock，含评估）
+bash scripts/run_lima_llm_v1.sh \
+  --dataset sst2 \
+  --split validation \
+  --mock-backbone \
+  --k 8 \
+  --chunker sentence \
+  --search greedy \
+  --max-samples 100 \
+  --output-dir lima_llm_results \
+  --run-eval
+```
+
+## 原始 LIMA 说明
+
+原始代码已迁入 `lima_origin/`。若需使用历史图像版流程，请参考：
+
+- `lima_origin/README_origin.md`
+- `lima_origin/说明.md`
