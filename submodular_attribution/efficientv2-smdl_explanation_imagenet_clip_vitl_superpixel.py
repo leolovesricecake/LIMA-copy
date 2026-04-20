@@ -18,7 +18,7 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 _inherited_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
 if _inherited_visible not in ("", "-1"):
     print("[bootstrap] Clear inherited CUDA_VISIBLE_DEVICES={}.".format(_inherited_visible))
-#    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 import subprocess
 import ctypes
 import ctypes.util
@@ -334,6 +334,21 @@ def resolve_device(cuda_ordinal):
     return "cuda:{}".format(cuda_ordinal)
 
 
+def probe_device_ready(cuda_ordinal):
+    if cuda_ordinal < 0:
+        return
+    try:
+        torch.cuda.set_device(cuda_ordinal)
+        _ = torch.empty((1,), device="cuda:{}".format(cuda_ordinal))
+        torch.cuda.synchronize(cuda_ordinal)
+    except Exception as exc:
+        raise RuntimeError(
+            "CUDA ordinal {} is not ready (busy/unavailable/runtime mismatch): {}".format(
+                cuda_ordinal, repr(exc)
+            )
+        ) from exc
+
+
 def _build_output_paths(save_npy_root_path, save_json_root_path, gt_id, image_relative_path):
     base_name = os.path.splitext(image_relative_path)[0]
     npy_path = os.path.join(
@@ -416,6 +431,7 @@ def main(args):
     print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
     cuda_ordinal = resolve_cuda_ordinal(args.device, allow_fallback=args.allow_device_fallback)
     device = resolve_device(cuda_ordinal)
+    probe_device_ready(cuda_ordinal)
     print("Selected CUDA ordinal={}".format(cuda_ordinal))
     print("Torch device={}".format(device))
     # Instantiate model

@@ -46,6 +46,7 @@ Options:
   --python-bin BIN               Python executable, default "python".
   --module NAME                  Python module to run.
   --allow-device-fallback        Pass through to python worker.
+  --skip-gpu-probe               Disable startup GPU readiness probe (not recommended).
   --begin INT                    Begin index before sharding.
   --end INT                      End index (exclusive). Use -1 for all.
   -h, --help                     Show this message.
@@ -67,6 +68,7 @@ enable_numa_bind=${LIMA_ENABLE_NUMA_BIND:-1}
 python_bin="python"
 module_name="submodular_attribution.efficientv2-smdl_explanation_imagenet_clip_vitl_superpixel"
 allow_device_fallback=0
+skip_gpu_probe=0
 begin=0
 end=-1
 log_root=""
@@ -108,6 +110,8 @@ while [[ $# -gt 0 ]]; do
             module_name="$2"; shift 2 ;;
         --allow-device-fallback)
             allow_device_fallback=1; shift ;;
+        --skip-gpu-probe)
+            skip_gpu_probe=1; shift ;;
         --begin)
             begin="$2"; shift 2 ;;
         --end)
@@ -128,6 +132,15 @@ fi
 if [[ ! -d "$dataset" ]]; then
     echo "Dataset root not found: $dataset"
     exit 1
+fi
+if ! command -v "$python_bin" >/dev/null 2>&1; then
+    if command -v python3 >/dev/null 2>&1; then
+        echo "Python executable '$python_bin' not found, fallback to python3."
+        python_bin="python3"
+    else
+        echo "Python executable '$python_bin' not found and python3 is unavailable."
+        exit 1
+    fi
 fi
 
 # Select target GPU indices for subprocesses.
@@ -151,6 +164,52 @@ if [[ ${#cuda_devices[@]} -eq 0 ]]; then
     echo "No valid CUDA devices found."
     exit 1
 fi
+
+# Normalize GPU list: integer-only and de-duplicated while preserving order.
+declare -a _normalized_cuda_devices=()
+for d in "${cuda_devices[@]}"; do
+    if [[ ! "$d" =~ ^[0-9]+$ ]]; then
+        echo "Invalid GPU index '${d}'. Expect non-negative integer."
+        exit 1
+    fi
+    already_seen=0
+    for x in "${_normalized_cuda_devices[@]}"; do
+        if [[ "$x" == "$d" ]]; then
+            already_seen=1
+            break
+        fi
+    done
+    if [[ "$already_seen" == "0" ]]; then
+        _normalized_cuda_devices+=("$d")
+    fi
+done
+cuda_devices=("${_normalized_cuda_devices[@]}")
+
+probe_torch_gpu_access() {
+    local gpu_index="$1"
+    "${python_bin}" - "$gpu_index" <<'PY'
+import sys
+
+gpu_index = int(sys.argv[1])
+try:
+    import torch
+except Exception as exc:
+    print("torch import failed:", repr(exc))
+    raise SystemExit(1)
+
+if not torch.cuda.is_available():
+    print("CUDA is not available in current torch runtime.")
+    raise SystemExit(1)
+
+try:
+    torch.cuda.set_device(gpu_index)
+    _ = torch.zeros((1,), device=f"cuda:{gpu_index}")
+except Exception as exc:
+    print("GPU {} probe failed: {}".format(gpu_index, repr(exc)))
+    raise SystemExit(1)
+print("GPU {} probe ok.".format(gpu_index))
+PY
+}
 
 declare -a worker_pids=()
 declare -a worker_logs=()
@@ -227,6 +286,23 @@ echo "Hyper-params: superpixel=${superpixel_algorithm}, lambda=[${lambda1},${lam
 echo "Resume check mode: ${resume_check}"
 echo "Threads per worker: ${threads_per_worker}"
 echo "NUMA bind enabled: ${enable_numa_bind}"
+if [[ "${skip_gpu_probe}" == "1" ]]; then
+    echo "GPU readiness probe: disabled by --skip-gpu-probe"
+else
+    echo "GPU readiness probe: enabled"
+fi
+
+if [[ "${skip_gpu_probe}" != "1" ]]; then
+    for device in "${cuda_devices[@]}"; do
+        echo "Probing GPU ${device} with torch ..."
+        if ! probe_torch_gpu_access "${device}"; then
+            echo "GPU ${device} is not ready (busy/unavailable or runtime mismatch)."
+            echo "Refuse to start worker on this GPU to avoid wrong-card fallback or mid-run crash."
+            echo "Fix options: free this GPU, choose another via --cuda-devices, or use --skip-gpu-probe."
+            exit 1
+        fi
+    done
+fi
 
 line_count=$(wc -l < "$eval_list")
 echo "Evaluation on $line_count instances."
@@ -259,7 +335,7 @@ do
         allow_fallback_flag=(--allow-device-fallback)
     fi
 
-    setsid env \
+    setsid env -u CUDA_VISIBLE_DEVICES -u NVIDIA_VISIBLE_DEVICES \
     OMP_NUM_THREADS="${threads_per_worker}" \
     MKL_NUM_THREADS="${threads_per_worker}" \
     OPENBLAS_NUM_THREADS="${threads_per_worker}" \
