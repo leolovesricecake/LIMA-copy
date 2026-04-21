@@ -32,7 +32,6 @@ def run_forward_greedy(
 
         gains: List[Tuple[int, float]] = []
         candidate_scores = {}
-        base_score = objective.evaluate_subset(selected)
         for cid in remaining:
             gain, _, aug = objective.evaluate_gain(selected, cid)
             gains.append((cid, gain))

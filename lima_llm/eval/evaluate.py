@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import time
@@ -13,6 +14,11 @@ from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
 from ..utils import f1_iou_from_masks, spans_to_char_mask
 from .metrics import aopc_metrics, comprehensiveness_and_sufficiency
+
+
+def _stable_hash_int(text: str) -> int:
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
 
 
 def _to_chunks(raw_chunks: Sequence[Dict]) -> List[TextChunk]:
@@ -77,6 +83,8 @@ def evaluate_saved_explanations(
 
     grad_comp: List[float] = []
     grad_suff: List[float] = []
+    grad_errors: List[Dict[str, str]] = []
+    grad_error_counts: Dict[str, int] = {}
 
     acc_hits = 0
     total = 0
@@ -135,9 +143,14 @@ def evaluate_saved_explanations(
         ours_sparsity.append(selected_len / total_len)
 
         if sample.rationale_char_spans:
+            chunk_by_id = {c.chunk_id: c for c in chunks}
             pred_mask = spans_to_char_mask(
                 text_len=len(sample.text),
-                spans=[(chunks[i].start_char, chunks[i].end_char) for i in selected if i < len(chunks)],
+                spans=[
+                    (chunk_by_id[cid].start_char, chunk_by_id[cid].end_char)
+                    for cid in selected
+                    if cid in chunk_by_id
+                ],
             )
             gold_mask = spans_to_char_mask(
                 text_len=len(sample.text),
@@ -150,7 +163,7 @@ def evaluate_saved_explanations(
         # Random baseline (average over random trials).
         trial_comp = []
         trial_suff = []
-        rng = random.Random(2026 + hash(sample_id) % 10_000)
+        rng = random.Random(2026 + (_stable_hash_int(sample_id) % 10_000))
         for _ in range(max(1, random_trials)):
             rr = _random_ranking(all_ids, rng)
             c, s, _ = comprehensiveness_and_sufficiency(
@@ -185,8 +198,11 @@ def evaluate_saved_explanations(
                 )
                 grad_comp.append(gc)
                 grad_suff.append(gs)
-            except Exception:
-                pass
+            except Exception as exc:
+                err = f"{type(exc).__name__}: {exc}"
+                grad_error_counts[err] = grad_error_counts.get(err, 0) + 1
+                if len(grad_errors) < 10:
+                    grad_errors.append({"sample_id": sample_id, "error": err})
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
@@ -228,6 +244,9 @@ def evaluate_saved_explanations(
                 "comprehensiveness": _safe_mean(grad_comp),
                 "sufficiency": _safe_mean(grad_suff),
                 "evaluated_samples": len(grad_comp),
+                "failed_samples": max(0, total - len(grad_comp)) if include_gradient_baseline else 0,
+                "error_type_counts": grad_error_counts,
+                "error_examples": grad_errors,
             },
         },
         "q_values": list(int(q) for q in q_values),
