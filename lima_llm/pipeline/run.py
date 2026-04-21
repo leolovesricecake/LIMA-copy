@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", type=str, required=True, choices=["sst2", "eraser_movie_reviews"])
     parser.add_argument("--split", type=str, default="validation")
     parser.add_argument("--eraser-root", type=str, default=None)
+    parser.add_argument("--sst2-source", type=str, default=None)
+    parser.add_argument("--dataset-cache-dir", type=str, default=None)
 
     parser.add_argument("--model-path", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -110,6 +112,8 @@ def main(argv: List[str] | None = None) -> None:
         split=args.split,
         max_samples=args.max_samples,
         eraser_root=args.eraser_root,
+        sst2_source=args.sst2_source,
+        dataset_cache_dir=args.dataset_cache_dir,
     )
 
     backbone = build_backbone(

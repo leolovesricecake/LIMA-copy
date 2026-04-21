@@ -5,6 +5,7 @@ set -euo pipefail
 # python -m lima_llm \
 #   --dataset sst2 \
 #   --split validation \
+#   --sst2-source hf://nyu-mll/glue \
 #   --mock-backbone \
 #   --k 8 \
 #   --chunker sentence \
@@ -17,13 +18,14 @@ set -euo pipefail
 # python -m lima_llm \
 #   --dataset eraser_movie_reviews \
 #   --split validation \
-#   --eraser-root /path/to/eraser \
+#   --eraser-root hf://eraser-benchmark/movie_rationales \
 #   --model-path /path/to/Qwen2.5-7B-Instruct \
 #   --device cuda:0 \
 #   --dtype bfloat16 \
 #   --k 8 \
 #   --chunker sentence \
 #   --search greedy \
+#   --dataset-cache-dir /path/to/dataset_cache \
 #   --output-dir lima_llm_results \
 #   --run-eval --eval-gradient-baseline
 

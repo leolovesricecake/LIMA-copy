@@ -60,6 +60,33 @@
 - 优化策略：默认不启用近似优化（无 UHeads、无随机贪心）。
 - 生成式迁移（输出 token 级解释）尚未进入 v1。
 
+## v1 资源清单（可定位/可下载）
+
+| 类型 | 资源标识 | 获取方式 | 在项目中的用途 |
+|---|---|---|---|
+| 模型 | `Qwen/Qwen2.5-7B-Instruct` | https://huggingface.co/Qwen/Qwen2.5-7B-Instruct | `HFBackbone` 推理与特征提取 |
+| 数据集 | `nyu-mll/glue`（config=`sst2`） | https://huggingface.co/datasets/nyu-mll/glue | `sst2` 烟测/回归 |
+| 数据集 | `eraser-benchmark/movie_rationales` | https://huggingface.co/datasets/eraser-benchmark/movie_rationales | v1 主评估（faithfulness + plausibility） |
+| 数据集参考 | `eraserbenchmark` | https://github.com/jayded/eraserbenchmark | ERASER 原始格式说明与本地数据组织参考 |
+| 代码入口 | `python -m lima_llm` | 仓库本地代码 | 端到端解释 + 评估 |
+| 一键脚本 | `scripts/run_lima_llm_v1.sh` | 仓库本地脚本 | 简化启动参数 |
+
+### 资源下载/缓存建议
+- Hugging Face 镜像（可选）：`export HF_ENDPOINT=https://hf-mirror.com`
+
+
+### 数据加载协议（已支持本地 + 远程）
+- `sst2`:
+  - 默认远程 HF：不传 `--sst2-source`
+  - 指定 HF：`--sst2-source hf://nyu-mll/glue`
+  - 本地目录/文件：`--sst2-source /path/to/sst2_dir`（支持 `.tsv/.csv/.jsonl`）
+  - 远程 URL：`--sst2-source https://.../sst2.zip`
+- `eraser_movie_reviews`:
+  - 默认远程 HF：不传 `--eraser-root`
+  - 指定 HF：`--eraser-root hf://eraser-benchmark/movie_rationales`
+  - 本地目录：`--eraser-root /path/to/eraser_movie_reviews`
+  - 远程 URL：`--eraser-root https://.../eraser_movie_reviews.tar.gz`
+
 # 前言
 ## 背景
 现代 LLM 拥有数千亿参数，其推理过程涉及复杂的注意力机制与专家混合架构（MoE），这使得传统基于梯度或单一注意力的解释方法在面对长文本输入与自回归输出时，往往表现出显著的噪声干扰、计算瓶颈以及保真度不足等缺陷。现有的文本归因方法主要可以归纳为梯度基方法、扰动基方法和博弈论基方法三类，但它们在迁移到如 DeepSeek 或 Qwen 等模型时均面临特定局限。
