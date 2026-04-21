@@ -1,0 +1,44 @@
+{
+  "dataset": "eraser_movie_reviews",
+  "split": "validation",
+  "sample_count": 200,
+  "metrics_primary": {
+    "accuracy_full": 0.89,
+    "comprehensiveness": 0.018439742352813485,
+    "sufficiency": 0.2482200888539664,
+    "aopc": 0.06606345800496474,
+    "deletion_auc": 0.749557171576362,
+    "insertion_auc": 0.6654636667545705
+  },
+  "metrics_secondary": {
+    "diagnosticity_vs_random": 0.315,
+    "sparsity": 0.2911939641691711,
+    "plausibility_f1": 0.09200394643530398,
+    "plausibility_iou": 0.05176127456105229,
+    "runtime_seconds": 3012.801736354828,
+    "forward_counters_delta": {
+      "predict_calls": 27586,
+      "embed_calls": 0,
+      "gradient_calls": 200
+    }
+  },
+  "baselines": {
+    "random": {
+      "comprehensiveness": 0.032393101872876286,
+      "sufficiency": 0.18161109626274555
+    },
+    "gradient": {
+      "enabled": true,
+      "comprehensiveness": 0.0,
+      "sufficiency": 0.0,
+      "evaluated_samples": 0
+    }
+  },
+  "q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ]
+}
