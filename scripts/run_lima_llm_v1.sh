@@ -28,5 +28,6 @@ set -euo pipefail
 #   --dataset-cache-dir /path/to/dataset_cache \
 #   --output-dir lima_llm_results \
 #   --run-eval --eval-gradient-baseline
+export HF_ENDPOINT=https://hf-mirror.com
 
 python -m lima_llm "$@"
