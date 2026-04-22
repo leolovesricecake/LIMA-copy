@@ -10,7 +10,6 @@ from ..backbone.base import BaseBackbone
 from ..chunking.utils import complement_chunk_ids, compose_text_from_chunk_ids
 from ..scoring import (
     collaboration_score,
-    confidence_score,
     consistency_score,
     effectiveness_score,
 )
@@ -69,7 +68,8 @@ class TextSubmodularObjective:
         label_probs = self.backbone.predict_label_probs(subset_text, self.verbalizers)
         target_prob = float(label_probs[self.target_label])
 
-        conf = confidence_score(label_probs, num_classes=len(self.verbalizers))
+        # Use target-class probability so F(S) is explicitly class-conditional.
+        conf = target_prob
         eff = effectiveness_score(self.chunk_embeddings, key)
         cons = consistency_score(self.backbone.embed_text(subset_text), self.anchor_embedding)
         col = collaboration_score(self.backbone.embed_text(complement_text), self.anchor_embedding)

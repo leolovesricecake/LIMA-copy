@@ -57,17 +57,30 @@ class HFBackbone(BaseBackbone):
         self.model.to(device)
         self.model.eval()
 
-    def tokenize_len(self, text: str) -> int:
+    def _token_ids_no_special(self, text: str) -> list[int]:
         ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
+        return [int(x) for x in ids]
+
+    def tokenize_len(self, text: str) -> int:
+        ids = self._token_ids_no_special(text)
         return max(1, len(ids))
 
     def _label_conditional_logprob(self, text: str, label_text: str) -> float:
         torch = self.torch
         prefix = f"Text:\n{text}\nLabel:"
-        prefix_ids = self.tokenizer(prefix, add_special_tokens=False, return_tensors="pt")["input_ids"]
-        label_ids = self.tokenizer(" " + label_text, add_special_tokens=False, return_tensors="pt")["input_ids"]
+        prefix_ids = self._token_ids_no_special(prefix)
+        label_ids = self._token_ids_no_special(" " + label_text)
 
-        input_ids = torch.cat([prefix_ids, label_ids], dim=1).to(self.device)
+        # Keep label tokens intact and truncate prompt prefix from the left if needed.
+        max_total = max(2, int(self.max_length))
+        max_label = max_total - 1
+        if len(label_ids) > max_label:
+            label_ids = label_ids[-max_label:]
+        max_prefix = max_total - len(label_ids)
+        prefix_ids = prefix_ids[-max_prefix:]
+
+        full_ids = prefix_ids + label_ids
+        input_ids = torch.tensor([full_ids], dtype=torch.long, device=self.device)
         attention_mask = torch.ones_like(input_ids)
 
         with torch.no_grad():
@@ -77,8 +90,8 @@ class HFBackbone(BaseBackbone):
             logprobs = self.nnf.log_softmax(logits, dim=-1)
             token_lp = logprobs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
 
-        label_token_count = label_ids.shape[1]
-        start = prefix_ids.shape[1] - 1
+        label_token_count = len(label_ids)
+        start = len(prefix_ids) - 1
         end = start + label_token_count
         label_lp = token_lp[:, start:end]
         score = float(label_lp.mean().item())
@@ -139,17 +152,29 @@ class HFBackbone(BaseBackbone):
         suffix = "\nLabel:"
         prompt = prefix + text + suffix
 
+        label_ids = self._token_ids_no_special(" " + label_text)
+        max_total = max(2, int(self.max_length))
+        max_label = max_total - 1
+        if len(label_ids) > max_label:
+            label_ids = label_ids[-max_label:]
+
         encoded = self.tokenizer(
             prompt,
             return_offsets_mapping=True,
             add_special_tokens=False,
-            return_tensors="pt",
+            truncation=False,
         )
-        prompt_ids = encoded["input_ids"]
-        offsets = encoded["offset_mapping"][0].tolist()
+        prompt_ids_list = [int(x) for x in encoded["input_ids"]]
+        offsets = encoded["offset_mapping"]
 
-        label_ids = self.tokenizer(" " + label_text, add_special_tokens=False, return_tensors="pt")["input_ids"]
-        full_ids = torch.cat([prompt_ids, label_ids], dim=1).to(self.device)
+        max_prompt = max_total - len(label_ids)
+        if len(prompt_ids_list) > max_prompt:
+            prompt_ids_list = prompt_ids_list[-max_prompt:]
+            offsets = offsets[-max_prompt:]
+
+        prompt_ids = torch.tensor([prompt_ids_list], dtype=torch.long, device=self.device)
+        label_ids_t = torch.tensor([label_ids], dtype=torch.long, device=self.device)
+        full_ids = torch.cat([prompt_ids, label_ids_t], dim=1)
 
         emb_layer = self.model.get_input_embeddings()
         full_embeds = emb_layer(full_ids).detach().requires_grad_(True)
@@ -160,7 +185,7 @@ class HFBackbone(BaseBackbone):
         logprobs = self.nnf.log_softmax(logits, dim=-1)
         token_lp = logprobs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
 
-        label_token_count = label_ids.shape[1]
+        label_token_count = len(label_ids)
         start = prompt_ids.shape[1] - 1
         end = start + label_token_count
         score = token_lp[:, start:end].mean()

@@ -1,35 +1,42 @@
 # 全流程计划
 
 ## Phase 0：仓库与工程基线（已完成）
-- 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
-- 当前仓库主入口为 `lima_llm/`，原始 LIMA 代码归档在 `lima_origin/`。
-- 统一运行入口、断点恢复、日志输出与评估产物格式。
+- 已完成 `lima_llm/` 与 `lima_origin/` 解耦，文本版与图像版分离。
+- 已完成统一 CLI、断点恢复、结果落盘与评估入口。
 
-## Phase 1：判别式任务可复现闭环（v1，当前）
-- 数据：`SST-2`（烟测/回归） + `ERASER Movie Reviews`（faithfulness 主评估）。
-- 模型：本地 HF 7B（默认 `Qwen2.5-7B-Instruct`），支持 `mock-backbone`。
-- 子区域划分：`sentence` 为主、`fixed_token` 兜底，强制覆盖率与无重叠。
-- 子模评分：`confidence/effectiveness/consistency/collaboration` + `F(S)`。
-- 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
-- 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
+## Phase 1：v1 功能闭环（已完成）
+- 已完成数据适配：`SST-2`、`ERASER Movie Reviews`。
+- 已完成核心方法：`chunking + 四分数 + F(S) + greedy/bidirectional`。
+- 已完成评估框架：`COMP/SUFF/AOPC/Deletion-AUC/Insertion-AUC + random/gradient baseline`。
 
-## Phase 2：稳定性与规模化（下一阶段）
-- 提升多卡与长任务稳定性：统一 GPU 映射策略、启动前 GPU 可用性探测、失败重试/熔断策略。
-- 增强数据适配：补齐更多 ERASER 子任务与中文判别数据集适配。
-- 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
-- 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
+## Phase 1.1：v1 实测结论（已完成）
+- 基于 `eval_report.json`：`sample_count=200`，`accuracy_full=0.89`，说明端到端推理与评估链路可运行且分类能力正常。
+- faithfulness 指标当前未达预期：`comprehensiveness=0.0184` 低于 random 的 `0.0324`，`sufficiency=0.2482` 高于 random 的 `0.1816`。
+- `diagnosticity_vs_random=0.315`，说明当前解释排序仅在约 31.5% 样本上同时优于随机。
+- `gradient baseline` 当前无有效样本：`evaluated_samples=0`，该对照组暂不可用。
 
-## Phase 3：效率优化（严格等价优先）
-- 样本内向量化与批量候选打分（保持结果与 v1 等价）。
-- 引入 KV cache 复用（仅在等价校验通过后启用）。
-- 引入候选预筛（如 attention/uncertainty 先验）并提供可关闭开关，默认关闭。
-- 为每项优化提供 equivalence test（子集选择序列与分数轨迹一致性校验）。
+## Phase 1.2：评估口径与基线修复（下一步，最高优先级）
+- 任务 A：修复评估目标定义，新增双口径报告：`target=gold label` 与 `target=model predicted label` 同时输出，避免混淆“任务正确性”与“模型行为解释”。
+- 任务 B：修复 gradient baseline 可用性，保证 `evaluated_samples > 0`，并记录失败原因计数。
+- 任务 C：补充每个 q 的明细表与曲线文件（不只均值），便于定位是 `q=1` 还是 `q=50` 拉低整体表现。
+- 任务 D：增加评估健壮性检查：空文本、超长文本、无 rationale 样本单独统计。
+- 验收标准：能稳定产出双口径指标、gradient baseline 有效样本覆盖率 > 95%、报告包含分桶明细。
+
+## Phase 2：方法效果提升（严格等价于当前定义，不引入近似）
+- 优先调参：`k`、`lambdas`、`chunker(sentence vs fixed_token)`，形成小规模网格实验脚本。
+- 增强 chunk 质量：句子切分异常样本回退到 `fixed_token`，并输出覆盖率/块数分布。
+- 增强排序稳定性：在不改变目标函数定义前提下检查数值归一化与 tie-break 规则。
+- 验收标准：相对 random baseline，`COMP` 持续更高、`SUFF` 持续更低，`diagnosticity` 明显提升。
+
+## Phase 3：性能优化（等价优先）
+- 在 Phase 2 指标稳定后再做加速：批处理、缓存复用、向量化。
+- 每项优化必须通过等价测试：同输入同 seed 下 `selected chunks` 与 `F(S)` 轨迹一致。
+- 验收标准：结果等价，吞吐提升可量化（samples/s、forward 次数、总时长）。
 
 ## Phase 4：生成式任务扩展（最终目标）
-- 从判别式标签目标扩展到“目标输出 token/span”解释。
-- 扩展评分定义到生成任务（基于目标序列 logprob 与隐藏态轨迹）。
-- 支持多轮对话与超长上下文的解释稳定性评估。
-- 引入人类评审与任务级指标（正确性、可读性、实用性）联合报告。
+- 从分类解释扩展到“目标输出 token/span”解释。
+- 扩展评估为生成式 faithfulness 与可用性联合指标。
+- 验收标准：在至少一个生成任务集上形成可复现实验报告。
 
 # v1
 
