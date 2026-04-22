@@ -15,11 +15,11 @@
     "sparsity": 0.37248597136440437,
     "plausibility_f1": 0.1534222213685224,
     "plausibility_iou": 0.08644365771084055,
-    "runtime_seconds": 2985.207216978073,
+    "runtime_seconds": 6726.0393834114075,
     "forward_counters_delta": {
-      "embed_calls": 0,
+      "predict_calls": 29775,
       "gradient_calls": 200,
-      "predict_calls": 27586
+      "embed_calls": 0
     }
   },
   "baselines": {
@@ -29,53 +29,17 @@
     },
     "gradient": {
       "enabled": true,
-      "comprehensiveness": 0.0,
-      "sufficiency": 0.0,
-      "evaluated_samples": 0,
-      "failed_samples": 200,
+      "comprehensiveness": 0.07929754803078858,
+      "sufficiency": 0.12296392872798532,
+      "evaluated_samples": 199,
+      "failed_samples": 1,
       "error_type_counts": {
-        "TypeError: Got unsupported ScalarType BFloat16": 200
+        "OutOfMemoryError: CUDA out of memory. Tried to allocate 60.00 MiB. GPU 7 has a total capacty of 79.15 GiB of which 38.12 MiB is free. Including non-PyTorch memory, this process has 40.64 GiB memory in use. Process 3558834 has 38.45 GiB memory in use. Of the allocated memory 38.93 GiB is allocated by PyTorch, and 1.21 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF": 1
       },
       "error_examples": [
         {
-          "sample_id": "eraser-mr-hf-validation-0",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-1",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-10",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-100",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-101",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-102",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-103",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-104",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-105",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
-        },
-        {
-          "sample_id": "eraser-mr-hf-validation-106",
-          "error": "TypeError: Got unsupported ScalarType BFloat16"
+          "sample_id": "eraser-mr-hf-validation-107",
+          "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 60.00 MiB. GPU 7 has a total capacty of 79.15 GiB of which 38.12 MiB is free. Including non-PyTorch memory, this process has 40.64 GiB memory in use. Process 3558834 has 38.45 GiB memory in use. Of the allocated memory 38.93 GiB is allocated by PyTorch, and 1.21 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF"
         }
       ]
     }
