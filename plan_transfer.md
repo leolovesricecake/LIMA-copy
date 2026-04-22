@@ -22,6 +22,14 @@
 - 任务 D：增加评估健壮性检查：空文本、超长文本、无 rationale 样本单独统计。
 - 验收标准：能稳定产出双口径指标、gradient baseline 有效样本覆盖率 > 95%、报告包含分桶明细。
 
+### Phase 1.2 当前进展（2026-04-22）
+- 已完成：评估可诊断性增强（gradient 失败样本数、错误类型计数、错误样例输出）。
+- 已完成：random baseline 改为稳定哈希种子，支持跨进程复现。
+- 已完成：plausibility 计算改为按 `chunk_id -> chunk` 映射，修复潜在索引错位。
+- 已完成：目标函数 `confidence` 改为目标类别概率，增强类条件化。
+- 已完成（P0）：修复 gradient baseline 的 BF16 转换问题，在 `gradient_chunk_importance` 中将梯度范数显式 `.float()` 后再转 NumPy。
+- 待验证：在真实 ERASER+Qwen2.5-7B 运行中确认 `gradient.evaluated_samples > 0` 且 `error_type_counts` 清零/显著下降。
+
 ## Phase 2：方法效果提升（严格等价于当前定义，不引入近似）
 - 优先调参：`k`、`lambdas`、`chunker(sentence vs fixed_token)`，形成小规模网格实验脚本。
 - 增强 chunk 质量：句子切分异常样本回退到 `fixed_token`，并输出覆盖率/块数分布。

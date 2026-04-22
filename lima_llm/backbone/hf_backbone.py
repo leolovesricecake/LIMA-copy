@@ -193,7 +193,14 @@ class HFBackbone(BaseBackbone):
         self.model.zero_grad(set_to_none=True)
         score.backward()
 
-        grad_norm = full_embeds.grad[0, : prompt_ids.shape[1], :].norm(dim=-1).detach().cpu().numpy()
+        grad_norm = (
+            full_embeds.grad[0, : prompt_ids.shape[1], :]
+            .norm(dim=-1)
+            .float()
+            .detach()
+            .cpu()
+            .numpy()
+        )
 
         text_start = len(prefix)
         text_end = len(prefix) + len(text)
