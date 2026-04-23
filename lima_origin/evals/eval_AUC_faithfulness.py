@@ -53,6 +53,7 @@ def main(args):
                 continue
             class_folder_count += 1
 
+            # TODO 优化，支持读取子文件夹
             json_file_names = os.listdir(json_id_files_path)
             for json_file_name in json_file_names:
                 json_file_path = os.path.join(json_id_files_path, json_file_name)
