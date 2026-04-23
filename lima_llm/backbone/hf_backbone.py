@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from typing import List, Sequence, Tuple
 
 import numpy as np
@@ -56,6 +57,25 @@ class HFBackbone(BaseBackbone):
         )
         self.model.to(device)
         self.model.eval()
+
+        # Batch knobs for batched objective evaluation.
+        # Can be overridden by env vars for quick tuning without code changes.
+        self.predict_batch_size = max(1, int(os.getenv("LIMA_PREDICT_BATCH_SIZE", "4")))
+        self.embed_batch_size = max(1, int(os.getenv("LIMA_EMBED_BATCH_SIZE", "2")))
+
+    @staticmethod
+    def _is_oom_error(exc: Exception) -> bool:
+        msg = f"{type(exc).__name__}: {exc}".lower()
+        if "outofmemory" in type(exc).__name__.lower():
+            return True
+        return "out of memory" in msg and ("cuda" in msg or "cudnn" in msg or "hip" in msg)
+
+    def _clear_cuda_cache(self) -> None:
+        try:
+            if self.torch.cuda.is_available():
+                self.torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def _token_ids_no_special(self, text: str) -> list[int]:
         ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
@@ -174,12 +194,26 @@ class HFBackbone(BaseBackbone):
         if not texts:
             return np.zeros((0, len(verbalizers)), dtype=np.float32)
         self.forward_counters["predict_calls"] += len(texts)
-        score_cols = [self._label_conditional_logprob_batch(texts, label) for label in verbalizers]
-        score_mat = np.stack(score_cols, axis=1).astype(np.float64)
-        score_mat = score_mat - score_mat.max(axis=1, keepdims=True)
-        probs = np.exp(score_mat)
-        probs = probs / probs.sum(axis=1, keepdims=True)
-        return probs.astype(np.float32)
+        outputs: List[np.ndarray] = []
+        idx = 0
+        batch_size = min(self.predict_batch_size, len(texts))
+        while idx < len(texts):
+            cur = list(texts[idx : idx + batch_size])
+            try:
+                score_cols = [self._label_conditional_logprob_batch(cur, label) for label in verbalizers]
+                score_mat = np.stack(score_cols, axis=1).astype(np.float64)
+                score_mat = score_mat - score_mat.max(axis=1, keepdims=True)
+                probs = np.exp(score_mat)
+                probs = probs / probs.sum(axis=1, keepdims=True)
+                outputs.append(probs.astype(np.float32))
+                idx += len(cur)
+            except Exception as exc:
+                if self._is_oom_error(exc) and batch_size > 1:
+                    self._clear_cuda_cache()
+                    batch_size = max(1, batch_size // 2)
+                    continue
+                raise
+        return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, len(verbalizers)), dtype=np.float32)
 
     def embed_text(self, text: str) -> np.ndarray:
         self.forward_counters["embed_calls"] += 1
@@ -215,10 +249,7 @@ class HFBackbone(BaseBackbone):
             pooled = pooled / norm
         return pooled
 
-    def embed_texts(self, texts: Sequence[str]) -> List[np.ndarray]:
-        if not texts:
-            return []
-        self.forward_counters["embed_calls"] += len(texts)
+    def _embed_texts_once(self, texts: Sequence[str]) -> List[np.ndarray]:
         torch = self.torch
         encoded = self.tokenizer(
             list(texts),
@@ -254,6 +285,26 @@ class HFBackbone(BaseBackbone):
                 row = row / norm
             out.append(row.astype(np.float32))
         return out
+
+    def embed_texts(self, texts: Sequence[str]) -> List[np.ndarray]:
+        if not texts:
+            return []
+        self.forward_counters["embed_calls"] += len(texts)
+        outputs: List[np.ndarray] = []
+        idx = 0
+        batch_size = min(self.embed_batch_size, len(texts))
+        while idx < len(texts):
+            cur = list(texts[idx : idx + batch_size])
+            try:
+                outputs.extend(self._embed_texts_once(cur))
+                idx += len(cur)
+            except Exception as exc:
+                if self._is_oom_error(exc) and batch_size > 1:
+                    self._clear_cuda_cache()
+                    batch_size = max(1, batch_size // 2)
+                    continue
+                raise
+        return outputs
 
     def gradient_chunk_importance(self, text: str, chunks, target_label: int, verbalizers: Sequence[str]) -> np.ndarray:
         self.forward_counters["gradient_calls"] += 1
