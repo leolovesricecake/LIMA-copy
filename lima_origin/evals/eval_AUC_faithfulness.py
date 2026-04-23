@@ -9,16 +9,39 @@ Created on 2023/12/1
 import argparse
 
 import os
-import os
 import json
-import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-from PIL import Image
 
 from tqdm import tqdm
 
 from sklearn import metrics
+
+
+def _iter_recursive_json_npy_pairs(json_root: str, npy_root: str):
+    pairs = []
+    if not (os.path.isdir(json_root) and os.path.isdir(npy_root)):
+        return pairs
+
+    class_ids = sorted(set(os.listdir(json_root)) & set(os.listdir(npy_root)))
+    for class_id in class_ids:
+        json_class_root = os.path.join(json_root, class_id)
+        npy_class_root = os.path.join(npy_root, class_id)
+        if not (os.path.isdir(json_class_root) and os.path.isdir(npy_class_root)):
+            continue
+
+        for cur_root, _, files in os.walk(json_class_root):
+            for name in files:
+                if not name.endswith(".json"):
+                    continue
+                json_file_path = os.path.join(cur_root, name)
+                rel_json = os.path.relpath(json_file_path, json_class_root)
+                rel_base, _ = os.path.splitext(rel_json)
+                npy_file_path = os.path.join(npy_class_root, rel_base + ".npy")
+                if not os.path.exists(npy_file_path):
+                    continue
+                pairs.append((class_id, json_file_path, npy_file_path))
+    return pairs
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Faithfulness Metric')
@@ -44,58 +67,50 @@ def main(args):
     # Format-1 (ours): explanation_dir/{json,npy}/class_id/*.json|*.npy
     if os.path.isdir(json_root_file) and os.path.isdir(npy_root_file):
         format_name = "format-1(ours)"
-        class_ids = os.listdir(npy_root_file)
-        for class_id in tqdm(class_ids):
-            json_id_files_path = os.path.join(json_root_file, class_id)
-            npy_id_files_path = os.path.join(npy_root_file, class_id)
-
-            if not os.path.isdir(json_id_files_path):
-                continue
-            class_folder_count += 1
-
-            # TODO 优化，支持读取子文件夹
-            json_file_names = os.listdir(json_id_files_path)
-            for json_file_name in json_file_names:
-                json_file_path = os.path.join(json_id_files_path, json_file_name)
-                npy_file_path = os.path.join(npy_id_files_path, json_file_name.replace(".json", ".npy"))
-                if not os.path.exists(npy_file_path):
-                    continue
-
+        pairs = _iter_recursive_json_npy_pairs(json_root_file, npy_root_file)
+        class_folder_count = len(set([x[0] for x in pairs]))
+        for _, json_file_path, npy_file_path in tqdm(pairs):
+            try:
                 with open(json_file_path, 'r', encoding='utf-8') as f:
                     saved_json_file = json.load(f)
                 submodular_image_set = np.load(npy_file_path)
+            except Exception:
+                continue
 
-                insertion_area = []
-                deletion_area = []
-                image = submodular_image_set.sum(0)
+            if "consistency_score" not in saved_json_file or "collaboration_score" not in saved_json_file:
+                continue
 
-                insertion_ours_image = image.copy() - image.copy()
-                deletion_ours_image = image.copy()
+            insertion_area = []
+            deletion_area = []
+            image = submodular_image_set.sum(0)
 
+            insertion_ours_image = image.copy() - image.copy()
+            deletion_ours_image = image.copy()
+
+            insertion_area.append(
+                (insertion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
+            deletion_area.append(
+                (deletion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
+
+            for smdl_sub_mask in submodular_image_set:
+                insertion_ours_image = insertion_ours_image + smdl_sub_mask
+                deletion_ours_image = image - insertion_ours_image
                 insertion_area.append(
                     (insertion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
                 deletion_area.append(
                     (deletion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
 
-                for smdl_sub_mask in submodular_image_set:
-                    insertion_ours_image = insertion_ours_image + smdl_sub_mask
-                    deletion_ours_image = image - insertion_ours_image
-                    insertion_area.append(
-                        (insertion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
-                    deletion_area.append(
-                        (deletion_ours_image.sum(-1)!=0).sum() / (image.shape[0] * image.shape[1]))
+            insertion_score = saved_json_file["consistency_score"]
+            deletion_score = saved_json_file["collaboration_score"]
 
-                insertion_score = saved_json_file["consistency_score"]
-                deletion_score = saved_json_file["collaboration_score"]
+            insertion_score = np.array([1 - deletion_score[-1]] + insertion_score)
+            deletion_score = 1 - np.array([1 - insertion_score[-1]] + deletion_score)
 
-                insertion_score = np.array([1 - deletion_score[-1]] + insertion_score)
-                deletion_score = 1 - np.array([1 - insertion_score[-1]] + deletion_score)
-
-                insertion_auc = metrics.auc(np.array(insertion_area), insertion_score)
-                deletion_auc = metrics.auc(1-np.array(deletion_area), deletion_score)
-                insertion_aucs.append(insertion_auc)
-                deletion_aucs.append(deletion_auc)
-                sample_count += 1
+            insertion_auc = metrics.auc(np.array(insertion_area), insertion_score)
+            deletion_auc = metrics.auc(1-np.array(deletion_area), deletion_score)
+            insertion_aucs.append(insertion_auc)
+            deletion_aucs.append(deletion_auc)
+            sample_count += 1
     else:
         # Format-2 (baseline): explanation_dir/*.json
         format_name = "format-2(baseline)"

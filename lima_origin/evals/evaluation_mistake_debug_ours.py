@@ -33,8 +33,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def _replace_ext(path: str, ext: str) -> str:
-    return path.replace(".jpg", ext).replace(".jpeg", ext).replace(".JPEG", ext)
+def _normalize_rel_no_ext(path: str) -> str:
+    root, _ = os.path.splitext(path)
+    return root.replace("\\", "/")
 
 
 def _parse_eval_line(line: str) -> Tuple[Optional[str], Optional[str]]:
@@ -55,24 +56,63 @@ def _build_name_index(root_dir: str, suffix: str) -> Dict[str, str]:
     return index
 
 
+def _build_recursive_pair_index(
+    json_root: str,
+    npy_root: str,
+) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    index = {}
+    if not (os.path.isdir(json_root) and os.path.isdir(npy_root)):
+        return index
+
+    class_ids = sorted(set(os.listdir(json_root)) & set(os.listdir(npy_root)))
+    for class_id in class_ids:
+        json_class_root = os.path.join(json_root, class_id)
+        npy_class_root = os.path.join(npy_root, class_id)
+        if not (os.path.isdir(json_class_root) and os.path.isdir(npy_class_root)):
+            continue
+
+        for cur_root, _, files in os.walk(json_class_root):
+            for name in files:
+                if not name.endswith(".json"):
+                    continue
+                json_path = os.path.join(cur_root, name)
+                rel_json = os.path.relpath(json_path, json_class_root).replace("\\", "/")
+                rel_no_ext = _normalize_rel_no_ext(rel_json)
+                npy_path = os.path.join(npy_class_root, rel_no_ext + ".npy")
+                if not os.path.exists(npy_path):
+                    continue
+                key = (class_id, rel_no_ext)
+                if key not in index:
+                    index[key] = (json_path, npy_path)
+    return index
+
+
 def _resolve_paths(
     json_root: str,
     npy_root: str,
     image_rel_path: str,
     gt_id: str,
+    pair_index: Dict[Tuple[str, str], Tuple[str, str]],
     json_name_index: Dict[str, str],
     npy_name_index: Dict[str, str],
 ) -> Tuple[Optional[str], Optional[str]]:
-    json_name = _replace_ext(image_rel_path, ".json")
-    npy_name = _replace_ext(image_rel_path, ".npy")
+    rel_no_ext = _normalize_rel_no_ext(image_rel_path)
+    json_name = rel_no_ext + ".json"
+    npy_name = rel_no_ext + ".npy"
 
     # Preferred path pattern used by current efficientv2 scripts:
-    #   <root>/json/<gt_id>/<image>.json
-    #   <root>/npy/<gt_id>/<image>.npy
+    #   <root>/json/<gt_id>/<image_rel>.json
+    #   <root>/npy/<gt_id>/<image_rel>.npy
     json_path = os.path.join(json_root, gt_id, json_name)
     npy_path = os.path.join(npy_root, gt_id, npy_name)
     if os.path.exists(json_path) and os.path.exists(npy_path):
         return json_path, npy_path
+
+    # Recursive fallback:
+    #   scan <root>/{json,npy}/<gt_id>/** and match by class+relative path key.
+    pair = pair_index.get((gt_id, rel_no_ext))
+    if pair is not None:
+        return pair
 
     # Backward compatible fallback.
     json_path = json_name_index.get(os.path.basename(json_name))
@@ -92,6 +132,7 @@ def _collect_samples(explanation_method: str, eval_list: str):
             )
         )
 
+    pair_index = _build_recursive_pair_index(json_root, npy_root)
     json_name_index = _build_name_index(json_root, ".json")
     npy_name_index = _build_name_index(npy_root, ".npy")
 
@@ -115,6 +156,7 @@ def _collect_samples(explanation_method: str, eval_list: str):
             npy_root,
             image_rel_path,
             gt_id,
+            pair_index,
             json_name_index,
             npy_name_index,
         )
