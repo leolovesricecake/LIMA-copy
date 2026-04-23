@@ -180,6 +180,9 @@ def evaluate_saved_explanations(
     over_max_length_samples = 0
     pred_not_gold_samples = 0
     token_len_eval_errors = 0
+    prob_cache_hits_total = 0
+    prob_cache_misses_total = 0
+    prob_cache_unique_texts_total = 0
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -217,8 +220,22 @@ def evaluate_saved_explanations(
         all_ids = [c.chunk_id for c in chunks]
         ranking_ours = selected + [cid for cid in all_ids if cid not in set(selected)]
 
+        prob_cache: Dict[str, np.ndarray] = {}
+        prob_cache_hits = 0
+        prob_cache_misses = 0
+
+        def _cached_prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
+            nonlocal prob_cache_hits, prob_cache_misses
+            if text in prob_cache:
+                prob_cache_hits += 1
+                return prob_cache[text]
+            prob_cache_misses += 1
+            probs = backbone.predict_label_probs(text, verbalizers)
+            prob_cache[text] = probs
+            return probs
+
         text_for_pred = sample.text if sample.text else "<EMPTY>"
-        full_probs = backbone.predict_label_probs(text_for_pred, verbalizers)
+        full_probs = _cached_prob_fn(text_for_pred, verbalizers)
         pred_label = int(np.argmax(full_probs))
         if pred_label == sample.label:
             acc_hits += 1
@@ -264,14 +281,14 @@ def evaluate_saved_explanations(
                 q_values=q_values,
                 target_label=target_label,
                 verbalizers=verbalizers,
-                prob_fn=backbone.predict_label_probs,
+                prob_fn=_cached_prob_fn,
             )
             aopc = aopc_metrics(
                 chunks=chunks,
                 ranking=ranking_ours,
                 target_label=target_label,
                 verbalizers=verbalizers,
-                prob_fn=backbone.predict_label_probs,
+                prob_fn=_cached_prob_fn,
             )
             state["ours_comp"].append(comp)
             state["ours_suff"].append(suff)
@@ -295,7 +312,7 @@ def evaluate_saved_explanations(
                     q_values=q_values,
                     target_label=target_label,
                     verbalizers=verbalizers,
-                    prob_fn=backbone.predict_label_probs,
+                    prob_fn=_cached_prob_fn,
                 )
                 trial_comp.append(c)
                 trial_suff.append(s)
@@ -338,7 +355,7 @@ def evaluate_saved_explanations(
                         q_values=q_values,
                         target_label=target_label,
                         verbalizers=verbalizers,
-                        prob_fn=backbone.predict_label_probs,
+                        prob_fn=_cached_prob_fn,
                     )
                     state["grad_comp"].append(gc)
                     state["grad_suff"].append(gs)
@@ -352,6 +369,10 @@ def evaluate_saved_explanations(
                     state["grad_error_counts"][err] = state["grad_error_counts"].get(err, 0) + 1
                     if len(state["grad_error_examples"]) < 10:
                         state["grad_error_examples"].append({"sample_id": sample_id, "error": err})
+
+        prob_cache_hits_total += prob_cache_hits
+        prob_cache_misses_total += prob_cache_misses
+        prob_cache_unique_texts_total += len(prob_cache)
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
@@ -416,6 +437,16 @@ def evaluate_saved_explanations(
             "plausibility_iou": _safe_mean(plaus_iou_values),
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
+            "eval_prob_cache_stats": {
+                "hits": int(prob_cache_hits_total),
+                "misses": int(prob_cache_misses_total),
+                "unique_texts": int(prob_cache_unique_texts_total),
+                "hit_rate": (
+                    float(prob_cache_hits_total / (prob_cache_hits_total + prob_cache_misses_total))
+                    if (prob_cache_hits_total + prob_cache_misses_total) > 0
+                    else 0.0
+                ),
+            },
         },
         "baselines": mode_reports["gold"]["baselines"],
         "metrics_by_target": mode_reports,

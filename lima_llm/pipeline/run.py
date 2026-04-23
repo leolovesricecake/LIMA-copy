@@ -156,7 +156,10 @@ def main(argv: List[str] | None = None) -> None:
         Path(args.output_dir)
         / args.dataset
         / f"model-{args.model_path.split('/')[-1].replace('.', '_')}"
-        / f"chunk-{args.chunker}_search-{args.search}_k-{args.k}_lam-{args.lambdas.replace(',', '-') }"
+        / (
+            f"chunk-{args.chunker}_search-{args.search}_k-{args.k}"
+            f"_lam-{args.lambdas.replace(',', '-')}_seed-{args.seed}"
+        )
     )
     ensure_dir(output_root)
     ensure_dir(output_root / "samples")

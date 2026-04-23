@@ -5,35 +5,60 @@
 - `v2`：在保证结果等价的前提下系统优化效率与稳定性。
 - `v3`：扩展到生成任务（token/span 级解释），形成可复现实验基线。
 
-## 当前状态（2026-04-22）
+## 当前状态（2026-04-23）
 - 代码层：`lima_llm/` 主链路已完整（数据、chunking、目标函数、搜索、评估、落盘、resume）。
 - 实验层（ERASER, 200样本）：
   - `accuracy_full=0.89`（稳定）
   - `comprehensiveness=0.0764`、`sufficiency=-0.1005`、`aopc=0.1531`
   - `diagnosticity_vs_random=0.715`
-  - `gradient baseline`: `evaluated_samples=199/200`（剩余 1 个 OOM，已可诊断）
-- 结论：方法已从“低于随机”提升到“显著优于随机”，但评估口径与稳定性仍需收敛。
+  - `metrics_by_target` 已包含 `gold/predicted` 双口径；
+  - `per_q`（`q=1/5/10/20/50`）已输出；
+  - `gradient baseline`: `evaluated_samples=200/200`、`failed_samples=0`。
+- 结论：Gate A 已达到验收口径，可进入 Gate B（稳定性验证）与 Gate C 前置设计。
 
-## 最优推进策略（门槛制）
+## Phase 0~4（详细全流程，已恢复并更新）
 
-## Gate A：评估真实性与可诊断性（当前优先级最高）
-- 目标：确保“指标可信”，先解决口径与评估完整性，再讨论调参与加速。
-- 已完成：
-  - random baseline 稳定种子；
-  - gradient 错误可观测；
-  - `chunk_id` 索引修复；
-  - 目标函数类条件化；
-  - gradient BF16 转换修复（P0）。
-- 进行中：
-  - 双口径报告：`target=gold` 与 `target=predicted`；
-  - per-q 明细汇总（不只总均值）；
-  - OOM 单样本重试与错误分桶。
-- 验收标准：
-  - 评估报告同时输出双口径 + per-q；
+## Phase 0：仓库与工程基线（已完成）
+- 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
+- 当前仓库主入口为 `lima_llm/`，原始 LIMA 代码归档在 `lima_origin/`。
+- 统一运行入口、断点恢复、日志输出与评估产物格式。
+
+## Phase 1：判别式任务可复现闭环（v1，已完成）
+- 数据：`SST-2`（烟测/回归） + `ERASER Movie Reviews`（faithfulness 主评估）。
+- 模型：本地 HF 7B（默认 `Qwen2.5-7B-Instruct`），支持 `mock-backbone`。
+- 子区域划分：`sentence` 为主、`fixed_token` 兜底，强制覆盖率与无重叠。
+- 子模评分：`confidence/effectiveness/consistency/collaboration` + `F(S)`。
+- 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
+- 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
+
+## Phase 2：稳定性与规模化（下一阶段）
+- 提升长任务稳定性：统一 GPU 映射策略、失败重试/熔断策略。
+- 增强数据适配：补齐更多 ERASER 子任务与中文判别数据集适配。
+- 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
+- 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
+
+## Phase 3：效率优化（严格等价优先）
+- 样本内向量化与批量候选打分（保持结果与 v1 等价）。
+- 引入 KV cache 复用（仅在等价校验通过后启用）。
+- 引入候选预筛（attention/uncertainty 先验）并提供可关闭开关，默认关闭。
+- 为每项优化提供 equivalence test（子集选择序列与分数轨迹一致性校验）。
+
+## Phase 4：生成式任务扩展（最终目标）
+- 从判别式标签目标扩展到“目标输出 token/span”解释。
+- 扩展评分定义到生成任务（基于目标序列 logprob 与隐藏态轨迹）。
+- 支持多轮对话与超长上下文的解释稳定性评估。
+- 引入人类评审与任务级指标（正确性、可读性、实用性）联合报告。
+
+## Gate A~D（门槛制验收）
+
+## Gate A：评估真实性与可诊断性（已通过）
+- 验收口径：
+  - 评估报告同时输出双口径 + `per_q`；
   - gradient 覆盖率 >= 95%（目标 100%）；
   - 失败样本可定位（error type + sample id）。
+- 当前结论：已满足，后续仅做回归监控。
 
-## Gate B：方法效果稳定性（在 Gate A 通过后执行）
+## Gate B：方法效果稳定性（当前优先级最高）
 - 目标：证明“不是单次幸运”，而是稳定优势。
 - 任务：
   - 小网格：`k`、`lambdas`、`chunker`、`search`；
@@ -44,11 +69,15 @@
   - `SUFF` 持续低于 random；
   - `diagnosticity` 在多 seed 上稳定。
 
-## Gate C：等价性能优化（在 Gate B 固化配置后执行）
+## Gate C：等价性能优化（Gate B 固化配置后执行）
 - 目标：在不改变结果的前提下提速。
-- 任务：批处理、缓存复用、向量化（逐项启用）。
 - 约束：每项优化都要有等价测试（`selected chunks` 与 `F(S)` 轨迹一致）。
-- 验收标准：结果等价 + 吞吐提升可量化。
+- 分层任务（按优先级）：
+  - P0：评估阶段文本概率缓存（避免 `gold/predicted` 与 baseline 的重复前向）。
+  - P0：候选子集打分批处理（减少搜索阶段单条前向开销）。
+  - P1：Objective 的 embedding/概率缓存键标准化（跨步骤命中）。
+  - P2：KV cache 复用与候选预筛（默认关闭，灰度启用）。
+- 验收标准：结果等价 + 吞吐提升可量化（至少报告 `predict_calls` 与总时长降幅）。
 
 ## Gate D：生成式任务扩展（最终阶段）
 - 目标：从分类解释迁移到生成目标 token/span 解释。
