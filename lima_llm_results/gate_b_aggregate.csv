@@ -1,0 +1,3 @@
+group_id,n_runs,seeds,gold_comp_mean,gold_comp_std,gold_suff_mean,gold_suff_std,gold_diag_mean,comp_adv_mean,suff_adv_mean,run_pass_rate
+"eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,1,1,1",4,"42,42,43,44",0.07581205020355992,0.00033696270046907484,-0.10120828461274504,0.00039913604163919613,0.6725000000000001,0.047531757914414635,0.2899085430080537,1.0
+"eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,2,1,1",3,"42,43,44",0.07701893011666834,0.0,-0.09839444831013681,1.3877787807814457e-17,0.665,0.04873863782752305,0.28709470670544546,1.0

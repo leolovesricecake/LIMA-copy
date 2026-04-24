@@ -1,0 +1,193 @@
+{
+  "group_count": 2,
+  "run_count": 7,
+  "min_runs": 3,
+  "groups": [
+    {
+      "group_id": "eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,1,1,1",
+      "config": {
+        "dataset": "eraser_movie_reviews",
+        "split": "validation",
+        "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "chunker": "sentence",
+        "search": "greedy",
+        "k": 8,
+        "lambdas": "1,1,1,1",
+        "eval_q_values": "1,5,10,20,50",
+        "eval_random_trials": 5,
+        "eval_gradient_baseline": true,
+        "max_samples": null
+      },
+      "n_runs": 4,
+      "seeds": [
+        42,
+        42,
+        43,
+        44
+      ],
+      "gate_b_checks": {
+        "comp_beats_random_all": true,
+        "suff_beats_random_all": true,
+        "run_pass_rate": 1.0
+      },
+      "gold_metrics": {
+        "comprehensiveness": {
+          "mean": 0.07581205020355992,
+          "std": 0.00033696270046907484,
+          "min": 0.07557470764964819,
+          "max": 0.07638766002934426
+        },
+        "sufficiency": {
+          "mean": -0.10120828461274504,
+          "std": 0.00039913604163919613,
+          "min": -0.1014812272042036,
+          "max": -0.10051846703886984
+        },
+        "diagnosticity_vs_random": {
+          "mean": 0.6725000000000001,
+          "std": 0.024622144504490236,
+          "min": 0.655,
+          "max": 0.715
+        },
+        "comp_adv_vs_random": {
+          "mean": 0.047531757914414635,
+          "std": 0.00033696270046907484,
+          "min": 0.0472944153605029,
+          "max": 0.04810736774019897
+        },
+        "suff_adv_vs_random": {
+          "mean": 0.2899085430080537,
+          "std": 0.0003991360416392142,
+          "min": 0.2892187254341785,
+          "max": 0.2901814855995123
+        }
+      },
+      "predicted_metrics": {
+        "comprehensiveness": {
+          "mean": 0.07920482614822687,
+          "std": 0.00018278812443497144,
+          "min": 0.07891597556322813,
+          "max": 0.07936221038550138
+        },
+        "sufficiency": {
+          "mean": 0.01281519728549756,
+          "std": 0.0003775603117198695,
+          "min": 0.012554612104780972,
+          "max": 0.013462168678641322
+        }
+      },
+      "runtime": {
+        "seconds": {
+          "mean": 3590.1611352562904,
+          "std": 1724.1257189925461,
+          "min": 2583.6064121723175,
+          "max": 6576.3894765377045
+        },
+        "predict_calls": {
+          "mean": 33379.75,
+          "std": 15006.632689830854,
+          "min": 24713.0,
+          "max": 59372.0
+        }
+      },
+      "reports": [
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1/eval_report.json",
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42/eval_report.json",
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-43/eval_report.json",
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-44/eval_report.json"
+      ]
+    },
+    {
+      "group_id": "eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,2,1,1",
+      "config": {
+        "dataset": "eraser_movie_reviews",
+        "split": "validation",
+        "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "chunker": "sentence",
+        "search": "greedy",
+        "k": 8,
+        "lambdas": "1,2,1,1",
+        "eval_q_values": "1,5,10,20,50",
+        "eval_random_trials": 5,
+        "eval_gradient_baseline": true,
+        "max_samples": null
+      },
+      "n_runs": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "gate_b_checks": {
+        "comp_beats_random_all": true,
+        "suff_beats_random_all": true,
+        "run_pass_rate": 1.0
+      },
+      "gold_metrics": {
+        "comprehensiveness": {
+          "mean": 0.07701893011666834,
+          "std": 0.0,
+          "min": 0.07701893011666834,
+          "max": 0.07701893011666834
+        },
+        "sufficiency": {
+          "mean": -0.09839444831013681,
+          "std": 1.3877787807814457e-17,
+          "min": -0.0983944483101368,
+          "max": -0.0983944483101368
+        },
+        "diagnosticity_vs_random": {
+          "mean": 0.665,
+          "std": 0.0,
+          "min": 0.665,
+          "max": 0.665
+        },
+        "comp_adv_vs_random": {
+          "mean": 0.04873863782752305,
+          "std": 0.0,
+          "min": 0.04873863782752305,
+          "max": 0.04873863782752305
+        },
+        "suff_adv_vs_random": {
+          "mean": 0.28709470670544546,
+          "std": 0.0,
+          "min": 0.28709470670544546,
+          "max": 0.28709470670544546
+        }
+      },
+      "predicted_metrics": {
+        "comprehensiveness": {
+          "mean": 0.08057206567376853,
+          "std": 0.0,
+          "min": 0.08057206567376853,
+          "max": 0.08057206567376853
+        },
+        "sufficiency": {
+          "mean": 0.016731931013986467,
+          "std": 0.0,
+          "min": 0.016731931013986467,
+          "max": 0.016731931013986467
+        }
+      },
+      "runtime": {
+        "seconds": {
+          "mean": 2774.3988727728524,
+          "std": 168.8945211547985,
+          "min": 2590.70543551445,
+          "max": 2998.459734916687
+        },
+        "predict_calls": {
+          "mean": 24727.666666666668,
+          "std": 0.9428090415820634,
+          "min": 24727.0,
+          "max": 24729.0
+        }
+      },
+      "reports": [
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-42/eval_report.json",
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-43/eval_report.json",
+        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-44/eval_report.json"
+      ]
+    }
+  ]
+}
