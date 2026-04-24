@@ -29,15 +29,37 @@ from torchvision import transforms
 import clip
 
 results_save_root = "./explanation_insertion_results"
-# TODO 手动修改explanation_method为需要调试的解释方法
-# explanation_method = "explanation_results/imagenet-clip-vitl-true/HsicAttributionMethod"
-explanation_method = "explanation_results/imagenet-clip-vitl-true/GradECLIP"
-image_root_path = "datasets/imagenet/ILSVRC2012_img_val"
-eval_list = "datasets/imagenet/val_clip_vitl_5k_true.txt"
-save_doc = "imagenet-clip-vitl-true"
 steps = 50
 batch_size = 10
 image_size_ = 224
+
+# TODO 手动修改 explain 为需要调试的解释方法
+dataset_name = "imagenet-a"
+explain = "GradECLIP"
+# explain = "HsicAttributionMethod"
+if dataset_name == "imagenet":
+    eval_list = "../datasets/imagenet/val_clip_vitl_5k_true.txt"
+    image_root_path = "../datasets/imagenet/ILSVRC2012_img_val"
+    explanation_method = f"explanation_results/imagenet-clip-vitl-true/{explain}"
+    save_doc = "imagenet-clip-vitl-true"
+    # eval_list = "datasets/imagenet/val_clip_vitl_2k_false.txt"
+elif dataset_name == "imagenet-a":
+    eval_list = "../datasets/ImageNet-A/imagenet-a_list.txt"
+    explanation_method = f"explanation_results/imagenet-a-clip-vitl/{explain}"
+    image_root_path = "../datasets/ImageNet-A/sample/image"
+    save_doc = "imagenet-a-clip-vitl"
+elif dataset_name == "imagenet-o":
+    eval_list = "../datasets/imagenet-o/imagenet-o_list.txt"
+    image_root_path = "../datasets/imagenet-o/samples"
+    explanation_method = f"explanation_results/imagenet-o-clip-vitl/{explain}"
+    save_doc = "imagenet-o-clip-vitl"
+else:
+    raise ValueError("Unsupported dataset_name: {}".format(dataset_name))
+
+print("dataset_name: {}\n.  eval_list: {}\n.  image_root_path: {}\n.  explanation_method: {}\n.  save_doc: {}".format(
+    dataset_name, eval_list, image_root_path, explanation_method, save_doc
+))
+
 
 class CLIPModel_Super(torch.nn.Module):
     def __init__(self, 

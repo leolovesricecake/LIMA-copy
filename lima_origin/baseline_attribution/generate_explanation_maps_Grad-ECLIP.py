@@ -38,17 +38,33 @@ SAVE_PATH = "explanation_results/"
 mkdir(SAVE_PATH)
 
 img_size = 224
-
-dataset_index = "datasets/imagenet/val_clip_vitl_5k_true.txt"
-SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
-
-# dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
-# SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
-    
-dataset_path = "datasets/imagenet/ILSVRC2012_img_val"
 class_number = 1000
 batch = 1
+
+
+dataset_name = "imagenet-o"
+if dataset_name == "imagenet":
+    dataset_index = "../datasets/imagenet/val_clip_vitl_5k_true.txt"
+    dataset_path = "../datasets/imagenet/ILSVRC2012_img_val"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
+    # dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
+    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
+    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
+elif dataset_name == "imagenet-a":
+    dataset_index = "../datasets/ImageNet-A/imagenet-a_list.txt"
+    dataset_path = "../datasets/ImageNet-A/sample/image"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-a-clip-vitl")
+elif dataset_name == "imagenet-o":
+    dataset_index = "../datasets/imagenet-o/imagenet-o_list.txt"
+    dataset_path = "../datasets/imagenet-o/samples"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-o-clip-vitl")
+else:
+    raise ValueError("Unsupported dataset_name: {}".format(dataset_name))
+    
 mkdir(SAVE_PATH)
+print("dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
+    dataset_name, dataset_index, dataset_path, SAVE_PATH
+))
 
 
 def zeroshot_classifier(model, classnames, templates, device):

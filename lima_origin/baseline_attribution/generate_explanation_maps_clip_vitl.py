@@ -44,23 +44,45 @@ from utils import *
 
 tf.config.run_functions_eagerly(True)
 
-SAVE_PATH = "explanation_results/"
-mkdir(SAVE_PATH)
-
 mode = "CLIP"
 net_mode  = "CLIP" # "resnet", vgg
-
 if mode == "CLIP":
     if net_mode == "CLIP":
         img_size = 224
-        dataset_index = "datasets/imagenet/val_clip_vitl_5k_true.txt"
-        SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
     # elif net_mode == "languagebind":
+    else:
+        raise ValueError("Unsupported net_mode: {}".format(net_mode))
+
         
-    dataset_path = "datasets/imagenet/ILSVRC2012_img_val"
     class_number = 1000
     batch = 100
-    mkdir(SAVE_PATH)
+
+
+SAVE_PATH = "explanation_results/"
+dataset_name = "imagenet-o"
+if dataset_name == "imagenet":
+    dataset_index = "../datasets/imagenet/val_clip_vitl_5k_true.txt"
+    dataset_path = "../datasets/imagenet/ILSVRC2012_img_val"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
+    # dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
+    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
+    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
+elif dataset_name == "imagenet-a":
+    dataset_index = "../datasets/ImageNet-A/imagenet-a_list.txt"
+    dataset_path = "../datasets/ImageNet-A/sample/image"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-a-clip-vitl")
+elif dataset_name == "imagenet-o":
+    dataset_index = "../datasets/imagenet-o/imagenet-o_list.txt"
+    dataset_path = "../datasets/imagenet-o/samples"
+    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-o-clip-vitl")
+else:
+    raise ValueError("Unsupported dataset_name: {}".format(dataset_name))
+    
+mkdir(SAVE_PATH)
+print("dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
+    dataset_name, dataset_index, dataset_path, SAVE_PATH
+))
+
 
 class CLIPModel_Super(torch.nn.Module):
     def __init__(self, 
@@ -368,7 +390,11 @@ def main(args):
     input_data = []
     label = []
     for data in datas:
-        label.append(int(data.strip().split(" ")[-1]))
+        data = data.strip()
+        if not data:
+            continue
+
+        label.append(int(data.split(" ")[-1]))
         input_data.append(
             os.path.join(dataset_path, data.split(" ")[0])
         )

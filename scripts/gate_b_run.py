@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import argparse
 import itertools
