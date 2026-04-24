@@ -41,6 +41,11 @@ from torchvision import transforms
 
 import tensorflow as tf
 from utils import *
+from dataset_config import (
+    build_result_file_path,
+    parse_eval_list,
+    resolve_dataset_config,
+)
 
 tf.config.run_functions_eagerly(True)
 
@@ -58,30 +63,7 @@ if mode == "CLIP":
     batch = 100
 
 
-SAVE_PATH = "explanation_results/"
-dataset_name = "imagenet-o"
-if dataset_name == "imagenet":
-    dataset_index = "../datasets/imagenet/val_clip_vitl_5k_true.txt"
-    dataset_path = "../datasets/imagenet/ILSVRC2012_img_val"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
-    # dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
-    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
-    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
-elif dataset_name == "imagenet-a":
-    dataset_index = "../datasets/ImageNet-A/imagenet-a_list.txt"
-    dataset_path = "../datasets/ImageNet-A/sample/image"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-a-clip-vitl")
-elif dataset_name == "imagenet-o":
-    dataset_index = "../datasets/imagenet-o/imagenet-o_list.txt"
-    dataset_path = "../datasets/imagenet-o/samples"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-o-clip-vitl")
-else:
-    raise ValueError("Unsupported dataset_name: {}".format(dataset_name))
-    
-mkdir(SAVE_PATH)
-print("dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
-    dataset_name, dataset_index, dataset_path, SAVE_PATH
-))
+DEFAULT_SAVE_ROOT = "explanation_results"
 
 
 class CLIPModel_Super(torch.nn.Module):
@@ -188,6 +170,36 @@ def parse_args():
         type=int,
         default=2048,
         help="TensorFlow per-process GPU memory limit in MB.",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default="imagenet",
+        help="Dataset preset name: imagenet / imagenet-false / imagenet-a / imagenet-o.",
+    )
+    parser.add_argument(
+        "--dataset-index",
+        type=str,
+        default=None,
+        help="Optional override for eval-list path.",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Optional override for dataset image root path.",
+    )
+    parser.add_argument(
+        "--save-doc",
+        type=str,
+        default=None,
+        help="Optional override for dataset save-doc name.",
+    )
+    parser.add_argument(
+        "--save-root",
+        type=str,
+        default=DEFAULT_SAVE_ROOT,
+        help="Root output directory for explanation maps.",
     )
     return parser.parse_args()
 
@@ -339,6 +351,23 @@ def configure_tensorflow_gpu(cuda_ordinal, tf_memory_limit):
 
 
 def main(args):
+    dataset_cfg = resolve_dataset_config(
+        dataset_name=args.dataset_name,
+        eval_list=args.dataset_index,
+        image_root_path=args.dataset_path,
+        save_doc=args.save_doc,
+    )
+    save_path = os.path.join(args.save_root, dataset_cfg["save_doc"])
+    mkdir(save_path)
+    print(
+        "dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
+            dataset_cfg["dataset_name"],
+            dataset_cfg["eval_list"],
+            dataset_cfg["image_root_path"],
+            save_path,
+        )
+    )
+
     print("Requested physical --device={}".format(args.device))
     print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
     print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
@@ -384,43 +413,33 @@ def main(args):
     ]
     
     # data preproccess
-    with open(dataset_index, "r") as f:
-        datas = f.read().split('\n')
-    
-    input_data = []
-    label = []
-    for data in datas:
-        data = data.strip()
-        if not data:
-            continue
-
-        label.append(int(data.split(" ")[-1]))
-        input_data.append(
-            os.path.join(dataset_path, data.split(" ")[0])
-        )
-    
-    total_steps = math.ceil(len(input_data) / batch)
+    samples = parse_eval_list(dataset_cfg["eval_list"], require_label=True)
+    total_steps = math.ceil(len(samples) / batch)
     
     for explainer in explainers:
         # explanation methods    
         explainer_method_name = explainer.__class__.__name__
-        exp_save_path = os.path.join(SAVE_PATH, explainer_method_name)
+        exp_save_path = os.path.join(save_path, explainer_method_name)
         mkdir(exp_save_path)
         
         for step in tqdm(range(total_steps), desc=explainer_method_name):
-            image_names = input_data[step * batch : step * batch + batch]
+            batch_samples = samples[step * batch : step * batch + batch]
+            image_names = [
+                os.path.join(dataset_cfg["image_root_path"], image_rel_path)
+                for image_rel_path, _ in batch_samples
+            ]
             X_raw = load_and_transform_vision_data(image_names, device)
 
-            Y_true = np.array(label[step * batch : step * batch + batch])
+            Y_true = np.array([label for _, label in batch_samples])
             labels_ohe = np.eye(class_number)[Y_true]
             
             explanations = explainer(X_raw, labels_ohe)
             if type(explanations) != np.ndarray:
                 explanations = explanations.numpy()
             
-            for explanation, image_name in zip(explanations, image_names):
-                mkdir(exp_save_path)
-                np.save(os.path.join(exp_save_path, image_name.split("/")[-1].replace(".JPEG", "")), explanation)
+            for explanation, (image_rel_path, _) in zip(explanations, batch_samples):
+                save_file = build_result_file_path(exp_save_path, image_rel_path, ".npy")
+                np.save(save_file, explanation)
     
     return
 

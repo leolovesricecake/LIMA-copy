@@ -20,13 +20,17 @@ import re
 
 import numpy as np
 import cv2
-import math
 from PIL import Image
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 # import tensorflow as tf
 from utils import *
+from dataset_config import (
+    build_result_file_path,
+    parse_eval_list,
+    resolve_dataset_config,
+)
 
 import torch
 from torch.autograd import Variable
@@ -34,37 +38,12 @@ from torchvision import transforms
 import clip
 from .Grad_Eclip.grad_eclip import *
 
-SAVE_PATH = "explanation_results/"
-mkdir(SAVE_PATH)
+DEFAULT_SAVE_ROOT = "explanation_results"
 
 img_size = 224
 class_number = 1000
 batch = 1
 
-
-dataset_name = "imagenet-o"
-if dataset_name == "imagenet":
-    dataset_index = "../datasets/imagenet/val_clip_vitl_5k_true.txt"
-    dataset_path = "../datasets/imagenet/ILSVRC2012_img_val"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-true")
-    # dataset_index = "datasets/imagenet/val_clip_vitl_2k_false.txt"
-    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
-    # SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-clip-vitl-false")
-elif dataset_name == "imagenet-a":
-    dataset_index = "../datasets/ImageNet-A/imagenet-a_list.txt"
-    dataset_path = "../datasets/ImageNet-A/sample/image"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-a-clip-vitl")
-elif dataset_name == "imagenet-o":
-    dataset_index = "../datasets/imagenet-o/imagenet-o_list.txt"
-    dataset_path = "../datasets/imagenet-o/samples"
-    SAVE_PATH = os.path.join(SAVE_PATH, "imagenet-o-clip-vitl")
-else:
-    raise ValueError("Unsupported dataset_name: {}".format(dataset_name))
-    
-mkdir(SAVE_PATH)
-print("dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
-    dataset_name, dataset_index, dataset_path, SAVE_PATH
-))
 
 
 def zeroshot_classifier(model, classnames, templates, device):
@@ -106,6 +85,36 @@ def parse_args():
         type=int,
         default=0,
         help="Physical GPU index from nvidia-smi. Set -1 for CPU.",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default="imagenet",
+        help="Dataset preset name: imagenet / imagenet-false / imagenet-a / imagenet-o.",
+    )
+    parser.add_argument(
+        "--dataset-index",
+        type=str,
+        default=None,
+        help="Optional override for eval-list path.",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Optional override for dataset image root path.",
+    )
+    parser.add_argument(
+        "--save-doc",
+        type=str,
+        default=None,
+        help="Optional override for dataset save-doc name.",
+    )
+    parser.add_argument(
+        "--save-root",
+        type=str,
+        default=DEFAULT_SAVE_ROOT,
+        help="Root output directory for explanation maps.",
     )
     return parser.parse_args()
 
@@ -227,6 +236,23 @@ def resolve_device(cuda_ordinal):
 
 
 def main(args):
+    dataset_cfg = resolve_dataset_config(
+        dataset_name=args.dataset_name,
+        eval_list=args.dataset_index,
+        image_root_path=args.dataset_path,
+        save_doc=args.save_doc,
+    )
+    save_path = os.path.join(args.save_root, dataset_cfg["save_doc"])
+    mkdir(save_path)
+    print(
+        "dataset_name: {}\n.  dataset_index: {}\n.  dataset_path: {}\n.  SAVE_PATH: {}".format(
+            dataset_cfg["dataset_name"],
+            dataset_cfg["eval_list"],
+            dataset_cfg["image_root_path"],
+            save_path,
+        )
+    )
+
     print("Requested physical --device={}".format(args.device))
     print("CUDA_DEVICE_ORDER={}".format(os.environ.get("CUDA_DEVICE_ORDER", "<not set>")))
     print("CUDA_VISIBLE_DEVICES={}".format(os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")))
@@ -245,29 +271,18 @@ def main(args):
     explainer = Grad_ECLIP(clipmodel, text_embedding)
     
     # data preproccess
-    with open(dataset_index, "r") as f:
-        datas = f.read().split('\n')
-    
-    input_data = []
-    label = []
-    for data in datas:
-        label.append(int(data.strip().split(" ")[-1]))
-        input_data.append(
-            os.path.join(dataset_path, data.split(" ")[0])
-        )
-    
-    total_steps = math.ceil(len(input_data) / batch)
+    samples = parse_eval_list(dataset_cfg["eval_list"], require_label=True)
     
     explainer_method_name = "GradECLIP"
-    exp_save_path = os.path.join(SAVE_PATH, explainer_method_name)
+    exp_save_path = os.path.join(save_path, explainer_method_name)
     mkdir(exp_save_path)
     
-    for step in tqdm(range(total_steps), desc=explainer_method_name):
-        img_path = input_data[step]
+    for image_rel_path, label in tqdm(samples, desc=explainer_method_name):
+        img_path = os.path.join(dataset_cfg["image_root_path"], image_rel_path)
         X_raw = Image.open(img_path).convert("RGB").resize((224,224))
         X_raw = imgprocess(X_raw).to(device).unsqueeze(0)
 
-        Y_true = label[step]
+        Y_true = label
         
         if device != "cpu":
             torch.cuda.empty_cache()
@@ -278,8 +293,8 @@ def main(args):
         if device != "cpu":
             torch.cuda.empty_cache()
         
-        np.save(os.path.join(exp_save_path, img_path.split("/")[-1].replace(".JPEG", "")),
-                cv2.resize(explanation.astype(np.float32), (224,224)))
+        save_file = build_result_file_path(exp_save_path, image_rel_path, ".npy")
+        np.save(save_file, cv2.resize(explanation.astype(np.float32), (224,224)))
 
 if __name__ == "__main__":
     args = parse_args()
