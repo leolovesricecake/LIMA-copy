@@ -73,6 +73,19 @@ def _iter_recursive_json_npy_pairs(json_root: str, npy_root: str):
     return pairs
 
 
+def _iter_recursive_json_files(root_dir: str):
+    json_paths = []
+    if not os.path.isdir(root_dir):
+        return json_paths
+    for cur_root, _, files in os.walk(root_dir):
+        for name in files:
+            if not name.endswith(".json"):
+                continue
+            json_paths.append(os.path.join(cur_root, name))
+    json_paths.sort()
+    return json_paths
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Faithfulness Metric')
     parser.add_argument('--explanation-dir', 
@@ -142,17 +155,16 @@ def main(args):
             deletion_aucs.append(deletion_auc)
             sample_count += 1
     else:
-        # Format-2 (baseline): explanation_dir/*.json
+        # Format-2 (baseline): explanation_dir/*.json (or nested class folders containing json)
         format_name = "format-2(baseline)"
-        json_file_names = [f for f in os.listdir(args.explanation_dir) if f.endswith(".json")]
-        if len(json_file_names) == 0:
+        json_file_paths = _iter_recursive_json_files(args.explanation_dir)
+        if len(json_file_paths) == 0:
             raise ValueError(
                 "No valid explanation files found. Expect either '{json,npy}' subdirs "
-                "or direct '*.json' files under explanation_dir."
+                "or '*.json' files (possibly nested) under explanation_dir."
             )
 
-        for json_file_name in tqdm(json_file_names):
-            json_file_path = os.path.join(args.explanation_dir, json_file_name)
+        for json_file_path in tqdm(json_file_paths):
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 saved_json_file = json.load(f)
 
