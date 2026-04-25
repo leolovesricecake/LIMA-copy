@@ -1,0 +1,80 @@
+# - - - - - - -
+# HsicAttributionMethod
+# - - - - - - -
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl --device 7
+dataset_name: imagenet-a
+.  eval_list: ../datasets/ImageNet-A/imagenet-a_list.txt
+.  image_root_path: ../datasets/ImageNet-A/sample/image
+.  explanation_method: explanation_results/imagenet-a-clip-vitl/HsicAttributionMethod
+.  save_doc: imagenet-a-clip-vitl
+Requested physical --device=7
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 7 (bus 0000:D6:00.0) -> CUDA ordinal 7.
+Torch device=cuda:7
+ 13%|█████████████▊                                                                                             | 516/3995 [00:03<00:18, 185.65it/s]Corrupt JPEG data: 101 extraneous bytes before marker 0xd9
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:24<00:00, 161.38it/s]
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl   --dataset-name imagenet-a   --explain-method HsicAttributionMethod   --device 1
+dataset_name: imagenet-a
+.  eval_list: ../datasets/ImageNet-A/imagenet-a_list.txt
+.  image_root_path: ../datasets/ImageNet-A/sample/image
+.  explanation_method: explanation_results/imagenet-a-clip-vitl/HsicAttributionMethod
+.  save_doc: imagenet-a-clip-vitl
+Requested physical --device=1
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
+Torch device=cuda:1
+ 13%|█████████████▉                                                                                            | 526/3995 [7:42:14<46:53:26, 48.66s/it]
+ Corrupt JPEG data: 101 extraneous bytes before marker 0xd9
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [24:05:23<00:00, 21.71s/it]
+
+
+()python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-a-clip-vitl/HsicAttributionMethod
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:12<00:00, 308.33it/s]
+AUC evaluated on 3995 samples (format-2(baseline))
+Insertion AUC Score: 0.0002
+Deletion AUC Score: 0.0002
+
+# - - - - - - -
+# GradECLIP
+# - - - - - - -
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl --device 7
+dataset_name: imagenet-a
+.  eval_list: ../datasets/ImageNet-A/imagenet-a_list.txt
+.  image_root_path: ../datasets/ImageNet-A/sample/image
+.  explanation_method: explanation_results/imagenet-a-clip-vitl/GradECLIP
+.  save_doc: imagenet-a-clip-vitl
+Requested physical --device=7
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 7 (bus 0000:D6:00.0) -> CUDA ordinal 7.
+Torch device=cuda:7
+ 13%|█████████████▊                                                                                             | 516/3995 [00:03<00:19, 177.20it/s]
+ Corrupt JPEG data: 101 extraneous bytes before marker 0xd9
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:27<00:00, 146.84it/s]
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl   --dataset-name imagenet-a   --explain-method GradECLIP   --device 6
+dataset_name: imagenet-a
+.  eval_list: ../datasets/ImageNet-A/imagenet-a_list.txt
+.  image_root_path: ../datasets/ImageNet-A/sample/image
+.  explanation_method: explanation_results/imagenet-a-clip-vitl/GradECLIP
+.  save_doc: imagenet-a-clip-vitl
+Requested physical --device=6
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 6 (bus 0000:D5:00.0) -> CUDA ordinal 6.
+Torch device=cuda:6
+ 13%|█████████████▉                                                                                            | 526/3995 [4:45:04<31:30:59, 32.71s/it]
+ Corrupt JPEG data: 101 extraneous bytes before marker 0xd9
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [22:26:30<00:00, 20.22s/it]
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-a-clip-vitl/GradECLIP
+explanation_insertion_results/imagenet-a-clip-vitl/GradECLIP
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:14<00:00, 282.22it/s]
+AUC evaluated on 3995 samples (format-2(baseline))
+Insertion AUC Score: 0.0006
+Deletion AUC Score: 0.0006

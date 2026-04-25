@@ -1,0 +1,215 @@
+{
+  "dataset": "eraser_movie_reviews",
+  "split": "validation",
+  "sample_count": 50,
+  "metrics_primary": {
+    "accuracy_full": 0.94,
+    "comprehensiveness": 0.047724028855562206,
+    "sufficiency": -0.07333707123994827,
+    "aopc": 0.07347805291173058,
+    "deletion_auc": 0.8098611446570331,
+    "insertion_auc": 0.9057947358330906
+  },
+  "metrics_secondary": {
+    "diagnosticity_vs_random": 0.6,
+    "sparsity": 0.3972899231070587,
+    "plausibility_f1": 0.1549401281328323,
+    "plausibility_iou": 0.08762181006742438,
+    "runtime_seconds": 754.2710564136505,
+    "forward_counters_delta": {
+      "predict_calls": 6232,
+      "embed_calls": 0,
+      "gradient_calls": 53
+    },
+    "eval_prob_cache_stats": {
+      "hits": 8722,
+      "misses": 6232,
+      "unique_texts": 6232,
+      "hit_rate": 0.5832553163033302
+    }
+  },
+  "baselines": {
+    "random": {
+      "comprehensiveness": 0.02408434938788414,
+      "sufficiency": 0.061863401046395296
+    },
+    "gradient": {
+      "enabled": true,
+      "comprehensiveness": 0.06976247256994247,
+      "sufficiency": 0.05408019647002221,
+      "evaluated_samples": 50,
+      "failed_samples": 0,
+      "error_type_counts": {},
+      "error_examples": []
+    }
+  },
+  "metrics_by_target": {
+    "gold": {
+      "metrics_primary": {
+        "comprehensiveness": 0.047724028855562206,
+        "sufficiency": -0.07333707123994827,
+        "aopc": 0.07347805291173058,
+        "deletion_auc": 0.8098611446570331,
+        "insertion_auc": 0.9057947358330906
+      },
+      "diagnosticity_vs_random": 0.6,
+      "baselines": {
+        "random": {
+          "comprehensiveness": 0.02408434938788414,
+          "sufficiency": 0.061863401046395296
+        },
+        "gradient": {
+          "enabled": true,
+          "comprehensiveness": 0.06976247256994247,
+          "sufficiency": 0.05408019647002221,
+          "evaluated_samples": 50,
+          "failed_samples": 0,
+          "error_type_counts": {},
+          "error_examples": []
+        }
+      },
+      "per_q": {
+        "ours": {
+          "comprehensiveness": {
+            "1": 0.019816128611564635,
+            "5": 0.02468127340078354,
+            "10": 0.04113055408000946,
+            "20": 0.07149707198143006,
+            "50": 0.08149511620402336
+          },
+          "sufficiency": {
+            "1": -0.09951312154531479,
+            "5": -0.09711843580007554,
+            "10": -0.09667051762342453,
+            "20": -0.06514475852251053,
+            "50": -0.008238522708415985
+          }
+        },
+        "random": {
+          "comprehensiveness": {
+            "1": 0.0061581669151783,
+            "5": 0.015976474523544313,
+            "10": 0.025881447136402135,
+            "20": 0.024540039300918574,
+            "50": 0.04786561906337738
+          },
+          "sufficiency": {
+            "1": 0.06178927740454674,
+            "5": 0.04492050100862981,
+            "10": 0.05189541131258012,
+            "20": 0.07593566697835924,
+            "50": 0.07477614852786064
+          }
+        },
+        "gradient": {
+          "comprehensiveness": {
+            "1": 0.014372406601905823,
+            "5": 0.059452162086963654,
+            "10": 0.06816503137350083,
+            "20": 0.08593208402395248,
+            "50": 0.12089067876338959
+          },
+          "sufficiency": {
+            "1": 0.09778822362422943,
+            "5": 0.05671923726797104,
+            "10": 0.039357238709926606,
+            "20": 0.03597662523388863,
+            "50": 0.04055965751409531
+          }
+        }
+      }
+    },
+    "predicted": {
+      "metrics_primary": {
+        "comprehensiveness": 0.045603768825530994,
+        "sufficiency": 0.001332391489297153,
+        "aopc": 0.0787694495015743,
+        "deletion_auc": 0.8299660609277224,
+        "insertion_auc": 0.8792416242204933
+      },
+      "diagnosticity_vs_random": 0.54,
+      "baselines": {
+        "random": {
+          "comprehensiveness": 0.036881589126586914,
+          "sufficiency": 0.1044097472116351
+        },
+        "gradient": {
+          "enabled": true,
+          "comprehensiveness": 0.08182233804464341,
+          "sufficiency": 0.09986810464411974,
+          "evaluated_samples": 50,
+          "failed_samples": 0,
+          "error_type_counts": {},
+          "error_examples": []
+        }
+      },
+      "per_q": {
+        "ours": {
+          "comprehensiveness": {
+            "1": 0.019816128611564635,
+            "5": 0.028260186314582825,
+            "10": 0.046682891249656674,
+            "20": 0.06785024225711822,
+            "50": 0.06540939569473267
+          },
+          "sufficiency": {
+            "1": -0.017441531885415317,
+            "5": -0.015474721156060696,
+            "10": -0.014828509837388992,
+            "20": 0.016330636367201806,
+            "50": 0.03807608395814896
+          }
+        },
+        "random": {
+          "comprehensiveness": {
+            "1": 0.010421570897102357,
+            "5": 0.015222811460494996,
+            "10": 0.03864004981517792,
+            "20": 0.04678042405843735,
+            "50": 0.07334308940172195
+          },
+          "sufficiency": {
+            "1": 0.12055955319106579,
+            "5": 0.10639649996906521,
+            "10": 0.09931878867745401,
+            "20": 0.10945964190363884,
+            "50": 0.08631425231695175
+          }
+        },
+        "gradient": {
+          "comprehensiveness": {
+            "1": 0.01596341848373413,
+            "5": 0.06640596628189087,
+            "10": 0.0810489696264267,
+            "20": 0.10234037101268768,
+            "50": 0.14335296481847762
+          },
+          "sufficiency": {
+            "1": 0.16862634144723415,
+            "5": 0.13189763139933347,
+            "10": 0.08037219285964965,
+            "20": 0.06250900387763977,
+            "50": 0.05593535363674164
+          }
+        }
+      }
+    }
+  },
+  "dataset_diagnostics": {
+    "samples_with_empty_text": 0,
+    "samples_without_rationale": 0,
+    "samples_over_backbone_max_length": 0,
+    "predicted_not_gold_samples": 3,
+    "token_len_eval_errors": 0,
+    "skipped_missing_sample_id": 0,
+    "skipped_empty_chunks": 0,
+    "backbone_max_length": 2048
+  },
+  "q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ]
+}

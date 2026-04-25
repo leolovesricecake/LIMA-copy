@@ -1,0 +1,33 @@
+# - - - - - - -
+# HsicAttributionMethod
+# - - - - - - -
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl   --dataset-name imagenet-o   --explain-method HsicAttributionMethod   --device 6
+dataset_name: imagenet-o
+.  eval_list: ../datasets/imagenet-o/imagenet-o_list.txt
+.  image_root_path: ../datasets/imagenet-o/samples
+.  explanation_method: explanation_results/imagenet-o-clip-vitl/HsicAttributionMethod
+.  save_doc: imagenet-o-clip-vitl
+Requested physical --device=6
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 6 (bus 0000:D5:00.0) -> CUDA ordinal 6.
+Torch device=cuda:6
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [19:11:47<00:00, 34.55s/it]
+
+
+
+# - - - - - - -
+# GradECLIP
+# - - - - - - -
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m baseline_attribution.debug_org_attribution_method_clip_vitl   --dataset-name imagenet-o   --explain-method GradECLIP   --device 1
+dataset_name: imagenet-o
+.  eval_list: ../datasets/imagenet-o/imagenet-o_list.txt
+.  image_root_path: ../datasets/imagenet-o/samples
+.  explanation_method: explanation_results/imagenet-o-clip-vitl/GradECLIP
+.  save_doc: imagenet-o-clip-vitl
+Requested physical --device=1
+CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=<not set>
+PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
+Torch device=cuda:1
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [9:40:09<00:00, 17.40s/it]
