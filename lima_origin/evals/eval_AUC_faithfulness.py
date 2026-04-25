@@ -17,6 +17,23 @@ from tqdm import tqdm
 from sklearn import metrics
 
 
+def _collect_relative_and_basename_index(root_dir: str, suffix: str):
+    rel_index = {}
+    base_index = {}
+    for cur_root, _, files in os.walk(root_dir):
+        for name in files:
+            if not name.endswith(suffix):
+                continue
+            file_path = os.path.join(cur_root, name)
+            rel_path = os.path.relpath(file_path, root_dir).replace("\\", "/")
+            rel_no_ext, _ = os.path.splitext(rel_path)
+            rel_index[rel_no_ext] = file_path
+
+            base_no_ext, _ = os.path.splitext(name)
+            base_index.setdefault(base_no_ext, []).append(file_path)
+    return rel_index, base_index
+
+
 def _iter_recursive_json_npy_pairs(json_root: str, npy_root: str):
     pairs = []
     if not (os.path.isdir(json_root) and os.path.isdir(npy_root)):
@@ -29,6 +46,10 @@ def _iter_recursive_json_npy_pairs(json_root: str, npy_root: str):
         if not (os.path.isdir(json_class_root) and os.path.isdir(npy_class_root)):
             continue
 
+        npy_rel_index, npy_base_index = _collect_relative_and_basename_index(
+            npy_class_root, ".npy"
+        )
+
         for cur_root, _, files in os.walk(json_class_root):
             for name in files:
                 if not name.endswith(".json"):
@@ -36,9 +57,18 @@ def _iter_recursive_json_npy_pairs(json_root: str, npy_root: str):
                 json_file_path = os.path.join(cur_root, name)
                 rel_json = os.path.relpath(json_file_path, json_class_root)
                 rel_base, _ = os.path.splitext(rel_json)
-                npy_file_path = os.path.join(npy_class_root, rel_base + ".npy")
-                if not os.path.exists(npy_file_path):
-                    continue
+                rel_base = rel_base.replace("\\", "/")
+                npy_file_path = npy_rel_index.get(rel_base)
+
+                # Fallback for datasets where json/npy extra subfolders are not strictly aligned:
+                # if class-local basename is unique, pair by basename.
+                if npy_file_path is None:
+                    base_no_ext, _ = os.path.splitext(name)
+                    npy_candidates = npy_base_index.get(base_no_ext, [])
+                    if len(npy_candidates) == 1:
+                        npy_file_path = npy_candidates[0]
+                    else:
+                        continue
                 pairs.append((class_id, json_file_path, npy_file_path))
     return pairs
 
