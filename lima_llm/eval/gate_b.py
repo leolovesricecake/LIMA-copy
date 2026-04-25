@@ -119,11 +119,23 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
 
         gold_comp = []
         gold_suff = []
+        gold_log_odds = []
+        gold_aopc_suff = []
+        gold_aopc_comp = []
+        gold_aopc = []
+        gold_deletion_auc = []
+        gold_insertion_auc = []
         gold_diag = []
         gold_comp_adv = []
         gold_suff_adv = []
         pred_comp = []
         pred_suff = []
+        pred_log_odds = []
+        pred_aopc_suff = []
+        pred_aopc_comp = []
+        pred_aopc = []
+        pred_deletion_auc = []
+        pred_insertion_auc = []
         runtimes = []
         predict_calls = []
         pass_runs = 0
@@ -139,11 +151,23 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
 
             gold_comp.append(_safe_float(gold_primary.get("comprehensiveness")))
             gold_suff.append(_safe_float(gold_primary.get("sufficiency")))
+            gold_log_odds.append(_safe_float(gold_primary.get("log_odds")))
+            gold_aopc_suff.append(_safe_float(gold_primary.get("aopc_sufficiency")))
+            gold_aopc_comp.append(_safe_float(gold_primary.get("aopc_comprehensiveness")))
+            gold_aopc.append(_safe_float(gold_primary.get("aopc")))
+            gold_deletion_auc.append(_safe_float(gold_primary.get("deletion_auc")))
+            gold_insertion_auc.append(_safe_float(gold_primary.get("insertion_auc")))
             gold_diag.append(_safe_float(gold.get("diagnosticity_vs_random")))
             gold_comp_adv.append(_safe_float(run.get("gold_comp_adv_vs_random")))
             gold_suff_adv.append(_safe_float(run.get("gold_suff_adv_vs_random")))
             pred_comp.append(_safe_float(pred_primary.get("comprehensiveness")))
             pred_suff.append(_safe_float(pred_primary.get("sufficiency")))
+            pred_log_odds.append(_safe_float(pred_primary.get("log_odds")))
+            pred_aopc_suff.append(_safe_float(pred_primary.get("aopc_sufficiency")))
+            pred_aopc_comp.append(_safe_float(pred_primary.get("aopc_comprehensiveness")))
+            pred_aopc.append(_safe_float(pred_primary.get("aopc")))
+            pred_deletion_auc.append(_safe_float(pred_primary.get("deletion_auc")))
+            pred_insertion_auc.append(_safe_float(pred_primary.get("insertion_auc")))
             runtimes.append(_safe_float(secondary.get("runtime_seconds")))
             predict_calls.append(
                 _safe_float(
@@ -175,15 +199,27 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
                     "run_pass_rate": float(pass_runs / len(items)),
                 },
                 "gold_metrics": {
+                    "log_odds": _stats(gold_log_odds),
                     "comprehensiveness": _stats(gold_comp),
                     "sufficiency": _stats(gold_suff),
+                    "aopc_sufficiency": _stats(gold_aopc_suff),
+                    "aopc_comprehensiveness": _stats(gold_aopc_comp),
+                    "aopc": _stats(gold_aopc),
+                    "deletion_auc": _stats(gold_deletion_auc),
+                    "insertion_auc": _stats(gold_insertion_auc),
                     "diagnosticity_vs_random": _stats(gold_diag),
                     "comp_adv_vs_random": _stats(gold_comp_adv),
                     "suff_adv_vs_random": _stats(gold_suff_adv),
                 },
                 "predicted_metrics": {
+                    "log_odds": _stats(pred_log_odds),
                     "comprehensiveness": _stats(pred_comp),
                     "sufficiency": _stats(pred_suff),
+                    "aopc_sufficiency": _stats(pred_aopc_suff),
+                    "aopc_comprehensiveness": _stats(pred_aopc_comp),
+                    "aopc": _stats(pred_aopc),
+                    "deletion_auc": _stats(pred_deletion_auc),
+                    "insertion_auc": _stats(pred_insertion_auc),
                 },
                 "runtime": {
                     "seconds": _stats(runtimes),
@@ -220,6 +256,12 @@ def write_gate_b_aggregate_csv(payload: Dict[str, Any], output_path: Path) -> Pa
                 "gold_comp_std": _safe_float(group.get("gold_metrics", {}).get("comprehensiveness", {}).get("std")),
                 "gold_suff_mean": _safe_float(group.get("gold_metrics", {}).get("sufficiency", {}).get("mean")),
                 "gold_suff_std": _safe_float(group.get("gold_metrics", {}).get("sufficiency", {}).get("std")),
+                "gold_log_odds_mean": _safe_float(group.get("gold_metrics", {}).get("log_odds", {}).get("mean")),
+                "gold_aopc_suff_mean": _safe_float(group.get("gold_metrics", {}).get("aopc_sufficiency", {}).get("mean")),
+                "gold_aopc_comp_mean": _safe_float(group.get("gold_metrics", {}).get("aopc_comprehensiveness", {}).get("mean")),
+                "gold_aopc_mean": _safe_float(group.get("gold_metrics", {}).get("aopc", {}).get("mean")),
+                "gold_deletion_auc_mean": _safe_float(group.get("gold_metrics", {}).get("deletion_auc", {}).get("mean")),
+                "gold_insertion_auc_mean": _safe_float(group.get("gold_metrics", {}).get("insertion_auc", {}).get("mean")),
                 "gold_diag_mean": _safe_float(group.get("gold_metrics", {}).get("diagnosticity_vs_random", {}).get("mean")),
                 "comp_adv_mean": _safe_float(group.get("gold_metrics", {}).get("comp_adv_vs_random", {}).get("mean")),
                 "suff_adv_mean": _safe_float(group.get("gold_metrics", {}).get("suff_adv_vs_random", {}).get("mean")),
@@ -235,6 +277,12 @@ def write_gate_b_aggregate_csv(payload: Dict[str, Any], output_path: Path) -> Pa
         "gold_comp_std",
         "gold_suff_mean",
         "gold_suff_std",
+        "gold_log_odds_mean",
+        "gold_aopc_suff_mean",
+        "gold_aopc_comp_mean",
+        "gold_aopc_mean",
+        "gold_deletion_auc_mean",
+        "gold_insertion_auc_mean",
         "gold_diag_mean",
         "comp_adv_mean",
         "suff_adv_mean",

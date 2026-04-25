@@ -20,7 +20,6 @@ class HFBackbone(BaseBackbone):
     ) -> None:
         super().__init__()
         self.model_path = model_path
-        self.device = device
         self.max_length = int(max_length)
         self.embedding_layer_ratio = float(embedding_layer_ratio)
 
@@ -34,6 +33,7 @@ class HFBackbone(BaseBackbone):
 
         self.torch = torch
         self.nnf = torch.nn.functional
+        self.device = self._prepare_device(torch, device)
 
         dtype_map = {
             "float16": torch.float16,
@@ -55,13 +55,20 @@ class HFBackbone(BaseBackbone):
             low_cpu_mem_usage=True,
             device_map=None,
         )
-        self.model.to(device)
+        self.model.to(self.device)
         self.model.eval()
 
         # Batch knobs for batched objective evaluation.
         # Can be overridden by env vars for quick tuning without code changes.
         self.predict_batch_size = max(1, int(os.getenv("LIMA_PREDICT_BATCH_SIZE", "4")))
         self.embed_batch_size = max(1, int(os.getenv("LIMA_EMBED_BATCH_SIZE", "2")))
+
+    @staticmethod
+    def _prepare_device(torch_module, device: str):
+        resolved = torch_module.device(device)
+        if resolved.type == "cuda":
+            torch_module.cuda.set_device(0 if resolved.index is None else resolved.index)
+        return resolved
 
     @staticmethod
     def _is_oom_error(exc: Exception) -> bool:

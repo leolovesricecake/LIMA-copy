@@ -1,6 +1,6 @@
 {
   "group_count": 2,
-  "run_count": 7,
+  "run_count": 6,
   "min_runs": 3,
   "groups": [
     {
@@ -18,9 +18,8 @@
         "eval_gradient_baseline": true,
         "max_samples": null
       },
-      "n_runs": 4,
+      "n_runs": 3,
       "seeds": [
-        42,
         42,
         43,
         44
@@ -31,67 +30,138 @@
         "run_pass_rate": 1.0
       },
       "gold_metrics": {
+        "log_odds": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
         "comprehensiveness": {
-          "mean": 0.07581205020355992,
-          "std": 0.00033696270046907484,
+          "mean": 0.07562018026163181,
+          "std": 6.430798458376656e-05,
           "min": 0.07557470764964819,
-          "max": 0.07638766002934426
+          "max": 0.07571112548559905
         },
         "sufficiency": {
-          "mean": -0.10120828461274504,
-          "std": 0.00039913604163919613,
+          "mean": -0.10143822380403678,
+          "std": 3.0407995872044215e-05,
           "min": -0.1014812272042036,
-          "max": -0.10051846703886984
+          "max": -0.10141672210395336
+        },
+        "aopc_sufficiency": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc_comprehensiveness": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc": {
+          "mean": 0.15026845608294442,
+          "std": 0.00010433168086403386,
+          "min": 0.15019468244391287,
+          "max": 0.15041600336100752
+        },
+        "deletion_auc": {
+          "mean": 0.662043524526784,
+          "std": 0.00010981792380517641,
+          "min": 0.6618882185295472,
+          "max": 0.6621211775254026
+        },
+        "insertion_auc": {
+          "mean": 0.8401356735123017,
+          "std": 3.9617675087192606e-05,
+          "min": 0.8401076595855927,
+          "max": 0.8401917013657197
         },
         "diagnosticity_vs_random": {
-          "mean": 0.6725000000000001,
-          "std": 0.024622144504490236,
+          "mean": 0.6583333333333333,
+          "std": 0.0023570226039551605,
           "min": 0.655,
-          "max": 0.715
+          "max": 0.66
         },
         "comp_adv_vs_random": {
-          "mean": 0.047531757914414635,
-          "std": 0.00033696270046907484,
+          "mean": 0.047339887972486526,
+          "std": 6.430798458376656e-05,
           "min": 0.0472944153605029,
-          "max": 0.04810736774019897
+          "max": 0.04743083319645376
         },
         "suff_adv_vs_random": {
-          "mean": 0.2899085430080537,
-          "std": 0.0003991360416392142,
-          "min": 0.2892187254341785,
+          "mean": 0.29013848219934546,
+          "std": 3.0407995872044215e-05,
+          "min": 0.29011698049926204,
           "max": 0.2901814855995123
         }
       },
       "predicted_metrics": {
+        "log_odds": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
         "comprehensiveness": {
-          "mean": 0.07920482614822687,
-          "std": 0.00018278812443497144,
+          "mean": 0.07921346544474363,
+          "std": 0.00021035711255399408,
           "min": 0.07891597556322813,
           "max": 0.07936221038550138
         },
         "sufficiency": {
-          "mean": 0.01281519728549756,
-          "std": 0.0003775603117198695,
+          "mean": 0.01259954015444964,
+          "std": 6.353785717240495e-05,
           "min": 0.012554612104780972,
-          "max": 0.013462168678641322
+          "max": 0.012689396253786981
+        },
+        "aopc_sufficiency": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc_comprehensiveness": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc": {
+          "mean": 0.15847079271151474,
+          "std": 0.0003327703206141647,
+          "min": 0.15800018441094696,
+          "max": 0.15870609686179865
+        },
+        "deletion_auc": {
+          "mean": 0.6989991158871908,
+          "std": 0.00034923778176485914,
+          "min": 0.6987521674834583,
+          "max": 0.6994930126946557
+        },
+        "insertion_auc": {
+          "mean": 0.826103506850064,
+          "std": 0.0002019679166461436,
+          "min": 0.8258178810831788,
+          "max": 0.8262463197335066
         }
       },
       "runtime": {
         "seconds": {
-          "mean": 3590.1611352562904,
-          "std": 1724.1257189925461,
+          "mean": 2594.7516881624856,
+          "std": 10.92964170087849,
           "min": 2583.6064121723175,
-          "max": 6576.3894765377045
+          "max": 2609.5991694927216
         },
         "predict_calls": {
-          "mean": 33379.75,
-          "std": 15006.632689830854,
+          "mean": 24715.666666666668,
+          "std": 2.494438257849294,
           "min": 24713.0,
-          "max": 59372.0
+          "max": 24719.0
         }
       },
       "reports": [
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1/eval_report.json",
         "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42/eval_report.json",
         "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-43/eval_report.json",
         "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-44/eval_report.json"
@@ -124,6 +194,12 @@
         "run_pass_rate": 1.0
       },
       "gold_metrics": {
+        "log_odds": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
         "comprehensiveness": {
           "mean": 0.07701893011666834,
           "std": 0.0,
@@ -135,6 +211,36 @@
           "std": 1.3877787807814457e-17,
           "min": -0.0983944483101368,
           "max": -0.0983944483101368
+        },
+        "aopc_sufficiency": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc_comprehensiveness": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc": {
+          "mean": 0.15296200526512563,
+          "std": 0.0,
+          "min": 0.15296200526512563,
+          "max": 0.15296200526512563
+        },
+        "deletion_auc": {
+          "mean": 0.6592712033287443,
+          "std": 0.0,
+          "min": 0.6592712033287443,
+          "max": 0.6592712033287443
+        },
+        "insertion_auc": {
+          "mean": 0.8396896630029579,
+          "std": 0.0,
+          "min": 0.8396896630029579,
+          "max": 0.8396896630029579
         },
         "diagnosticity_vs_random": {
           "mean": 0.665,
@@ -156,6 +262,12 @@
         }
       },
       "predicted_metrics": {
+        "log_odds": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
         "comprehensiveness": {
           "mean": 0.08057206567376853,
           "std": 0.0,
@@ -167,6 +279,36 @@
           "std": 0.0,
           "min": 0.016731931013986467,
           "max": 0.016731931013986467
+        },
+        "aopc_sufficiency": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc_comprehensiveness": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "aopc": {
+          "mean": 0.16066958572161458,
+          "std": 0.0,
+          "min": 0.16066958572161458,
+          "max": 0.16066958572161458
+        },
+        "deletion_auc": {
+          "mean": 0.6967355961357017,
+          "std": 1.1102230246251565e-16,
+          "min": 0.6967355961357018,
+          "max": 0.6967355961357018
+        },
+        "insertion_auc": {
+          "mean": 0.823732558015771,
+          "std": 0.0,
+          "min": 0.823732558015771,
+          "max": 0.823732558015771
         }
       },
       "runtime": {

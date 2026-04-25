@@ -5,18 +5,21 @@
 - `v2`：在保证结果等价的前提下系统优化效率与稳定性。
 - `v3`：扩展到生成任务（token/span 级解释），形成可复现实验基线。
 
-## 当前状态（2026-04-23）
+## 当前状态（2026-04-25）
 - 代码层：`lima_llm/` 主链路已完整（数据、chunking、目标函数、搜索、评估、落盘、resume）。
-- 实验层（ERASER, 200样本）：
+- 实验层（ERASER Movie Reviews, validation）：
   - `accuracy_full=0.89`（稳定）
   - `comprehensiveness=0.0764`、`sufficiency=-0.1005`、`aopc=0.1531`
   - `diagnosticity_vs_random=0.715`
   - `metrics_by_target` 已包含 `gold/predicted` 双口径；
   - `per_q`（`q=1/5/10/20/50`）已输出；
   - `gradient baseline`: `evaluated_samples=200/200`、`failed_samples=0`。
-- 结论：Gate A 已达到验收口径，可进入 Gate B（稳定性验证）与 Gate C 前置设计。
-
-## Phase 0~4（详细全流程，已恢复并更新）
+- Gate B 多 seed 验收已完成：
+  - `sentence + greedy + k=8 + lambdas=1,1,1,1`：3 seeds，`comp_adv_mean=0.0473`、`suff_adv_mean=0.2901`、`diagnosticity=0.6583±0.0024`、`run_pass_rate=1.0`；
+  - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`diagnosticity=0.6650±0.0000`、`run_pass_rate=1.0`；
+  - 聚合产物：`lima_llm_results/gate_b_aggregate.json` 与 `lima_llm_results/gate_b_aggregate.csv`。
+- 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
+- 结论：Gate A、Gate B 已达到工程验收口径；进入 Gate C（等价性能优化）。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
 
 ## Phase 0：仓库与工程基线（已完成）
 - 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
@@ -31,7 +34,7 @@
 - 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
 - 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
 
-## Phase 2：稳定性与规模化（下一阶段）
+## Phase 2：稳定性与规模化（Gate B 已验收，进入 Gate C）
 - 提升长任务稳定性：统一 GPU 映射策略、失败重试/熔断策略。
 - 增强数据适配：补齐更多 ERASER 子任务与中文判别数据集适配。
 - 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
@@ -49,8 +52,6 @@
 - 支持多轮对话与超长上下文的解释稳定性评估。
 - 引入人类评审与任务级指标（正确性、可读性、实用性）联合报告。
 
-## Gate A~D（门槛制验收）
-
 ## Gate A：评估真实性与可诊断性（已通过）
 - 验收口径：
   - 评估报告同时输出双口径 + `per_q`；
@@ -58,7 +59,7 @@
   - 失败样本可定位（error type + sample id）。
 - 当前结论：已满足，后续仅做回归监控。
 
-## Gate B：方法效果稳定性（当前优先级最高）
+## Gate B：方法效果稳定性（已验收）
 - 目标：证明“不是单次幸运”，而是稳定优势。
 - 任务：
   - 小网格：`k`、`lambdas`、`chunker`、`search`；
@@ -68,13 +69,18 @@
   - `COMP` 持续高于 random；
   - `SUFF` 持续低于 random；
   - `diagnosticity` 在多 seed 上稳定。
+- 当前结论：
+  - 两个 lambda 配置均完成 `seed=42/43/44`；
+  - 所有 run 均满足 `COMP > random` 且 `SUFF < random`；
+  - `run_pass_rate=1.0`，diagnosticity 在 `0.655~0.665` 区间稳定。
+  - 注意：这些产物来自 word-level 统一评估前的报告；新协议下需要重跑聚合作为论文最终表格。
 
-## Gate C：等价性能优化（Gate B 固化配置后执行）
+## Gate C：等价性能优化（当前阶段）
 - 目标：在不改变结果的前提下提速。
 - 约束：每项优化都要有等价测试（`selected chunks` 与 `F(S)` 轨迹一致）。
 - 分层任务（按优先级）：
-  - P0：评估阶段文本概率缓存（避免 `gold/predicted` 与 baseline 的重复前向）。
-  - P0：候选子集打分批处理（减少搜索阶段单条前向开销）。
+  - P0：评估阶段文本概率缓存（避免 `gold/predicted` 与 baseline 的重复前向）。【已实现，已有缓存命中率报告】
+  - P0：候选子集打分批处理（减少搜索阶段单条前向开销）。【已实现，新增 batched/fallback 等价测试】
   - P1：Objective 的 embedding/概率缓存键标准化（跨步骤命中）。
   - P2：KV cache 复用与候选预筛（默认关闭，灰度启用）。
 - 验收标准：结果等价 + 吞吐提升可量化（至少报告 `predict_calls` 与总时长降幅）。
@@ -113,19 +119,65 @@
 - 优化策略：默认不启用近似优化（无 UHeads、无随机贪心）。
 - 生成式迁移（输出 token 级解释）尚未进入 v1。
 
-## v1 资源清单（可定位/可下载）
-
-| 类型 | 资源标识 | 获取方式 | 在项目中的用途 |
-|---|---|---|---|
-| 模型 | `Qwen/Qwen2.5-7B-Instruct` | https://huggingface.co/Qwen/Qwen2.5-7B-Instruct | `HFBackbone` 推理与特征提取 |
-| 数据集 | `nyu-mll/glue`（config=`sst2`） | https://huggingface.co/datasets/nyu-mll/glue | `sst2` 烟测/回归 |
-| 数据集 | `eraser-benchmark/movie_rationales` | https://huggingface.co/datasets/eraser-benchmark/movie_rationales | v1 主评估（faithfulness + plausibility） |
-| 数据集参考 | `eraserbenchmark` | https://github.com/jayded/eraserbenchmark | ERASER 原始格式说明与本地数据组织参考 |
-| 代码入口 | `python -m lima_llm` | 仓库本地代码 | 端到端解释 + 评估 |
-| 一键脚本 | `scripts/run_lima_llm_v1.sh` | 仓库本地脚本 | 简化启动参数 |
+# 资源清单
 
 ### 资源下载/缓存建议
-- Hugging Face 镜像（可选）：`export HF_ENDPOINT=https://hf-mirror.com`
+- 设置 Hugging Face 镜像：`export HF_ENDPOINT=https://hf-mirror.com`
+
+## 模型
+1. `Qwen/Qwen2.5-7B-Instruct`：https://huggingface.co/Qwen/Qwen2.5-7B-Instruct
+   
+
+## 数据集
+1. SST-2（Stanford Sentiment Treebank，2013）
+   - Recursive Deep Models for Semantic Compositionality Over a Sentiment Treebank
+   - https://nlp.stanford.edu/sentiment/
+   - 数据来源：电影评论（短句）
+   - 特点：句子级而非整篇评论、语义组合性强（fine-grained treebank）
+   - 任务：句子级情感分类（二分类），代表 short text sentiment classification
+
+2. Rotten Tomatoes（RT / RTN，2005）
+   - Seeing Stars: Exploiting Class Relationships for Sentiment Categorization with Respect to Rating Scales
+   - https://www.cs.cornell.edu/people/pabo/movie-review-data/
+   - 数据来源：电影评论片段（snippets）
+   - 特点：中等长度文本、情绪表达更复杂、介于短句与长文之间
+   - 任务：情感分类（通常为二分类），代表 medium-length sentiment classification
+
+3. IMDB Movie Reviews（2011）
+   - Learning Word Vectors for Sentiment Analysis
+   - https://ai.stanford.edu/~amaas/data/sentiment/
+   - 数据来源：IMDB 网站电影长评论
+   - 特点：长文本（平均200词以上）、语义结构复杂、上下文依赖强
+   - 任务：情感分类（二分类），代表 long text sentiment classification
+
+4. EMR（Emotion Recognition，2018）
+   - CARER: Contextualized Affect Representations for Emotion Recognition
+   - https://github.com/dair-ai/emotion_dataset
+   - 数据来源：社交媒体文本（短句）
+   - 特点：多类别情绪标签（6类）、细粒度情绪表达
+   - 任务：情绪分类（sadness, joy, love, anger, fear, surprise），代表 multi-class emotion classification
+
+5. ERASER Benchmark（2020）
+   - ERASER: A Benchmark to Evaluate Rationalized NLP Models
+   - https://www.eraserbenchmark.com/
+   - 数据来源：多种NLP任务数据（含电影评论），附带人工标注 rationale
+   - 特点：提供 token-level 人类解释标注、可用于评估解释质量与人类一致性
+   - 任务：解释性评估（explainability evaluation），衡量模型解释与 human rationales 的一致性
+
+
+## Baselines
+1. 梯度方法
+   1. Integrated Gradients (IG)(Sundararajan et al., 2017, ICML)：Axiomatic Attribution for Deep Networks
+   2. Sequential Integrated Gradients (SIG)(Enguehard, 2023, ACL) ：Sequential Integrated Gradients: A Simple but Effective Method for Explaining Language Models
+
+2. 相关性分解方法：将模型的表示分解为向量，每个向量对应不同词对预测的贡献。
+   1. GlobEnc (Modarressi et al., 2022)：Globenc: Quantifying global token attribution by incorporating the whole encoder layer in transformers
+   2. DecompX (Modarressi et al., 2023)：Decompx: Explaining transformers decisions by propagating token decomposition
+
+3. 基于扰动的方法：通过对输入或神经元施加扰动，观察对后续预测的影响。
+   1. LIME (Ribeiro et al., 2016, SIGKDD)：Why Should I Trust You?”: Explaining the Predictions of Any Classifier
+   2. SHAP (Lundberg & Lee, 2017, NeurlIPS)：A Unified Approach to Interpreting Model Predictions
+   3. Attributive Masking Learning（Barkan et al., 2024, EMNLP）：LLM Explainability via Attributive Masking Learning
 
 
 ### 数据加载协议（已支持本地 + 远程）
@@ -139,6 +191,7 @@
   - 指定 HF：`--eraser-root hf://eraser-benchmark/movie_rationales`
   - 本地目录：`--eraser-root /path/to/eraser_movie_reviews`
   - 远程 URL：`--eraser-root https://.../eraser_movie_reviews.tar.gz`
+
 
 # 前言
 ## 背景

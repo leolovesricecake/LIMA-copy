@@ -104,7 +104,6 @@ def main(argv: List[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    set_seed(args.seed)
     weights = ObjectiveWeights(*parse_lambdas(args.lambdas))
 
     bundle = load_dataset_bundle(
@@ -124,6 +123,7 @@ def main(argv: List[str] | None = None) -> None:
         embedding_layer_ratio=args.embedding_layer_ratio,
         dtype=args.dtype,
     )
+    set_seed(args.seed)
 
     chunker = build_chunker(
         method=args.chunker,

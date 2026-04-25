@@ -77,6 +77,7 @@ def test_eval_probability_cache_reduces_duplicate_predict_calls(tmp_path: Path) 
 
     cache_stats = report["metrics_secondary"]["eval_prob_cache_stats"]
     predict_calls = backbone.snapshot_counters()["predict_calls"]
+    assert report["metric_settings"]["perturbation_unit"] == "word"
     assert cache_stats["hits"] > 0
     assert cache_stats["misses"] == predict_calls
-    assert predict_calls <= 6
+    assert predict_calls <= 10

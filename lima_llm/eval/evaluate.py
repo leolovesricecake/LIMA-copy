@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import time
 from pathlib import Path
 from statistics import mean
@@ -13,7 +14,10 @@ import numpy as np
 from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
 from ..utils import f1_iou_from_masks, spans_to_char_mask
-from .metrics import aopc_metrics, comprehensiveness_and_sufficiency
+from .metrics import AML_AOPC_Q_VALUES, AML_PRIMARY_Q_PERCENT, aml_faithfulness_metrics, aopc_metrics
+
+
+_WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
 
 
 def _stable_hash_int(text: str) -> int:
@@ -23,6 +27,15 @@ def _stable_hash_int(text: str) -> int:
 
 def _safe_mean(xs: Sequence[float]) -> float:
     return float(np.mean(xs)) if xs else 0.0
+
+
+def _reference_token_text(backbone) -> str:
+    tokenizer = getattr(backbone, "tokenizer", None)
+    for attr in ("mask_token", "unk_token", "pad_token", "eos_token"):
+        token = getattr(tokenizer, attr, None) if tokenizer is not None else None
+        if token:
+            return str(token)
+    return "<UNK>"
 
 
 def _to_chunks(raw_chunks: Sequence[Dict]) -> List[TextChunk]:
@@ -39,6 +52,76 @@ def _to_chunks(raw_chunks: Sequence[Dict]) -> List[TextChunk]:
             )
         )
     return chunks
+
+
+def _word_units_from_text(text: str) -> List[TextChunk]:
+    units: List[TextChunk] = []
+    for idx, match in enumerate(_WORD_UNIT_RE.finditer(text)):
+        units.append(
+            TextChunk(
+                chunk_id=idx,
+                start_char=match.start(),
+                end_char=match.end(),
+                text=text[match.start() : match.end()],
+            )
+        )
+    if not units:
+        return [TextChunk(chunk_id=0, start_char=0, end_char=len(text), text=text)]
+    return units
+
+
+def _content_span(unit: TextChunk) -> tuple[int, int]:
+    leading_len = len(unit.text) - len(unit.text.lstrip())
+    trailing_len = len(unit.text) - len(unit.text.rstrip())
+    start = unit.start_char + leading_len
+    end = unit.end_char - trailing_len
+    if end <= start:
+        return unit.start_char, unit.end_char
+    return start, end
+
+
+def _project_chunk_ranking_to_word_ranking(
+    word_units: Sequence[TextChunk],
+    chunks: Sequence[TextChunk],
+    chunk_ranking: Sequence[int],
+) -> List[int]:
+    chunk_rank = {int(chunk_id): idx for idx, chunk_id in enumerate(chunk_ranking)}
+    fallback_rank = len(chunk_rank) + len(chunks) + 1
+
+    projected = []
+    for word in word_units:
+        word_start, word_end = _content_span(word)
+        weighted_rank = 0.0
+        overlap_total = 0
+
+        for chunk in chunks:
+            overlap = max(0, min(word_end, chunk.end_char) - max(word_start, chunk.start_char))
+            if overlap <= 0:
+                continue
+            weighted_rank += float(overlap) * float(chunk_rank.get(chunk.chunk_id, fallback_rank))
+            overlap_total += int(overlap)
+
+        if overlap_total <= 0:
+            projected_rank = float(fallback_rank + word.chunk_id)
+        else:
+            projected_rank = weighted_rank / float(overlap_total)
+        projected.append((word.chunk_id, projected_rank))
+
+    return [word_id for word_id, _ in sorted(projected, key=lambda item: (item[1], item[0]))]
+
+
+def _count_words_split_across_chunks(word_units: Sequence[TextChunk], chunks: Sequence[TextChunk]) -> int:
+    split_count = 0
+    for word in word_units:
+        word_start, word_end = _content_span(word)
+        overlaps = 0
+        for chunk in chunks:
+            if min(word_end, chunk.end_char) > max(word_start, chunk.start_char):
+                overlaps += 1
+                if overlaps > 1:
+                    split_count += 1
+                    break
+    return split_count
 
 
 def _random_ranking(chunk_ids: Sequence[int], rng: random.Random) -> List[int]:
@@ -106,15 +189,24 @@ def _gradient_ranking_with_retry(
 def _init_mode_state(q_values: Sequence[int]) -> Dict:
     q_ints = [int(q) for q in q_values]
     return {
+        "ours_log_odds": [],
         "ours_comp": [],
         "ours_suff": [],
+        "ours_aopc_suff": [],
+        "ours_aopc_comp": [],
         "ours_aopc": [],
         "ours_del_auc": [],
         "ours_ins_auc": [],
+        "random_log_odds": [],
         "random_comp": [],
         "random_suff": [],
+        "random_aopc_suff": [],
+        "random_aopc_comp": [],
+        "grad_log_odds": [],
         "grad_comp": [],
         "grad_suff": [],
+        "grad_aopc_suff": [],
+        "grad_aopc_comp": [],
         "diagnosticity_hits": 0,
         "grad_evaluated": 0,
         "grad_error_counts": {},
@@ -160,10 +252,14 @@ def evaluate_saved_explanations(
     if not sample_dir.exists():
         raise FileNotFoundError(f"Missing sample directory: {sample_dir}")
 
+    aopc_q_values = tuple(int(q) for q in q_values) if q_values else AML_AOPC_Q_VALUES
+    tracked_q_values = tuple(sorted(set((*aopc_q_values, AML_PRIMARY_Q_PERCENT))))
+    reference_token_text = _reference_token_text(backbone)
+
     sample_map = {s.sample_id: s for s in bundle.samples}
     mode_states = {
-        "gold": _init_mode_state(q_values),
-        "predicted": _init_mode_state(q_values),
+        "gold": _init_mode_state(tracked_q_values),
+        "predicted": _init_mode_state(tracked_q_values),
     }
 
     sparsity_values: List[float] = []
@@ -180,6 +276,8 @@ def evaluate_saved_explanations(
     over_max_length_samples = 0
     pred_not_gold_samples = 0
     token_len_eval_errors = 0
+    word_count_total = 0
+    words_split_across_chunks_total = 0
     prob_cache_hits_total = 0
     prob_cache_misses_total = 0
     prob_cache_unique_texts_total = 0
@@ -198,12 +296,15 @@ def evaluate_saved_explanations(
 
         sample = sample_map[sample_id]
         chunks = _to_chunks(payload["chunks"])
+        word_units = _word_units_from_text(sample.text)
         selected = [int(x) for x in payload.get("selected_chunk_ids", [])]
         if not chunks:
             skipped_empty_chunks += 1
             continue
 
         total += 1
+        word_count_total += len(word_units)
+        words_split_across_chunks_total += _count_words_split_across_chunks(word_units, chunks)
 
         if sample.text.strip() == "":
             empty_text_samples += 1
@@ -217,8 +318,14 @@ def evaluate_saved_explanations(
             except Exception:
                 token_len_eval_errors += 1
 
-        all_ids = [c.chunk_id for c in chunks]
-        ranking_ours = selected + [cid for cid in all_ids if cid not in set(selected)]
+        chunk_ids = [c.chunk_id for c in chunks]
+        chunk_ranking_ours = selected + [cid for cid in chunk_ids if cid not in set(selected)]
+        word_ids = [w.chunk_id for w in word_units]
+        ranking_ours = _project_chunk_ranking_to_word_ranking(
+            word_units=word_units,
+            chunks=chunks,
+            chunk_ranking=chunk_ranking_ours,
+        )
 
         prob_cache: Dict[str, np.ndarray] = {}
         prob_cache_hits = 0
@@ -266,7 +373,7 @@ def evaluate_saved_explanations(
 
         rng = random.Random(2026 + (_stable_hash_int(sample_id) % 10_000))
         random_rankings = [
-            _random_ranking(all_ids, rng) for _ in range(max(1, int(random_trials)))
+            _random_ranking(word_ids, rng) for _ in range(max(1, int(random_trials)))
         ]
 
         grad_rank_cache: Dict[int, List[int]] = {}
@@ -275,62 +382,81 @@ def evaluate_saved_explanations(
         for mode_name, target_label in (("gold", sample.label), ("predicted", pred_label)):
             state = mode_states[mode_name]
 
-            comp, suff, per_q = comprehensiveness_and_sufficiency(
-                chunks=chunks,
-                ranking=ranking_ours,
-                q_values=q_values,
-                target_label=target_label,
-                verbalizers=verbalizers,
-                prob_fn=_cached_prob_fn,
-            )
-            aopc = aopc_metrics(
-                chunks=chunks,
+            ours_metrics, per_q = aml_faithfulness_metrics(
+                chunks=word_units,
                 ranking=ranking_ours,
                 target_label=target_label,
                 verbalizers=verbalizers,
                 prob_fn=_cached_prob_fn,
+                aopc_q_values=aopc_q_values,
+                extra_q_values=tracked_q_values,
+                reference_token_text=reference_token_text,
             )
-            state["ours_comp"].append(comp)
-            state["ours_suff"].append(suff)
-            state["ours_aopc"].append(float(aopc["aopc"]))
-            state["ours_del_auc"].append(float(aopc["deletion_auc"]))
-            state["ours_ins_auc"].append(float(aopc["insertion_auc"]))
-            for q in q_values:
+            state["ours_log_odds"].append(float(ours_metrics["log_odds"]))
+            state["ours_comp"].append(float(ours_metrics["comprehensiveness"]))
+            state["ours_suff"].append(float(ours_metrics["sufficiency"]))
+            state["ours_aopc_suff"].append(float(ours_metrics["aopc_sufficiency"]))
+            state["ours_aopc_comp"].append(float(ours_metrics["aopc_comprehensiveness"]))
+            ours_curve = aopc_metrics(
+                chunks=word_units,
+                ranking=ranking_ours,
+                target_label=target_label,
+                verbalizers=verbalizers,
+                prob_fn=_cached_prob_fn,
+            )
+            state["ours_aopc"].append(float(ours_curve["aopc"]))
+            state["ours_del_auc"].append(float(ours_curve["deletion_auc"]))
+            state["ours_ins_auc"].append(float(ours_curve["insertion_auc"]))
+            for q in tracked_q_values:
                 q_int = int(q)
                 state["per_q"]["ours"]["comprehensiveness"][q_int].append(float(per_q[q_int]["comp"]))
                 state["per_q"]["ours"]["sufficiency"][q_int].append(float(per_q[q_int]["suff"]))
 
+            trial_log_odds: List[float] = []
             trial_comp: List[float] = []
             trial_suff: List[float] = []
-            trial_per_q_comp = {int(q): [] for q in q_values}
-            trial_per_q_suff = {int(q): [] for q in q_values}
+            trial_aopc_suff: List[float] = []
+            trial_aopc_comp: List[float] = []
+            trial_per_q_comp = {int(q): [] for q in tracked_q_values}
+            trial_per_q_suff = {int(q): [] for q in tracked_q_values}
 
             for rr in random_rankings:
-                c, s, pq = comprehensiveness_and_sufficiency(
-                    chunks=chunks,
+                rm, pq = aml_faithfulness_metrics(
+                    chunks=word_units,
                     ranking=rr,
-                    q_values=q_values,
                     target_label=target_label,
                     verbalizers=verbalizers,
                     prob_fn=_cached_prob_fn,
+                    aopc_q_values=aopc_q_values,
+                    extra_q_values=tracked_q_values,
+                    reference_token_text=reference_token_text,
                 )
-                trial_comp.append(c)
-                trial_suff.append(s)
-                for q in q_values:
+                trial_log_odds.append(float(rm["log_odds"]))
+                trial_comp.append(float(rm["comprehensiveness"]))
+                trial_suff.append(float(rm["sufficiency"]))
+                trial_aopc_suff.append(float(rm["aopc_sufficiency"]))
+                trial_aopc_comp.append(float(rm["aopc_comprehensiveness"]))
+                for q in tracked_q_values:
                     q_int = int(q)
                     trial_per_q_comp[q_int].append(float(pq[q_int]["comp"]))
                     trial_per_q_suff[q_int].append(float(pq[q_int]["suff"]))
 
+            avg_rlo = float(mean(trial_log_odds))
             avg_rc = float(mean(trial_comp))
             avg_rs = float(mean(trial_suff))
+            avg_ras = float(mean(trial_aopc_suff))
+            avg_rac = float(mean(trial_aopc_comp))
+            state["random_log_odds"].append(avg_rlo)
             state["random_comp"].append(avg_rc)
             state["random_suff"].append(avg_rs)
-            for q in q_values:
+            state["random_aopc_suff"].append(avg_ras)
+            state["random_aopc_comp"].append(avg_rac)
+            for q in tracked_q_values:
                 q_int = int(q)
                 state["per_q"]["random"]["comprehensiveness"][q_int].append(float(mean(trial_per_q_comp[q_int])))
                 state["per_q"]["random"]["sufficiency"][q_int].append(float(mean(trial_per_q_suff[q_int])))
 
-            if comp > avg_rc and suff < avg_rs:
+            if ours_metrics["comprehensiveness"] > avg_rc and ours_metrics["sufficiency"] < avg_rs:
                 state["diagnosticity_hits"] += 1
 
             if include_gradient_baseline:
@@ -339,7 +465,7 @@ def evaluate_saved_explanations(
                         grad_rank_cache[target_label] = _gradient_ranking_with_retry(
                             backbone=backbone,
                             text=sample.text,
-                            chunks=chunks,
+                            chunks=word_units,
                             label=target_label,
                             verbalizers=verbalizers,
                             max_oom_retries=1,
@@ -349,18 +475,23 @@ def evaluate_saved_explanations(
 
                 if target_label in grad_rank_cache:
                     grad_rank = grad_rank_cache[target_label]
-                    gc, gs, gpq = comprehensiveness_and_sufficiency(
-                        chunks=chunks,
+                    gm, gpq = aml_faithfulness_metrics(
+                        chunks=word_units,
                         ranking=grad_rank,
-                        q_values=q_values,
                         target_label=target_label,
                         verbalizers=verbalizers,
                         prob_fn=_cached_prob_fn,
+                        aopc_q_values=aopc_q_values,
+                        extra_q_values=tracked_q_values,
+                        reference_token_text=reference_token_text,
                     )
-                    state["grad_comp"].append(gc)
-                    state["grad_suff"].append(gs)
+                    state["grad_log_odds"].append(float(gm["log_odds"]))
+                    state["grad_comp"].append(float(gm["comprehensiveness"]))
+                    state["grad_suff"].append(float(gm["sufficiency"]))
+                    state["grad_aopc_suff"].append(float(gm["aopc_sufficiency"]))
+                    state["grad_aopc_comp"].append(float(gm["aopc_comprehensiveness"]))
                     state["grad_evaluated"] += 1
-                    for q in q_values:
+                    for q in tracked_q_values:
                         q_int = int(q)
                         state["per_q"]["gradient"]["comprehensiveness"][q_int].append(float(gpq[q_int]["comp"]))
                         state["per_q"]["gradient"]["sufficiency"][q_int].append(float(gpq[q_int]["suff"]))
@@ -385,8 +516,11 @@ def evaluate_saved_explanations(
         state = mode_states[mode_name]
         return {
             "metrics_primary": {
+                "log_odds": _safe_mean(state["ours_log_odds"]),
                 "comprehensiveness": _safe_mean(state["ours_comp"]),
                 "sufficiency": _safe_mean(state["ours_suff"]),
+                "aopc_sufficiency": _safe_mean(state["ours_aopc_suff"]),
+                "aopc_comprehensiveness": _safe_mean(state["ours_aopc_comp"]),
                 "aopc": _safe_mean(state["ours_aopc"]),
                 "deletion_auc": _safe_mean(state["ours_del_auc"]),
                 "insertion_auc": _safe_mean(state["ours_ins_auc"]),
@@ -394,13 +528,19 @@ def evaluate_saved_explanations(
             "diagnosticity_vs_random": (state["diagnosticity_hits"] / total) if total > 0 else 0.0,
             "baselines": {
                 "random": {
+                    "log_odds": _safe_mean(state["random_log_odds"]),
                     "comprehensiveness": _safe_mean(state["random_comp"]),
                     "sufficiency": _safe_mean(state["random_suff"]),
+                    "aopc_sufficiency": _safe_mean(state["random_aopc_suff"]),
+                    "aopc_comprehensiveness": _safe_mean(state["random_aopc_comp"]),
                 },
                 "gradient": {
                     "enabled": bool(include_gradient_baseline),
+                    "log_odds": _safe_mean(state["grad_log_odds"]),
                     "comprehensiveness": _safe_mean(state["grad_comp"]),
                     "sufficiency": _safe_mean(state["grad_suff"]),
+                    "aopc_sufficiency": _safe_mean(state["grad_aopc_suff"]),
+                    "aopc_comprehensiveness": _safe_mean(state["grad_aopc_comp"]),
                     "evaluated_samples": int(state["grad_evaluated"]),
                     "failed_samples": max(0, total - int(state["grad_evaluated"]))
                     if include_gradient_baseline
@@ -425,6 +565,16 @@ def evaluate_saved_explanations(
         "dataset": bundle.dataset_name,
         "split": bundle.split,
         "sample_count": total,
+        "metric_settings": {
+            "protocol": "AML",
+            "primary_top_k_percent": int(AML_PRIMARY_Q_PERCENT),
+            "aopc_top_k_percentages": [int(q) for q in aopc_q_values],
+            "aopc_average_denominator": "len(top_k_percentages)+1",
+            "log_odds_reference_token": reference_token_text,
+            "perturbation_unit": "word",
+            "word_segmentation": "whitespace-delimited spans with surrounding whitespace preserved",
+            "chunk_to_word_projection": "overlap-weighted average chunk rank; lower rank is more important",
+        },
         # Backward-compatible top-level fields: keep gold-target as default.
         "metrics_primary": {
             "accuracy_full": (acc_hits / total) if total > 0 else 0.0,
@@ -459,7 +609,13 @@ def evaluate_saved_explanations(
             "skipped_missing_sample_id": skipped_missing_sample_id,
             "skipped_empty_chunks": skipped_empty_chunks,
             "backbone_max_length": int(max_length) if max_length is not None else None,
+            "word_count_total": int(word_count_total),
+            "words_split_across_chunks_total": int(words_split_across_chunks_total),
+            "words_split_across_chunks_rate": (
+                float(words_split_across_chunks_total / word_count_total) if word_count_total > 0 else 0.0
+            ),
         },
-        "q_values": [int(q) for q in q_values],
+        "q_values": [int(q) for q in aopc_q_values],
+        "per_q_values": [int(q) for q in tracked_q_values],
     }
     return report
