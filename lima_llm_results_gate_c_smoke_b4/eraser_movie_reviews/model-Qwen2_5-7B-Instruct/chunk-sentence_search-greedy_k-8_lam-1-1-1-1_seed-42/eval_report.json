@@ -1,0 +1,268 @@
+{
+  "dataset": "eraser_movie_reviews",
+  "split": "validation",
+  "sample_count": 20,
+  "metric_settings": {
+    "protocol": "AML",
+    "primary_top_k_percent": 20,
+    "aopc_top_k_percentages": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ],
+    "aopc_average_denominator": "len(top_k_percentages)+1",
+    "log_odds_reference_token": "<|endoftext|>",
+    "perturbation_unit": "word",
+    "word_segmentation": "whitespace-delimited spans with surrounding whitespace preserved",
+    "chunk_to_word_projection": "overlap-weighted average chunk rank; lower rank is more important"
+  },
+  "metrics_primary": {
+    "accuracy_full": 0.9,
+    "log_odds": 0.17730168820544617,
+    "comprehensiveness": 0.04722823351621628,
+    "sufficiency": -0.12204275876283646,
+    "aopc_sufficiency": -0.06523245498538016,
+    "aopc_comprehensiveness": 0.03104505309214195,
+    "aopc": 0.05444900286326911,
+    "deletion_auc": 0.7685181736653041,
+    "insertion_auc": 0.8886190907865725
+  },
+  "metrics_secondary": {
+    "diagnosticity_vs_random": 0.45,
+    "sparsity": 0.4187548142942454,
+    "plausibility_f1": 0.1516763084443126,
+    "plausibility_iou": 0.08575464484088254,
+    "runtime_seconds": 3672.6991181373596,
+    "forward_counters_delta": {
+      "embed_calls": 0,
+      "predict_calls": 30924,
+      "gradient_calls": 0
+    },
+    "eval_prob_cache_stats": {
+      "hits": 31944,
+      "misses": 30924,
+      "unique_texts": 30924,
+      "hit_rate": 0.5081122351593815
+    }
+  },
+  "baselines": {
+    "random": {
+      "log_odds": 0.19366484255566654,
+      "comprehensiveness": 0.014258258342742918,
+      "sufficiency": 0.10568512588739395,
+      "aopc_sufficiency": 0.04428638235976298,
+      "aopc_comprehensiveness": 0.019104401692748067
+    },
+    "gradient": {
+      "enabled": false,
+      "log_odds": 0.0,
+      "comprehensiveness": 0.0,
+      "sufficiency": 0.0,
+      "aopc_sufficiency": 0.0,
+      "aopc_comprehensiveness": 0.0,
+      "evaluated_samples": 0,
+      "failed_samples": 0,
+      "error_type_counts": {},
+      "error_examples": []
+    }
+  },
+  "metrics_by_target": {
+    "gold": {
+      "metrics_primary": {
+        "log_odds": 0.17730168820544617,
+        "comprehensiveness": 0.04722823351621628,
+        "sufficiency": -0.12204275876283646,
+        "aopc_sufficiency": -0.06523245498538016,
+        "aopc_comprehensiveness": 0.03104505309214195,
+        "aopc": 0.05444900286326911,
+        "deletion_auc": 0.7685181736653041,
+        "insertion_auc": 0.8886190907865725
+      },
+      "diagnosticity_vs_random": 0.45,
+      "baselines": {
+        "random": {
+          "log_odds": 0.19366484255566654,
+          "comprehensiveness": 0.014258258342742918,
+          "sufficiency": 0.10568512588739395,
+          "aopc_sufficiency": 0.04428638235976298,
+          "aopc_comprehensiveness": 0.019104401692748067
+        },
+        "gradient": {
+          "enabled": false,
+          "log_odds": 0.0,
+          "comprehensiveness": 0.0,
+          "sufficiency": 0.0,
+          "aopc_sufficiency": 0.0,
+          "aopc_comprehensiveness": 0.0,
+          "evaluated_samples": 0,
+          "failed_samples": 0,
+          "error_type_counts": {},
+          "error_examples": []
+        }
+      },
+      "per_q": {
+        "ours": {
+          "comprehensiveness": {
+            "1": 0.005540092289447784,
+            "5": 0.014038762450218201,
+            "10": 0.02210860401391983,
+            "20": 0.04722823351621628,
+            "50": 0.09735462628304958
+          },
+          "sufficiency": {
+            "1": 0.0695064201951027,
+            "5": -0.13508989661931992,
+            "10": -0.12413214296102523,
+            "20": -0.12204275876283646,
+            "50": -0.07963635176420211
+          }
+        },
+        "random": {
+          "comprehensiveness": {
+            "1": 0.005515679121017455,
+            "5": 0.005976206660270692,
+            "10": 0.017548934966325765,
+            "20": 0.014258258342742918,
+            "50": 0.0713273310661316
+          },
+          "sufficiency": {
+            "1": 0.002146280482411381,
+            "5": 0.04265217065811158,
+            "10": 0.06486543223261831,
+            "20": 0.10568512588739395,
+            "50": 0.050369284898042675
+          }
+        },
+        "gradient": {
+          "comprehensiveness": {
+            "1": 0.0,
+            "5": 0.0,
+            "10": 0.0,
+            "20": 0.0,
+            "50": 0.0
+          },
+          "sufficiency": {
+            "1": 0.0,
+            "5": 0.0,
+            "10": 0.0,
+            "20": 0.0,
+            "50": 0.0
+          }
+        }
+      }
+    },
+    "predicted": {
+      "metrics_primary": {
+        "log_odds": -0.11957330792312806,
+        "comprehensiveness": 0.048835855722427365,
+        "sufficiency": 0.003146405844017863,
+        "aopc_sufficiency": 0.02910642922700693,
+        "aopc_comprehensiveness": 0.033658635616302494,
+        "aopc": 0.06624312807825364,
+        "deletion_auc": 0.787021849626031,
+        "insertion_auc": 0.8279416864833319
+      },
+      "diagnosticity_vs_random": 0.4,
+      "baselines": {
+        "random": {
+          "log_odds": -0.14571015458316236,
+          "comprehensiveness": 0.03632420405745507,
+          "sufficiency": 0.18381060380488634,
+          "aopc_sufficiency": 0.11186122825214018,
+          "aopc_comprehensiveness": 0.029199686522285145
+        },
+        "gradient": {
+          "enabled": false,
+          "log_odds": 0.0,
+          "comprehensiveness": 0.0,
+          "sufficiency": 0.0,
+          "aopc_sufficiency": 0.0,
+          "aopc_comprehensiveness": 0.0,
+          "evaluated_samples": 0,
+          "failed_samples": 0,
+          "error_type_counts": {},
+          "error_examples": []
+        }
+      },
+      "per_q": {
+        "ours": {
+          "comprehensiveness": {
+            "1": -5.151331424713135e-05,
+            "5": 0.024362167716026305,
+            "10": 0.029467716813087463,
+            "20": 0.048835855722427365,
+            "50": 0.09933758676052093
+          },
+          "sufficiency": {
+            "1": 0.15403517335653305,
+            "5": -0.01281108190305531,
+            "10": 0.0024834399577230216,
+            "20": 0.003146405844017863,
+            "50": 0.027784638106822968
+          }
+        },
+        "random": {
+          "comprehensiveness": {
+            "1": 0.0062070000171661355,
+            "5": 0.004248330295085906,
+            "10": 0.019782774448394776,
+            "20": 0.03632420405745507,
+            "50": 0.10863581031560898
+          },
+          "sufficiency": {
+            "1": 0.11640457975678146,
+            "5": 0.13445054359734057,
+            "10": 0.14879867155104873,
+            "20": 0.18381060380488634,
+            "50": 0.08770297080278397
+          }
+        },
+        "gradient": {
+          "comprehensiveness": {
+            "1": 0.0,
+            "5": 0.0,
+            "10": 0.0,
+            "20": 0.0,
+            "50": 0.0
+          },
+          "sufficiency": {
+            "1": 0.0,
+            "5": 0.0,
+            "10": 0.0,
+            "20": 0.0,
+            "50": 0.0
+          }
+        }
+      }
+    }
+  },
+  "dataset_diagnostics": {
+    "samples_with_empty_text": 0,
+    "samples_without_rationale": 0,
+    "samples_over_backbone_max_length": 0,
+    "predicted_not_gold_samples": 2,
+    "token_len_eval_errors": 0,
+    "skipped_missing_sample_id": 0,
+    "skipped_empty_chunks": 0,
+    "backbone_max_length": 2048,
+    "word_count_total": 14902,
+    "words_split_across_chunks_total": 0,
+    "words_split_across_chunks_rate": 0.0
+  },
+  "q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ],
+  "per_q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ]
+}

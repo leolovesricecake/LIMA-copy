@@ -38,6 +38,17 @@ AUC evaluated on 3995 samples (format-2(baseline))
 Insertion AUC Score: 0.0002
 Deletion AUC Score: 0.0002
 
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.evaluation_mistake_debug_baseline \
+>   --explanation-method explanation_insertion_results/imagenet-a-clip-vitl/HsicAttributionMethod \
+>   --eval-list ../datasets/ImageNet-A/imagenet-a_list.txt
+scan: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:12<00:00, 326.79it/s]
+[scan] mode=format-2-flat-json eval_list=3995 valid=3995 missing=0 broken=0 missing_key=0 empty=0 malformed=0.
+percentage: 0.25, avg. highest confidence: 0.0008877664543361926, std:0.0034400949592837773, retention percentage at highest confidence: 0.07918397997496872, std: 0.060976081760499984, used=3995, empty_curve=0.
+percentage: 0.5, avg. highest confidence: 0.0011020928807789752, std:0.008027598782640777, retention percentage at highest confidence: 0.09807259073842305, std: 0.09900222997031599, used=3995, empty_curve=0.
+percentage: 0.75, avg. highest confidence: 0.0012802104329287037, std:0.010220386580615748, retention percentage at highest confidence: 0.12848560700876097, std: 0.1662875488927138, used=3995, empty_curve=0.
+percentage: 1.0, avg. highest confidence: 0.001767804536115243, std:0.016068084620261516, retention percentage at highest confidence: 0.18367459324155197, std: 0.26899137475469176, used=3995, empty_curve=0.
+
+
 # - - - - - - -
 # GradECLIP
 # - - - - - - -
@@ -78,3 +89,13 @@ explanation_insertion_results/imagenet-a-clip-vitl/GradECLIP
 AUC evaluated on 3995 samples (format-2(baseline))
 Insertion AUC Score: 0.0006
 Deletion AUC Score: 0.0006
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.evaluation_mistake_debug_baseline \
+>   --explanation-method explanation_insertion_results/imagenet-a-clip-vitl/GradECLIP \
+>   --eval-list ../datasets/ImageNet-A/imagenet-a_list.txt
+scan: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3995/3995 [00:22<00:00, 174.57it/s]
+[scan] mode=format-2-flat-json eval_list=3995 valid=3995 missing=0 broken=0 missing_key=0 empty=0 malformed=0.
+percentage: 0.25, avg. highest confidence: 0.001843509805366602, std:0.009432813016997856, retention percentage at highest confidence: 0.09627033792240301, std: 0.06894308119250507, used=3995, empty_curve=0.
+percentage: 0.5, avg. highest confidence: 0.002694525050281434, std:0.017998719961254128, retention percentage at highest confidence: 0.13872841051314144, std: 0.12918299186846074, used=3995, empty_curve=0.
+percentage: 0.75, avg. highest confidence: 0.0029059596742049922, std:0.018695839752095527, retention percentage at highest confidence: 0.16858072590738424, std: 0.18173427679768528, used=3995, empty_curve=0.
+percentage: 1.0, avg. highest confidence: 0.0033857402127138217, std:0.021360258746077703, retention percentage at highest confidence: 0.2151489361702128, std: 0.2623284522632423, used=3995, empty_curve=0.

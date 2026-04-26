@@ -14,6 +14,22 @@ PCI bus-id mapping: physical GPU 6 (bus 0000:D5:00.0) -> CUDA ordinal 6.
 Torch device=cuda:6
 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [19:11:47<00:00, 34.55s/it]
 
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-o-clip-vitl/HsicAttributionMethod
+explanation_insertion_results/imagenet-o-clip-vitl/HsicAttributionMethod
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [00:07<00:00, 260.37it/s]
+AUC evaluated on 2000 samples (format-2(baseline))
+Insertion AUC Score: 0.1003
+Deletion AUC Score: 0.1003
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.evaluation_mistake_debug_baseline \
+>   --explanation-method explanation_insertion_results/imagenet-o-clip-vitl/HsicAttributionMethod \
+>   --eval-list ../datasets/imagenet-o/imagenet-o_list.txt
+scan: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [00:03<00:00, 613.02it/s]
+[scan] mode=format-2-flat-json eval_list=2000 valid=2000 missing=0 broken=0 missing_key=0 empty=0 malformed=0.
+percentage: 0.25, avg. highest confidence: 0.12956526374816896, std:0.2433342633223356, retention percentage at highest confidence: 0.15349000000000002, std: 0.07517060529222842, used=2000, empty_curve=0.
+percentage: 0.5, avg. highest confidence: 0.20327546226978302, std:0.3037174449839314, retention percentage at highest confidence: 0.26438, std: 0.1540078426574439, used=2000, empty_curve=0.
+percentage: 0.75, avg. highest confidence: 0.23469640183448792, std:0.32094558809801604, retention percentage at highest confidence: 0.3662, std: 0.23991156704085778, used=2000, empty_curve=0.
+percentage: 1.0, avg. highest confidence: 0.2688721354007721, std:0.33919460259104883, retention percentage at highest confidence: 0.52112, std: 0.3520805953187423, used=2000, empty_curve=0.
 
 
 # - - - - - - -
@@ -31,3 +47,21 @@ CUDA_VISIBLE_DEVICES=<not set>
 PCI bus-id mapping: physical GPU 1 (bus 0000:52:00.0) -> CUDA ordinal 1.
 Torch device=cuda:1
 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [9:40:09<00:00, 17.40s/it]
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.eval_AUC_faithfulness --explanation-dir explanation_insertion_results/imagenet-o-clip-vitl/GradECLIP
+
+explanation_insertion_results/imagenet-o-clip-vitl/GradECLIP
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 710/710 [00:05<00:00, 135.27it/s]
+AUC evaluated on 710 samples (format-2(baseline))
+Insertion AUC Score: 0.1432
+Deletion AUC Score: 0.1431
+
+(lima_final) nsq@sysu-sys:/mnt/huawei/nsq/LIMA-copy/lima_origin$ python -m evals.evaluation_mistake_debug_baseline \
+>   --explanation-method explanation_insertion_results/imagenet-o-clip-vitl/GradECLIP \
+>   --eval-list ../datasets/imagenet-o/imagenet-o_list.txt
+scan: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2000/2000 [00:01<00:00, 1271.68it/s]
+[scan] mode=format-2-flat-json eval_list=2000 valid=710 missing=1290 broken=0 missing_key=0 empty=0 malformed=0.
+percentage: 0.25, avg. highest confidence: 0.14392556422193287, std:0.25652198491429756, retention percentage at highest confidence: 0.17847887323943662, std: 0.07013826569158499, used=710, empty_curve=0.
+percentage: 0.5, avg. highest confidence: 0.2998777903301615, std:0.34936246639587076, retention percentage at highest confidence: 0.33030985915492955, std: 0.1400268175068866, used=710, empty_curve=0.
+percentage: 0.75, avg. highest confidence: 0.3524908997643162, std:0.36424496712494703, retention percentage at highest confidence: 0.43278873239436616, std: 0.2088353968359593, used=710, empty_curve=0.
+percentage: 1.0, avg. highest confidence: 0.383440642961314, std:0.37489372959898903, retention percentage at highest confidence: 0.5332394366197183, std: 0.29663927279283653, used=710, empty_curve=0.
