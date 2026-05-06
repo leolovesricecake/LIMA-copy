@@ -16,7 +16,7 @@
   "fixed_token_size": 64,
   "search": "greedy",
   "seed": 42,
-  "max_samples": 20,
+  "max_samples": null,
   "dry_run": 0,
   "verbose_chunks": false,
   "output_dir": "lima_llm_results_gate_c_smoke_b1",
