@@ -17,8 +17,9 @@ class HFBackbone(BaseBackbone):
         max_length: int = 2048,
         embedding_layer_ratio: float = 0.7,
         dtype: str = "bfloat16",
+        equivalence_mode: str = "optimized_batch",
     ) -> None:
-        super().__init__()
+        super().__init__(equivalence_mode=equivalence_mode)
         self.model_path = model_path
         self.max_length = int(max_length)
         self.embedding_layer_ratio = float(embedding_layer_ratio)
@@ -111,6 +112,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = torch.ones_like(input_ids)
 
         with torch.no_grad():
+            self.forward_counters["predict_model_forwards"] += 1
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
             logits = outputs.logits[:, :-1, :]
             targets = input_ids[:, 1:]
@@ -170,6 +172,7 @@ class HFBackbone(BaseBackbone):
             label_lens.append(int(label_len))
 
         with torch.no_grad():
+            self.forward_counters["predict_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -197,7 +200,7 @@ class HFBackbone(BaseBackbone):
         probs = probs / probs.sum()
         return probs.astype(np.float32)
 
-    def predict_label_probs_batch(self, texts: Sequence[str], verbalizers: Sequence[str]) -> np.ndarray:
+    def _predict_label_probs_batch_impl(self, texts: Sequence[str], verbalizers: Sequence[str]) -> np.ndarray:
         if not texts:
             return np.zeros((0, len(verbalizers)), dtype=np.float32)
         self.forward_counters["predict_calls"] += len(texts)
@@ -236,6 +239,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
+            self.forward_counters["embed_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -270,6 +274,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
+            self.forward_counters["embed_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -293,7 +298,7 @@ class HFBackbone(BaseBackbone):
             out.append(row.astype(np.float32))
         return out
 
-    def embed_texts(self, texts: Sequence[str]) -> List[np.ndarray]:
+    def _embed_texts_impl(self, texts: Sequence[str]) -> List[np.ndarray]:
         if not texts:
             return []
         self.forward_counters["embed_calls"] += len(texts)
@@ -352,6 +357,7 @@ class HFBackbone(BaseBackbone):
         emb_layer = self.model.get_input_embeddings()
         full_embeds = emb_layer(full_ids).detach().requires_grad_(True)
 
+        self.forward_counters["predict_model_forwards"] += 1
         outputs = self.model(inputs_embeds=full_embeds, use_cache=False)
         logits = outputs.logits[:, :-1, :]
         targets = full_ids[:, 1:]

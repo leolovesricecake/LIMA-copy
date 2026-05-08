@@ -1,5 +1,3 @@
-import numpy as np
-
 from lima_llm.backbone.mock_backbone import MockBackbone
 from lima_llm.objective.submodular import ObjectiveWeights, TextSubmodularObjective
 from lima_llm.search.algorithms import run_bidirectional_search, run_forward_greedy
@@ -42,12 +40,12 @@ def _assert_same_trace(left, right) -> None:
     assert [item.selected_chunk_id for item in left] == [item.selected_chunk_id for item in right]
     assert len(left) == len(right)
     for l_item, r_item in zip(left, right):
-        assert np.isclose(l_item.marginal_gain, r_item.marginal_gain)
-        assert np.isclose(l_item.total_score, r_item.total_score)
-        assert np.isclose(l_item.components.confidence, r_item.components.confidence)
-        assert np.isclose(l_item.components.effectiveness, r_item.components.effectiveness)
-        assert np.isclose(l_item.components.consistency, r_item.components.consistency)
-        assert np.isclose(l_item.components.collaboration, r_item.components.collaboration)
+        assert abs(float(l_item.marginal_gain) - float(r_item.marginal_gain)) <= 1e-6
+        assert abs(float(l_item.total_score) - float(r_item.total_score)) <= 1e-6
+        assert abs(float(l_item.components.confidence) - float(r_item.components.confidence)) <= 1e-6
+        assert abs(float(l_item.components.effectiveness) - float(r_item.components.effectiveness)) <= 1e-6
+        assert abs(float(l_item.components.consistency) - float(r_item.components.consistency)) <= 1e-6
+        assert abs(float(l_item.components.collaboration) - float(r_item.components.collaboration)) <= 1e-6
 
 
 def test_forward_greedy_batched_and_fallback_paths_are_equivalent() -> None:

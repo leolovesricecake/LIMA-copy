@@ -1,5 +1,3 @@
-import numpy as np
-
 from lima_llm.backbone.mock_backbone import MockBackbone
 from lima_llm.objective.submodular import ObjectiveWeights, TextSubmodularObjective
 from lima_llm.types import TextChunk
@@ -34,8 +32,8 @@ def test_evaluate_gains_matches_single_evaluate_gain() -> None:
 
     for candidate in candidates:
         gain_single, _, score_single = objective.evaluate_gain(selected, candidate)
-        assert np.isclose(gain_map[candidate], gain_single)
-        assert np.isclose(score_map[candidate].total, score_single.total)
+        assert abs(float(gain_map[candidate]) - float(gain_single)) <= 1e-6
+        assert abs(float(score_map[candidate].total) - float(score_single.total)) <= 1e-6
 
 
 def test_evaluate_subsets_matches_evaluate_subset() -> None:
@@ -47,4 +45,4 @@ def test_evaluate_subsets_matches_evaluate_subset() -> None:
 
     assert len(batch_scores) == len(single_scores)
     for batch_item, single_item in zip(batch_scores, single_scores):
-        assert np.isclose(batch_item.total, single_item.total)
+        assert abs(float(batch_item.total) - float(single_item.total)) <= 1e-6

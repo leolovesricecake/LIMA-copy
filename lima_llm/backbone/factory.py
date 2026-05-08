@@ -12,13 +12,15 @@ def build_backbone(
     max_length: int,
     embedding_layer_ratio: float,
     dtype: str,
+    equivalence_mode: str = "optimized_batch",
 ) -> BaseBackbone:
     if use_mock_backbone:
-        return MockBackbone()
+        return MockBackbone(equivalence_mode=equivalence_mode)
     return HFBackbone(
         model_path=model_path,
         device=device,
         max_length=max_length,
         embedding_layer_ratio=embedding_layer_ratio,
         dtype=dtype,
+        equivalence_mode=equivalence_mode,
     )
