@@ -17,9 +17,8 @@ class HFBackbone(BaseBackbone):
         max_length: int = 2048,
         embedding_layer_ratio: float = 0.7,
         dtype: str = "bfloat16",
-        equivalence_mode: str = "optimized_batch",
     ) -> None:
-        super().__init__(equivalence_mode=equivalence_mode)
+        super().__init__()
         self.model_path = model_path
         self.max_length = int(max_length)
         self.embedding_layer_ratio = float(embedding_layer_ratio)
@@ -63,14 +62,6 @@ class HFBackbone(BaseBackbone):
         # Can be overridden by env vars for quick tuning without code changes.
         self.predict_batch_size = max(1, int(os.getenv("LIMA_PREDICT_BATCH_SIZE", "4")))
         self.embed_batch_size = max(1, int(os.getenv("LIMA_EMBED_BATCH_SIZE", "2")))
-        # Keep embedding path strictly equivalent by default.
-        # Set LIMA_ENABLE_EMBED_BATCH=1 to re-enable true embed batching for speed probes.
-        self.enable_embed_batch = str(os.getenv("LIMA_ENABLE_EMBED_BATCH", "0")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
 
     @staticmethod
     def _prepare_device(torch_module, device: str):
@@ -120,7 +111,6 @@ class HFBackbone(BaseBackbone):
         attention_mask = torch.ones_like(input_ids)
 
         with torch.no_grad():
-            self.forward_counters["predict_model_forwards"] += 1
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
             logits = outputs.logits[:, :-1, :]
             targets = input_ids[:, 1:]
@@ -180,7 +170,6 @@ class HFBackbone(BaseBackbone):
             label_lens.append(int(label_len))
 
         with torch.no_grad():
-            self.forward_counters["predict_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -246,7 +235,6 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
-            self.forward_counters["embed_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -285,7 +273,6 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
-            self.forward_counters["embed_model_forwards"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -313,10 +300,6 @@ class HFBackbone(BaseBackbone):
         if not texts:
             return []
         self.forward_counters["embed_calls"] += len(texts)
-        if not getattr(self, "enable_embed_batch", True):
-            # Exact-by-default: preserve single-sample numerics for Gate-C equivalence.
-            return [self._embed_text_once(text) for text in texts]
-
         outputs: List[np.ndarray] = []
         idx = 0
         batch_size = min(self.embed_batch_size, len(texts))
@@ -372,7 +355,6 @@ class HFBackbone(BaseBackbone):
         emb_layer = self.model.get_input_embeddings()
         full_embeds = emb_layer(full_ids).detach().requires_grad_(True)
 
-        self.forward_counters["predict_model_forwards"] += 1
         outputs = self.model(inputs_embeds=full_embeds, use_cache=False)
         logits = outputs.logits[:, :-1, :]
         targets = full_ids[:, 1:]

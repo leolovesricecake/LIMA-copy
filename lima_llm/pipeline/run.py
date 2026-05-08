@@ -37,12 +37,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dtype", type=str, default="bfloat16")
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--embedding-layer-ratio", type=float, default=0.7)
-    parser.add_argument(
-        "--equivalence-mode",
-        type=str,
-        default="optimized_batch",
-        choices=["strict_ref", "optimized_batch"],
-    )
     parser.add_argument("--mock-backbone", action="store_true")
 
     parser.add_argument("--k", type=int, default=8)
@@ -128,7 +122,6 @@ def main(argv: List[str] | None = None) -> None:
         max_length=args.max_length,
         embedding_layer_ratio=args.embedding_layer_ratio,
         dtype=args.dtype,
-        equivalence_mode=args.equivalence_mode,
     )
     set_seed(args.seed)
 

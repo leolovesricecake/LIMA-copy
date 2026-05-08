@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 from lima_llm.eval import (
     aggregate_gate_b_runs,
     collect_gate_b_runs,
-    write_gate_b_aggregate_csv,
+    write_gate_b_summary_csv,
     write_gate_b_aggregate_json,
 )
 
@@ -37,7 +37,7 @@ def main() -> None:
     runs = collect_gate_b_runs(results_root=results_root)
     payload = aggregate_gate_b_runs(runs=runs, min_runs=args.min_runs)
     write_gate_b_aggregate_json(payload=payload, output_path=output_json)
-    write_gate_b_aggregate_csv(payload=payload, output_path=output_csv)
+    write_gate_b_summary_csv(payload=payload, output_path=output_csv)
 
     print(
         f"[gate-b] root={results_root} runs={payload.get('run_count', 0)} groups={payload.get('group_count', 0)}"

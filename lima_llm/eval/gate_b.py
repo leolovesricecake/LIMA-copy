@@ -32,7 +32,6 @@ def _group_config(run_config: Dict[str, Any]) -> Dict[str, Any]:
         "dataset": run_config.get("dataset"),
         "split": run_config.get("split"),
         "model_path": run_config.get("model_path"),
-        "equivalence_mode": run_config.get("equivalence_mode", "optimized_batch"),
         "chunker": run_config.get("chunker"),
         "search": run_config.get("search"),
         "k": run_config.get("k"),
@@ -49,7 +48,6 @@ def _group_key(config: Dict[str, Any]) -> Tuple[Any, ...]:
         config.get("dataset"),
         config.get("split"),
         config.get("model_path"),
-        config.get("equivalence_mode"),
         config.get("chunker"),
         config.get("search"),
         config.get("k"),
@@ -183,7 +181,6 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
         group_id = (
             f"{config.get('dataset')}/{config.get('split')}"
             f"|model={Path(str(config.get('model_path', ''))).name}"
-            f"|eq={config.get('equivalence_mode')}"
             f"|chunk={config.get('chunker')}"
             f"|search={config.get('search')}"
             f"|k={config.get('k')}"
@@ -246,7 +243,7 @@ def write_gate_b_aggregate_json(payload: Dict[str, Any], output_path: Path) -> P
     return output_path
 
 
-def write_gate_b_aggregate_csv(payload: Dict[str, Any], output_path: Path) -> Path:
+def write_gate_b_summary_csv(payload: Dict[str, Any], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     for group in payload.get("groups", []):

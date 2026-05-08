@@ -278,9 +278,6 @@ def evaluate_saved_explanations(
     token_len_eval_errors = 0
     word_count_total = 0
     words_split_across_chunks_total = 0
-    prob_cache_hits_total = 0
-    prob_cache_misses_total = 0
-    prob_cache_unique_texts_total = 0
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -327,22 +324,11 @@ def evaluate_saved_explanations(
             chunk_ranking=chunk_ranking_ours,
         )
 
-        prob_cache: Dict[str, np.ndarray] = {}
-        prob_cache_hits = 0
-        prob_cache_misses = 0
-
-        def _cached_prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
-            nonlocal prob_cache_hits, prob_cache_misses
-            if text in prob_cache:
-                prob_cache_hits += 1
-                return prob_cache[text]
-            prob_cache_misses += 1
-            probs = backbone.predict_label_probs(text, verbalizers)
-            prob_cache[text] = probs
-            return probs
+        def _prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
+            return backbone.predict_label_probs(text, verbalizers)
 
         text_for_pred = sample.text if sample.text else "<EMPTY>"
-        full_probs = _cached_prob_fn(text_for_pred, verbalizers)
+        full_probs = _prob_fn(text_for_pred, verbalizers)
         pred_label = int(np.argmax(full_probs))
         if pred_label == sample.label:
             acc_hits += 1
@@ -387,7 +373,7 @@ def evaluate_saved_explanations(
                 ranking=ranking_ours,
                 target_label=target_label,
                 verbalizers=verbalizers,
-                prob_fn=_cached_prob_fn,
+                prob_fn=_prob_fn,
                 aopc_q_values=aopc_q_values,
                 extra_q_values=tracked_q_values,
                 reference_token_text=reference_token_text,
@@ -402,7 +388,7 @@ def evaluate_saved_explanations(
                 ranking=ranking_ours,
                 target_label=target_label,
                 verbalizers=verbalizers,
-                prob_fn=_cached_prob_fn,
+                prob_fn=_prob_fn,
             )
             state["ours_aopc"].append(float(ours_curve["aopc"]))
             state["ours_del_auc"].append(float(ours_curve["deletion_auc"]))
@@ -426,7 +412,7 @@ def evaluate_saved_explanations(
                     ranking=rr,
                     target_label=target_label,
                     verbalizers=verbalizers,
-                    prob_fn=_cached_prob_fn,
+                    prob_fn=_prob_fn,
                     aopc_q_values=aopc_q_values,
                     extra_q_values=tracked_q_values,
                     reference_token_text=reference_token_text,
@@ -480,7 +466,7 @@ def evaluate_saved_explanations(
                         ranking=grad_rank,
                         target_label=target_label,
                         verbalizers=verbalizers,
-                        prob_fn=_cached_prob_fn,
+                        prob_fn=_prob_fn,
                         aopc_q_values=aopc_q_values,
                         extra_q_values=tracked_q_values,
                         reference_token_text=reference_token_text,
@@ -500,10 +486,6 @@ def evaluate_saved_explanations(
                     state["grad_error_counts"][err] = state["grad_error_counts"].get(err, 0) + 1
                     if len(state["grad_error_examples"]) < 10:
                         state["grad_error_examples"].append({"sample_id": sample_id, "error": err})
-
-        prob_cache_hits_total += prob_cache_hits
-        prob_cache_misses_total += prob_cache_misses
-        prob_cache_unique_texts_total += len(prob_cache)
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
@@ -587,16 +569,6 @@ def evaluate_saved_explanations(
             "plausibility_iou": _safe_mean(plaus_iou_values),
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
-            "eval_prob_cache_stats": {
-                "hits": int(prob_cache_hits_total),
-                "misses": int(prob_cache_misses_total),
-                "unique_texts": int(prob_cache_unique_texts_total),
-                "hit_rate": (
-                    float(prob_cache_hits_total / (prob_cache_hits_total + prob_cache_misses_total))
-                    if (prob_cache_hits_total + prob_cache_misses_total) > 0
-                    else 0.0
-                ),
-            },
         },
         "baselines": mode_reports["gold"]["baselines"],
         "metrics_by_target": mode_reports,

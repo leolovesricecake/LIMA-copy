@@ -9,8 +9,8 @@ from .base import BaseBackbone
 
 
 class MockBackbone(BaseBackbone):
-    def __init__(self, embedding_dim: int = 128, equivalence_mode: str = "optimized_batch") -> None:
-        super().__init__(equivalence_mode=equivalence_mode)
+    def __init__(self, embedding_dim: int = 128) -> None:
+        super().__init__()
         self.embedding_dim = int(embedding_dim)
 
     def tokenize_len(self, text: str) -> int:

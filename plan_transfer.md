@@ -19,7 +19,8 @@
   - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`diagnosticity=0.6650±0.0000`、`run_pass_rate=1.0`；
   - 聚合产物：`lima_llm_results/gate_b_aggregate.json` 与 `lima_llm_results/gate_b_aggregate.csv`。
 - 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
-- 结论：Gate A、Gate B 已达到工程验收口径；进入 Gate C（等价性能优化）。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
+- 结论：Gate A、Gate B 已达到工程验收口径。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
+- 提醒：性能优化（原 Gate C）暂缓，待功能方案冻结后再重启专项优化。
 
 ## Phase 0：仓库与工程基线（已完成）
 - 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
@@ -34,17 +35,14 @@
 - 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
 - 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
 
-## Phase 2：稳定性与规模化（Gate B 已验收，进入 Gate C）
+## Phase 2：稳定性与规模化
 - 提升长任务稳定性：统一 GPU 映射策略、失败重试/熔断策略。
 - 增强数据适配：补齐更多 ERASER 子任务与中文判别数据集适配。
 - 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
 - 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
 
-## Phase 3：效率优化（严格等价优先）
-- 样本内向量化与批量候选打分（保持结果与 v1 等价）。
-- 引入 KV cache 复用（仅在等价校验通过后启用）。
-- 引入候选预筛（attention/uncertainty 先验）并提供可关闭开关，默认关闭。
-- 为每项优化提供 equivalence test（子集选择序列与分数轨迹一致性校验）。
+## Phase 3：效率优化（后续专项）
+- 暂缓执行，待功能方案冻结后再重启专项优化。
 
 ## Phase 4：生成式任务扩展（最终目标）
 - 从判别式标签目标扩展到“目标输出 token/span”解释。
@@ -74,16 +72,6 @@
   - 所有 run 均满足 `COMP > random` 且 `SUFF < random`；
   - `run_pass_rate=1.0`，diagnosticity 在 `0.655~0.665` 区间稳定。
   - 注意：这些产物来自 word-level 统一评估前的报告；新协议下需要重跑聚合作为论文最终表格。
-
-## Gate C：等价性能优化（当前阶段）
-- 目标：在不改变结果的前提下提速。
-- 约束：每项优化都要有等价测试（`selected chunks` 与 `F(S)` 轨迹一致）。
-- 分层任务（按优先级）：
-  - P0：评估阶段文本概率缓存（避免 `gold/predicted` 与 baseline 的重复前向）。【已实现，已有缓存命中率报告】
-  - P0：候选子集打分批处理（减少搜索阶段单条前向开销）。【已实现，新增 batched/fallback 等价测试】
-  - P1：Objective 的 embedding/概率缓存键标准化（跨步骤命中）。
-  - P2：KV cache 复用与候选预筛（默认关闭，灰度启用）。
-- 验收标准：结果等价 + 吞吐提升可量化（至少报告 `predict_calls` 与总时长降幅）。
 
 ## Gate D：生成式任务扩展（最终阶段）
 - 目标：从分类解释迁移到生成目标 token/span 解释。

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import numpy as np
 
@@ -58,125 +58,67 @@ class TextSubmodularObjective:
         text = compose_text_from_chunk_ids(self.chunks, comp)
         return text if text != "" else self.empty_text_token
 
-    @staticmethod
-    def _dedupe_keep_order(items: Sequence[str]) -> List[str]:
-        seen = set()
-        out: List[str] = []
-        for item in items:
-            if item in seen:
-                continue
-            seen.add(item)
-            out.append(item)
-        return out
-
-    def _predict_probs_cached(self, texts: Sequence[str]) -> Dict[str, np.ndarray]:
-        unique = self._dedupe_keep_order(texts)
-        missing = [text for text in unique if text not in self._prob_cache]
-        if missing:
-            batched = self.backbone.predict_label_probs_batch(missing, self.verbalizers)
-            for text, probs in zip(missing, batched):
-                self._prob_cache[text] = np.asarray(probs, dtype=np.float32)
-        return {text: self._prob_cache[text] for text in unique}
-
-    def _embed_cached(self, texts: Sequence[str]) -> Dict[str, np.ndarray]:
-        unique = self._dedupe_keep_order(texts)
-        missing = [text for text in unique if text not in self._embed_cache]
-        if missing:
-            embeddings = self.backbone.embed_texts(missing)
-            for text, emb in zip(missing, embeddings):
-                self._embed_cache[text] = np.asarray(emb, dtype=np.float32)
-        return {text: self._embed_cache[text] for text in unique}
+    def _predict_prob_cached(self, text: str) -> np.ndarray:
+        if text not in self._prob_cache:
+            self._prob_cache[text] = np.asarray(
+                self.backbone.predict_label_probs(text, self.verbalizers),
+                dtype=np.float32,
+            )
+        return self._prob_cache[text]
 
     def _embed_text_cached(self, text: str) -> np.ndarray:
-        return self._embed_cached([text])[text]
+        if text not in self._embed_cache:
+            self._embed_cache[text] = np.asarray(self.backbone.embed_text(text), dtype=np.float32)
+        return self._embed_cache[text]
 
-    def _materialize_subsets(self, subset_keys: Sequence[Tuple[int, ...]]) -> None:
-        missing_keys = [key for key in subset_keys if key not in self.cache]
-        if not missing_keys:
+    def _materialize_subset(self, subset_key: Tuple[int, ...]) -> None:
+        if subset_key in self.cache:
             return
 
-        subset_text_by_key: Dict[Tuple[int, ...], str] = {}
-        complement_text_by_key: Dict[Tuple[int, ...], str] = {}
-        subset_texts: List[str] = []
-        embed_texts: List[str] = []
+        subset_text = self._subset_text(subset_key)
+        complement_text = self._complement_text(subset_key)
 
-        for key in missing_keys:
-            subset_text = self._subset_text(key)
-            complement_text = self._complement_text(key)
-            subset_text_by_key[key] = subset_text
-            complement_text_by_key[key] = complement_text
-            subset_texts.append(subset_text)
-            embed_texts.append(subset_text)
-            embed_texts.append(complement_text)
+        label_probs = self._predict_prob_cached(subset_text)
+        target_prob = float(label_probs[self.target_label])
 
-        self._predict_probs_cached(subset_texts)
-        self._embed_cached(embed_texts)
+        # Use target-class probability so F(S) is explicitly class-conditional.
+        conf = target_prob
+        eff = effectiveness_score(self.chunk_embeddings, subset_key)
+        cons = consistency_score(self._embed_text_cached(subset_text), self.anchor_embedding)
+        col = collaboration_score(self._embed_text_cached(complement_text), self.anchor_embedding)
 
-        for key in missing_keys:
-            subset_text = subset_text_by_key[key]
-            complement_text = complement_text_by_key[key]
+        components = ScoreComponents(
+            confidence=conf,
+            effectiveness=eff,
+            consistency=cons,
+            collaboration=col,
+        )
 
-            label_probs = self._prob_cache[subset_text]
-            target_prob = float(label_probs[self.target_label])
+        total = (
+            self.weights.lambda1 * conf
+            + self.weights.lambda2 * eff
+            + self.weights.lambda3 * cons
+            + self.weights.lambda4 * col
+        )
 
-            # Use target-class probability so F(S) is explicitly class-conditional.
-            conf = target_prob
-            eff = effectiveness_score(self.chunk_embeddings, key)
-            cons = consistency_score(self._embed_cache[subset_text], self.anchor_embedding)
-            col = collaboration_score(self._embed_cache[complement_text], self.anchor_embedding)
-
-            components = ScoreComponents(
-                confidence=conf,
-                effectiveness=eff,
-                consistency=cons,
-                collaboration=col,
-            )
-
-            total = (
-                self.weights.lambda1 * conf
-                + self.weights.lambda2 * eff
-                + self.weights.lambda3 * cons
-                + self.weights.lambda4 * col
-            )
-
-            score = SubsetScore(
-                subset_indices=key,
-                total=float(total),
-                components=components,
-                target_probability=target_prob,
-                label_probabilities=tuple(float(x) for x in label_probs.tolist()),
-            )
-            self.cache[key] = score
+        self.cache[subset_key] = SubsetScore(
+            subset_indices=subset_key,
+            total=float(total),
+            components=components,
+            target_probability=target_prob,
+            label_probabilities=tuple(float(x) for x in label_probs.tolist()),
+        )
 
     def evaluate_subset(self, subset: Sequence[int]) -> SubsetScore:
         key = normalize_subset(subset)
-        self._materialize_subsets([key])
+        self._materialize_subset(key)
         return self.cache[key]
 
-    def evaluate_subsets(self, subsets: Sequence[Sequence[int]]) -> List[SubsetScore]:
-        keys = [normalize_subset(subset) for subset in subsets]
-        self._materialize_subsets(keys)
-        return [self.cache[key] for key in keys]
-
-    def evaluate_gains(
-        self,
-        subset: Sequence[int],
-        candidates: Sequence[int],
-    ) -> Tuple[SubsetScore, Dict[int, float], Dict[int, SubsetScore]]:
-        base_key = normalize_subset(subset)
-        aug_keys = [normalize_subset(tuple(list(base_key) + [candidate])) for candidate in candidates]
-        self._materialize_subsets([base_key, *aug_keys])
-
-        base = self.cache[base_key]
-        gains: Dict[int, float] = {}
-        scores: Dict[int, SubsetScore] = {}
-        for candidate, key in zip(candidates, aug_keys):
-            score = self.cache[key]
-            gains[int(candidate)] = float(score.total - base.total)
-            scores[int(candidate)] = score
-        return base, gains, scores
-
     def evaluate_gain(self, subset: Sequence[int], candidate: int) -> Tuple[float, SubsetScore, SubsetScore]:
-        base, gains, scores = self.evaluate_gains(subset=subset, candidates=[candidate])
-        augmented = scores[int(candidate)]
-        return float(gains[int(candidate)]), base, augmented
+        base_key = normalize_subset(subset)
+        aug_key = normalize_subset(tuple(list(base_key) + [candidate]))
+        self._materialize_subset(base_key)
+        self._materialize_subset(aug_key)
+        base = self.cache[base_key]
+        augmented = self.cache[aug_key]
+        return float(augmented.total - base.total), base, augmented
