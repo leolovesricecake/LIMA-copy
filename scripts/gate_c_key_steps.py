@@ -42,10 +42,12 @@ def _check_backbone_step_equivalence(
     verbalizers: Sequence[str],
     texts: Sequence[str],
     tolerance: float,
+    max_batch_size: int,
 ) -> None:
     max_prob_diff = 0.0
     max_embed_diff = 0.0
 
+    # 1) Single-text strict vs optimized path (sanity baseline).
     for text in texts:
         safe_text = text if text else "<EMPTY>"
 
@@ -85,11 +87,63 @@ def _check_backbone_step_equivalence(
             )
             return
 
+    # 2) Multi-text strict-single vs optimized-batch (the key Gate C contract).
+    batch_size = max(2, int(max_batch_size))
+    for start in range(0, len(texts), batch_size):
+        batch_raw = list(texts[start : start + batch_size])
+        batch = [item if item else "<EMPTY>" for item in batch_raw]
+        if len(batch) < 2:
+            continue
+
+        backbone.set_equivalence_mode("strict_ref")
+        probs_ref_rows = [backbone.predict_label_probs(text, verbalizers) for text in batch]
+        emb_ref_rows = [backbone.embed_text(text) for text in batch]
+
+        backbone.set_equivalence_mode("optimized_batch")
+        probs_opt_mat = backbone.predict_label_probs_batch(batch, verbalizers)
+        emb_opt_rows = backbone.embed_texts(batch)
+
+        for row_idx, text in enumerate(batch):
+            prob_diff = _abs_max(probs_ref_rows[row_idx].tolist(), probs_opt_mat[row_idx].tolist())
+            embed_diff = _abs_max(emb_ref_rows[row_idx].tolist(), emb_opt_rows[row_idx].tolist())
+            max_prob_diff = max(max_prob_diff, prob_diff)
+            max_embed_diff = max(max_embed_diff, embed_diff)
+
+            if prob_diff > tolerance:
+                _append_failure(
+                    report,
+                    "backbone.predict_batch",
+                    {
+                        "batch_start": start,
+                        "batch_size": len(batch),
+                        "row": row_idx,
+                        "text_preview": text[:120],
+                        "abs_diff": prob_diff,
+                        "left": probs_ref_rows[row_idx].tolist(),
+                        "right": probs_opt_mat[row_idx].tolist(),
+                    },
+                )
+                return
+            if embed_diff > tolerance:
+                _append_failure(
+                    report,
+                    "backbone.embed_batch",
+                    {
+                        "batch_start": start,
+                        "batch_size": len(batch),
+                        "row": row_idx,
+                        "text_preview": text[:120],
+                        "abs_diff": embed_diff,
+                    },
+                )
+                return
+
     report["sections"]["backbone"] = {
         "passed": True,
         "max_prob_abs_diff": max_prob_diff,
         "max_embed_abs_diff": max_embed_diff,
         "checked_texts": len(texts),
+        "checked_batch_size": batch_size,
     }
 
 
@@ -122,14 +176,92 @@ def _check_objective_step_equivalence(
     checked = 0
 
     for sample in samples:
+        # Cross-mode strict vs optimized equivalence on the same subset/candidate set.
+        backbone.set_equivalence_mode("strict_ref")
+        chunks_ref, objective_ref = _build_objective(backbone, sample, chunker, verbalizers, weights)
+        backbone.set_equivalence_mode("optimized_batch")
+        chunks_opt, objective_opt = _build_objective(backbone, sample, chunker, verbalizers, weights)
+        if len(chunks_ref) != len(chunks_opt):
+            _append_failure(
+                report,
+                "objective.chunk_count",
+                {
+                    "sample_id": sample.sample_id,
+                    "strict_ref_count": len(chunks_ref),
+                    "optimized_count": len(chunks_opt),
+                },
+            )
+            return
+
+        candidate_ids = [chunk.chunk_id for chunk in chunks_ref][: max(1, int(max_candidates))]
+        subset = []
+        base_ref, gain_map_ref, score_map_ref = objective_ref.evaluate_gains(subset, candidate_ids)
+        base_opt, gain_map_opt, score_map_opt = objective_opt.evaluate_gains(subset, candidate_ids)
+        base_diff = abs(float(base_ref.total) - float(base_opt.total))
+        max_abs_diff = max(max_abs_diff, base_diff)
+        if base_diff > tolerance:
+            _append_failure(
+                report,
+                "objective.cross_mode.base",
+                {
+                    "sample_id": sample.sample_id,
+                    "subset": subset,
+                    "left_total": float(base_ref.total),
+                    "right_total": float(base_opt.total),
+                    "abs_diff": base_diff,
+                },
+            )
+            return
+        for candidate in candidate_ids:
+            diff_gain = abs(float(gain_map_ref[candidate]) - float(gain_map_opt[candidate]))
+            diff_score = abs(float(score_map_ref[candidate].total) - float(score_map_opt[candidate].total))
+            max_abs_diff = max(max_abs_diff, diff_gain, diff_score)
+            if diff_gain > tolerance or diff_score > tolerance:
+                _append_failure(
+                    report,
+                    "objective.cross_mode.gains",
+                    {
+                        "sample_id": sample.sample_id,
+                        "candidate": candidate,
+                        "gain_left": float(gain_map_ref[candidate]),
+                        "gain_right": float(gain_map_opt[candidate]),
+                        "score_left": float(score_map_ref[candidate].total),
+                        "score_right": float(score_map_opt[candidate].total),
+                        "abs_diff_gain": diff_gain,
+                        "abs_diff_score": diff_score,
+                    },
+                )
+                return
+
+        subsets = [[], candidate_ids[:1], candidate_ids[:2], candidate_ids[:3]]
+        scores_ref = objective_ref.evaluate_subsets(subsets)
+        scores_opt = objective_opt.evaluate_subsets(subsets)
+        for left_item, right_item in zip(scores_ref, scores_opt):
+            diff_total = abs(float(left_item.total) - float(right_item.total))
+            max_abs_diff = max(max_abs_diff, diff_total)
+            if diff_total > tolerance:
+                _append_failure(
+                    report,
+                    "objective.cross_mode.subsets",
+                    {
+                        "sample_id": sample.sample_id,
+                        "subset": list(left_item.subset_indices),
+                        "left_total": float(left_item.total),
+                        "right_total": float(right_item.total),
+                        "abs_diff": diff_total,
+                    },
+                )
+                return
+
+        # Intra-mode API consistency: evaluate_gains/subsets vs evaluate_gain/subset.
         for mode in ("strict_ref", "optimized_batch"):
             backbone.set_equivalence_mode(mode)
             chunks, objective = _build_objective(backbone, sample, chunker, verbalizers, weights)
-            candidate_ids = [chunk.chunk_id for chunk in chunks][: max(1, int(max_candidates))]
+            mode_candidate_ids = [chunk.chunk_id for chunk in chunks][: max(1, int(max_candidates))]
             subset = []
 
-            _, gain_map, score_map = objective.evaluate_gains(subset, candidate_ids)
-            for candidate in candidate_ids:
+            _, gain_map, score_map = objective.evaluate_gains(subset, mode_candidate_ids)
+            for candidate in mode_candidate_ids:
                 gain_single, _, score_single = objective.evaluate_gain(subset, candidate)
                 diff_gain = abs(float(gain_map[candidate]) - float(gain_single))
                 diff_score = abs(float(score_map[candidate].total) - float(score_single.total))
@@ -150,9 +282,9 @@ def _check_objective_step_equivalence(
                     )
                     return
 
-            subsets = [[], candidate_ids[:1], candidate_ids[:2], candidate_ids[:3]]
-            batch_scores = objective.evaluate_subsets(subsets)
-            single_scores = [objective.evaluate_subset(subset_item) for subset_item in subsets]
+            mode_subsets = [[], mode_candidate_ids[:1], mode_candidate_ids[:2], mode_candidate_ids[:3]]
+            batch_scores = objective.evaluate_subsets(mode_subsets)
+            single_scores = [objective.evaluate_subset(subset_item) for subset_item in mode_subsets]
             for batch_item, single_item in zip(batch_scores, single_scores):
                 diff_total = abs(float(batch_item.total) - float(single_item.total))
                 max_abs_diff = max(max_abs_diff, diff_total)
@@ -231,12 +363,25 @@ def _check_search_step_equivalence(
             selected_opt, trace_opt = _search_once(search, objective_opt, candidate_ids=candidate_ids, k=run_k)
 
             if selected_ref != selected_opt:
+                mismatch_step = None
+                for idx, (left_id, right_id) in enumerate(zip(selected_ref, selected_opt)):
+                    if left_id != right_id:
+                        mismatch_step = idx
+                        break
+                if mismatch_step is None and len(selected_ref) != len(selected_opt):
+                    mismatch_step = min(len(selected_ref), len(selected_opt))
+
                 _append_failure(
                     report,
                     "search.selected_chunk_ids",
                     {
                         "sample_id": sample.sample_id,
                         "search": search,
+                        "first_mismatch_step": mismatch_step,
+                        "left_prefix": selected_ref[: min(len(selected_ref), 10)],
+                        "right_prefix": selected_opt[: min(len(selected_opt), 10)],
+                        "left_trace_preview": _trace_as_dicts(trace_ref)[: min(len(trace_ref), 5)],
+                        "right_trace_preview": _trace_as_dicts(trace_opt)[: min(len(trace_opt), 5)],
                         "left": selected_ref,
                         "right": selected_opt,
                     },
@@ -294,6 +439,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int, default=20)
     parser.add_argument("--max-candidates", type=int, default=16)
+    parser.add_argument("--max-batch-size-check", type=int, default=8)
     parser.add_argument("--tolerance", type=float, default=1e-6)
     parser.add_argument("--output-json", type=str, default=None)
     return parser
@@ -361,6 +507,7 @@ def main() -> None:
         verbalizers=bundle.verbalizers,
         texts=dedup_texts,
         tolerance=float(args.tolerance),
+        max_batch_size=int(args.max_batch_size_check),
     )
     if report["passed"]:
         _check_objective_step_equivalence(
