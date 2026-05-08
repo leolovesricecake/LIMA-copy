@@ -63,6 +63,14 @@ class HFBackbone(BaseBackbone):
         # Can be overridden by env vars for quick tuning without code changes.
         self.predict_batch_size = max(1, int(os.getenv("LIMA_PREDICT_BATCH_SIZE", "4")))
         self.embed_batch_size = max(1, int(os.getenv("LIMA_EMBED_BATCH_SIZE", "2")))
+        # Keep embedding path strictly equivalent by default.
+        # Set LIMA_ENABLE_EMBED_BATCH=1 to re-enable true embed batching for speed probes.
+        self.enable_embed_batch = str(os.getenv("LIMA_ENABLE_EMBED_BATCH", "0")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
     @staticmethod
     def _prepare_device(torch_module, device: str):
@@ -225,8 +233,7 @@ class HFBackbone(BaseBackbone):
                 raise
         return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, len(verbalizers)), dtype=np.float32)
 
-    def embed_text(self, text: str) -> np.ndarray:
-        self.forward_counters["embed_calls"] += 1
+    def _embed_text_once(self, text: str) -> np.ndarray:
         torch = self.torch
         encoded = self.tokenizer(
             text,
@@ -259,6 +266,10 @@ class HFBackbone(BaseBackbone):
         if norm > 1e-8:
             pooled = pooled / norm
         return pooled
+
+    def embed_text(self, text: str) -> np.ndarray:
+        self.forward_counters["embed_calls"] += 1
+        return self._embed_text_once(text)
 
     def _embed_texts_once(self, texts: Sequence[str]) -> List[np.ndarray]:
         torch = self.torch
@@ -302,6 +313,10 @@ class HFBackbone(BaseBackbone):
         if not texts:
             return []
         self.forward_counters["embed_calls"] += len(texts)
+        if not getattr(self, "enable_embed_batch", True):
+            # Exact-by-default: preserve single-sample numerics for Gate-C equivalence.
+            return [self._embed_text_once(text) for text in texts]
+
         outputs: List[np.ndarray] = []
         idx = 0
         batch_size = min(self.embed_batch_size, len(texts))
