@@ -25,9 +25,10 @@ set -euo pipefail
 #   --k 8 \
 #   --chunker sentence \
 #   --search greedy \
+#   --explain-method ours \
 #   --dataset-cache-dir /path/to/dataset_cache \
 #   --output-dir lima_llm_results \
-#   --run-eval --eval-role full
+#   --run-eval
 export HF_ENDPOINT=https://hf-mirror.com
 
 python -m lima_llm "$@"

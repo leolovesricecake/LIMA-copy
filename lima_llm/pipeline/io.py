@@ -28,6 +28,7 @@ def rebuild_summary_csv(output_root: Path) -> Path:
             scores = payload.get("scores", {})
             row = {
                 "sample_id": payload.get("sample_id", ""),
+                "explain_method": payload.get("explain_method", ""),
                 "label": payload.get("label", ""),
                 "selected_chunk_count": len(payload.get("selected_chunk_ids", [])),
                 "total_chunks": len(payload.get("chunks", [])),
@@ -46,6 +47,7 @@ def rebuild_summary_csv(output_root: Path) -> Path:
             f,
             fieldnames=[
                 "sample_id",
+                "explain_method",
                 "label",
                 "selected_chunk_count",
                 "total_chunks",

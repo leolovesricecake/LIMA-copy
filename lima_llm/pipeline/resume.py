@@ -29,6 +29,12 @@ def is_sample_completed(paths: Dict[str, Path], mode: str) -> bool:
 
     try:
         payload = json.loads(json_path.read_text(encoding="utf-8"))
+        if "explain_method" not in payload:
+            return False
+        if "chunk_ranking" not in payload:
+            return False
+        if "chunk_scores" not in payload:
+            return False
         if "selected_chunk_ids" not in payload:
             return False
         if "trace" not in payload:

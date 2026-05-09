@@ -69,6 +69,7 @@ class ScoreTrace:
 
 @dataclass
 class ExplanationResult:
+    explain_method: str
     sample_id: str
     dataset: str
     split: str
@@ -76,6 +77,8 @@ class ExplanationResult:
     label_text: Optional[str]
     text: str
     chunks: List[TextChunk]
+    chunk_ranking: List[int]
+    chunk_scores: List[float]
     selected_chunk_ids: List[int]
     selected_text: str
     scores: Dict[str, Any]
@@ -84,6 +87,7 @@ class ExplanationResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "explain_method": self.explain_method,
             "sample_id": self.sample_id,
             "dataset": self.dataset,
             "split": self.split,
@@ -91,6 +95,8 @@ class ExplanationResult:
             "label_text": self.label_text,
             "text": self.text,
             "chunks": [asdict(c) for c in self.chunks],
+            "chunk_ranking": list(self.chunk_ranking),
+            "chunk_scores": list(self.chunk_scores),
             "selected_chunk_ids": list(self.selected_chunk_ids),
             "selected_text": self.selected_text,
             "scores": self.scores,

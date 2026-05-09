@@ -10,16 +10,16 @@
 - 实验层（ERASER Movie Reviews, validation）：
   - `accuracy_full=0.89`（稳定）
   - `comprehensiveness=0.0764`、`sufficiency=-0.1005`、`aopc=0.1531`
-  - `diagnosticity_vs_random=0.715`
+  - 历史结论：`ours` 相对 `random` 具备稳定优势
   - `metrics_by_target` 已包含 `gold/predicted` 双口径；
   - `per_q`（`q=1/5/10/20/50`）已输出；
   - `gradient baseline`: `evaluated_samples=200/200`、`failed_samples=0`。
 - Gate B 多 seed 验收已完成：
-  - `sentence + greedy + k=8 + lambdas=1,1,1,1`：3 seeds，`comp_adv_mean=0.0473`、`suff_adv_mean=0.2901`、`diagnosticity=0.6583±0.0024`、`run_pass_rate=1.0`；
-  - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`diagnosticity=0.6650±0.0000`、`run_pass_rate=1.0`；
+  - `sentence + greedy + k=8 + lambdas=1,1,1,1`：3 seeds，`comp_adv_mean=0.0473`、`suff_adv_mean=0.2901`、`run_pass_rate=1.0`；
+  - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`run_pass_rate=1.0`；
   - 聚合产物：`lima_llm_results/gate_b_aggregate.json` 与 `lima_llm_results/gate_b_aggregate.csv`。
 - 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
-- Gate B 评估支持角色拆分：`--eval-role {ours,random,gradient,full}`，可在不同 GPU 独立并行执行并产出同结构报告。
+- Gate B 评估已切换为方法级独立运行：`--explain-method {ours,random,gradient}`，可在不同 GPU 独立并行执行。
 - 结论：Gate A、Gate B 已达到工程验收口径。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
 - 提醒：性能优化（原 Gate C）暂缓，待功能方案冻结后再重启专项优化。
 
@@ -67,11 +67,11 @@
 - 验收标准：
   - `COMP` 持续高于 random；
   - `SUFF` 持续低于 random；
-  - `diagnosticity` 在多 seed 上稳定。
+  - `run_pass_rate` 在多 seed 上稳定。
 - 当前结论：
   - 两个 lambda 配置均完成 `seed=42/43/44`；
   - 所有 run 均满足 `COMP > random` 且 `SUFF < random`；
-  - `run_pass_rate=1.0`，diagnosticity 在 `0.655~0.665` 区间稳定。
+  - `run_pass_rate=1.0`。
   - 注意：这些产物来自 word-level 统一评估前的报告；新协议下需要重跑聚合作为论文最终表格。
 
 ## Gate D：生成式任务扩展（最终阶段）

@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunkers", type=str, default="sentence")
     parser.add_argument("--searches", type=str, default="greedy")
     parser.add_argument("--lambdas-list", type=str, default="1,1,1,1")
+    parser.add_argument("--methods", type=str, default="ours")
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -46,24 +47,26 @@ def main() -> None:
     chunkers = _parse_str_csv(args.chunkers)
     searches = _parse_str_csv(args.searches)
     lambdas_values = _parse_lambdas_list(args.lambdas_list)
+    methods = _parse_str_csv(args.methods)
     base_args = list(extra or [])
     if base_args and base_args[0] == "--":
         base_args = base_args[1:]
 
-    if not seeds or not k_values or not chunkers or not searches or not lambdas_values:
-        raise ValueError("seeds/k-values/chunkers/searches/lambdas-list must not be empty")
+    if not seeds or not k_values or not chunkers or not searches or not lambdas_values or not methods:
+        raise ValueError("seeds/k-values/chunkers/searches/lambdas-list/methods must not be empty")
 
-    jobs = list(itertools.product(seeds, k_values, chunkers, searches, lambdas_values))
+    jobs = list(itertools.product(seeds, k_values, chunkers, searches, lambdas_values, methods))
     print(f"[gate-b-run] jobs={len(jobs)}")
 
     progress = tqdm(jobs, desc="gate-b-jobs", dynamic_ncols=True, unit="job")
-    for i, (seed, k, chunker, search, lambdas) in enumerate(progress, start=1):
+    for i, (seed, k, chunker, search, lambdas, method) in enumerate(progress, start=1):
         progress.set_postfix(
             {
                 "seed": seed,
                 "k": k,
                 "chunk": chunker,
                 "search": search,
+                "method": method,
             },
             refresh=False,
         )
@@ -82,8 +85,13 @@ def main() -> None:
             search,
             "--lambdas",
             lambdas,
+            "--explain-method",
+            method,
         ]
-        print(f"[gate-b-run] ({i}/{len(jobs)}) seed={seed} k={k} chunker={chunker} search={search} lam={lambdas}")
+        print(
+            f"[gate-b-run] ({i}/{len(jobs)}) seed={seed} k={k} chunker={chunker} "
+            f"search={search} lam={lambdas} method={method}"
+        )
         print("[gate-b-run] cmd:", " ".join(cmd))
         if args.dry_run:
             continue

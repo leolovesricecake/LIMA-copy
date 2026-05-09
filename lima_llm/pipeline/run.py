@@ -55,8 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--run-eval", action="store_true")
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
-    parser.add_argument("--eval-random-trials", type=int, default=5)
-    parser.add_argument("--eval-role", type=str, default="full", choices=["ours", "random", "gradient", "full"])
+    parser.add_argument("--explain-method", type=str, default="ours", choices=["ours", "random", "gradient"])
     return parser
 
 
@@ -137,6 +136,8 @@ def main(argv: List[str] | None = None) -> None:
         k=args.k,
         search=args.search,
         weights=weights,
+        explain_method=args.explain_method,
+        seed=args.seed,
     )
     explainer = TextLIMAExplainer(
         backbone=backbone,
@@ -159,6 +160,7 @@ def main(argv: List[str] | None = None) -> None:
         / (
             f"chunk-{args.chunker}_search-{args.search}_k-{args.k}"
             f"_lam-{args.lambdas.replace(',', '-')}_seed-{args.seed}"
+            f"_method-{args.explain_method}"
         )
     )
     ensure_dir(output_root)
@@ -171,7 +173,7 @@ def main(argv: List[str] | None = None) -> None:
         print(f"[config] keep existing run config: {config_path}")
 
     if args.run_eval:
-        eval_cfg_path = output_root / f"eval_config.{args.eval_role}.json"
+        eval_cfg_path = output_root / "eval_config.json"
         eval_cfg_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
 
     pending_samples, _ = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
@@ -194,23 +196,16 @@ def main(argv: List[str] | None = None) -> None:
         from ..eval.evaluate import evaluate_saved_explanations
 
         q_values = parse_q_values(args.eval_q_values)
-        print(
-            f"[eval] running q_values={q_values} random_trials={args.eval_random_trials} "
-            f"role={args.eval_role}"
-        )
+        print(f"[eval] running q_values={q_values} method={args.explain_method}")
         eval_report = evaluate_saved_explanations(
             output_root=output_root,
             bundle=bundle,
             backbone=backbone,
             verbalizers=bundle.verbalizers,
             q_values=q_values,
-            random_trials=args.eval_random_trials,
-            eval_role=args.eval_role,
+            explain_method=args.explain_method,
         )
-        if args.eval_role == "full":
-            report_path = output_root / "eval_report.json"
-        else:
-            report_path = output_root / f"eval_report.{args.eval_role}.json"
+        report_path = output_root / "eval_report.json"
         report_path.write_text(json.dumps(eval_report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[eval] report={report_path}")
 

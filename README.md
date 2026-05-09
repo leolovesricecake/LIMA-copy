@@ -23,12 +23,13 @@ bash scripts/run_lima_llm_v1.sh \
   --k 8 \
   --chunker sentence \
   --search greedy \
+  --explain-method ours \
   --max-samples 100 \
   --output-dir lima_llm_results \
-  --run-eval --eval-role full
+  --run-eval
 ```
 
-`--eval-role` 支持 `ours/random/gradient/full`，其中 `full` 会执行三者全量评估；也可将不同角色分开在不同 GPU 独立运行。
+`--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
 
 ## 原始 LIMA 说明
 

@@ -27,29 +27,21 @@ def _build_tiny_eraser(root: Path) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _single_path(root: Path, pattern: str) -> Path:
-    matches = list(root.glob(pattern))
+def _sample_payloads(method_root: Path) -> dict[str, dict]:
+    payloads = {}
+    for path in sorted((method_root / "samples").glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payloads[str(payload["sample_id"])] = payload
+    return payloads
+
+
+def _method_dir(root: Path, method: str) -> Path:
+    matches = list(root.glob(f"**/*_method-{method}"))
     assert len(matches) == 1
     return matches[0]
 
 
-def _collect_keys(obj, prefix="") -> set[str]:
-    keys: set[str] = set()
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            cur = f"{prefix}.{k}" if prefix else str(k)
-            keys.add(cur)
-            keys.update(_collect_keys(v, cur))
-    elif isinstance(obj, list):
-        keys.add(prefix + "[]")
-    return keys
-
-
-def _assert_close(a: float, b: float, tol: float = 1e-6) -> None:
-    assert abs(float(a) - float(b)) <= tol
-
-
-def test_eval_roles_reports_are_independent_and_consistent(tmp_path: Path) -> None:
+def test_method_level_reports_and_shared_chunk_partition(tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser"
     _build_tiny_eraser(eraser_root)
 
@@ -71,46 +63,68 @@ def test_eval_roles_reports_are_independent_and_consistent(tmp_path: Path) -> No
         "--output-dir",
         str(out),
         "--run-eval",
-        "--eval-random-trials",
-        "3",
+        "--seed",
+        "42",
     ]
 
-    main([*base_argv, "--eval-role", "full"])
-    main([*base_argv, "--eval-role", "ours"])
-    main([*base_argv, "--eval-role", "random"])
-    main([*base_argv, "--eval-role", "gradient"])
+    for method in ("ours", "random", "gradient"):
+        main([*base_argv, "--explain-method", method])
 
-    full_path = _single_path(out, "**/eval_report.json")
-    ours_path = _single_path(out, "**/eval_report.ours.json")
-    random_path = _single_path(out, "**/eval_report.random.json")
-    gradient_path = _single_path(out, "**/eval_report.gradient.json")
+    method_payloads: dict[str, dict[str, dict]] = {}
+    for method in ("ours", "random", "gradient"):
+        mdir = _method_dir(out, method)
+        report = json.loads((mdir / "eval_report.json").read_text(encoding="utf-8"))
+        assert report["report_method"] == method
 
-    full = json.loads(full_path.read_text(encoding="utf-8"))
-    ours = json.loads(ours_path.read_text(encoding="utf-8"))
-    random = json.loads(random_path.read_text(encoding="utf-8"))
-    gradient = json.loads(gradient_path.read_text(encoding="utf-8"))
+        payloads = _sample_payloads(mdir)
+        assert len(payloads) == 2
+        for payload in payloads.values():
+            assert payload["explain_method"] == method
+            assert len(payload["chunk_ranking"]) == len(payload["chunks"])
+            assert len(payload["chunk_scores"]) == len(payload["chunks"])
+            assert payload["selected_chunk_ids"] == payload["chunk_ranking"][:2]
+        method_payloads[method] = payloads
 
-    assert ours["report_role"] == "ours"
-    assert random["report_role"] == "random"
-    assert gradient["report_role"] == "gradient"
+    # Shared chunk partition must be identical across methods.
+    for sample_id in method_payloads["ours"].keys():
+        chunks_ours = method_payloads["ours"][sample_id]["chunks"]
+        chunks_random = method_payloads["random"][sample_id]["chunks"]
+        chunks_gradient = method_payloads["gradient"][sample_id]["chunks"]
+        assert chunks_ours == chunks_random == chunks_gradient
 
-    ours_keys = _collect_keys(ours)
-    random_keys = _collect_keys(random)
-    gradient_keys = _collect_keys(gradient)
-    assert ours_keys == random_keys == gradient_keys
 
-    for mode in ("gold", "predicted"):
-        full_ours = full["metrics_by_target"][mode]["metrics_primary"]
-        split_ours = ours["metrics_by_target"][mode]["metrics_primary"]
-        _assert_close(full_ours["comprehensiveness"], split_ours["comprehensiveness"])
-        _assert_close(full_ours["sufficiency"], split_ours["sufficiency"])
+def test_random_method_is_reproducible_with_same_seed(tmp_path: Path) -> None:
+    eraser_root = tmp_path / "eraser"
+    _build_tiny_eraser(eraser_root)
 
-        full_random = full["metrics_by_target"][mode]["baselines"]["random"]
-        split_random = random["metrics_by_target"][mode]["metrics_primary"]
-        _assert_close(full_random["comprehensiveness"], split_random["comprehensiveness"])
-        _assert_close(full_random["sufficiency"], split_random["sufficiency"])
+    out_a = tmp_path / "results_a"
+    out_b = tmp_path / "results_b"
+    argv = [
+        "--dataset",
+        "eraser_movie_reviews",
+        "--split",
+        "validation",
+        "--eraser-root",
+        str(eraser_root),
+        "--mock-backbone",
+        "--chunker",
+        "sentence",
+        "--search",
+        "greedy",
+        "--k",
+        "2",
+        "--run-eval",
+        "--explain-method",
+        "random",
+        "--seed",
+        "42",
+    ]
 
-        full_grad = full["metrics_by_target"][mode]["baselines"]["gradient"]
-        split_grad = gradient["metrics_by_target"][mode]["metrics_primary"]
-        _assert_close(full_grad["comprehensiveness"], split_grad["comprehensiveness"])
-        _assert_close(full_grad["sufficiency"], split_grad["sufficiency"])
+    main([*argv, "--output-dir", str(out_a)])
+    main([*argv, "--output-dir", str(out_b)])
+
+    payloads_a = _sample_payloads(_method_dir(out_a, "random"))
+    payloads_b = _sample_payloads(_method_dir(out_b, "random"))
+    assert set(payloads_a.keys()) == set(payloads_b.keys())
+    for sid in payloads_a:
+        assert payloads_a[sid]["chunk_ranking"] == payloads_b[sid]["chunk_ranking"]
