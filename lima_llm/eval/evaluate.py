@@ -10,6 +10,7 @@ from statistics import mean
 from typing import Dict, List, Sequence
 
 import numpy as np
+from tqdm import tqdm
 
 from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
@@ -18,6 +19,12 @@ from .metrics import AML_AOPC_Q_VALUES, AML_PRIMARY_Q_PERCENT, aml_faithfulness_
 
 
 _WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
+
+EVAL_ROLE_FULL = "full"
+EVAL_ROLE_OURS = "ours"
+EVAL_ROLE_RANDOM = "random"
+EVAL_ROLE_GRADIENT = "gradient"
+EVAL_ROLES = (EVAL_ROLE_OURS, EVAL_ROLE_RANDOM, EVAL_ROLE_GRADIENT, EVAL_ROLE_FULL)
 
 
 def _stable_hash_int(text: str) -> int:
@@ -186,45 +193,24 @@ def _gradient_ranking_with_retry(
     raise RuntimeError("Unexpected gradient retry state")
 
 
-def _init_mode_state(q_values: Sequence[int]) -> Dict:
+def _empty_role_state(q_values: Sequence[int]) -> Dict:
     q_ints = [int(q) for q in q_values]
     return {
-        "ours_log_odds": [],
-        "ours_comp": [],
-        "ours_suff": [],
-        "ours_aopc_suff": [],
-        "ours_aopc_comp": [],
-        "ours_aopc": [],
-        "ours_del_auc": [],
-        "ours_ins_auc": [],
-        "random_log_odds": [],
-        "random_comp": [],
-        "random_suff": [],
-        "random_aopc_suff": [],
-        "random_aopc_comp": [],
-        "grad_log_odds": [],
-        "grad_comp": [],
-        "grad_suff": [],
-        "grad_aopc_suff": [],
-        "grad_aopc_comp": [],
-        "diagnosticity_hits": 0,
-        "grad_evaluated": 0,
-        "grad_error_counts": {},
-        "grad_error_examples": [],
+        "log_odds": [],
+        "comp": [],
+        "suff": [],
+        "aopc_suff": [],
+        "aopc_comp": [],
+        "aopc": [],
+        "del_auc": [],
+        "ins_auc": [],
         "per_q": {
-            "ours": {
-                "comprehensiveness": {q: [] for q in q_ints},
-                "sufficiency": {q: [] for q in q_ints},
-            },
-            "random": {
-                "comprehensiveness": {q: [] for q in q_ints},
-                "sufficiency": {q: [] for q in q_ints},
-            },
-            "gradient": {
-                "comprehensiveness": {q: [] for q in q_ints},
-                "sufficiency": {q: [] for q in q_ints},
-            },
+            "comprehensiveness": {q: [] for q in q_ints},
+            "sufficiency": {q: [] for q in q_ints},
         },
+        "evaluated_samples": 0,
+        "error_counts": {},
+        "error_examples": [],
     }
 
 
@@ -239,6 +225,51 @@ def _mean_per_q(per_q_block: Dict) -> Dict:
     }
 
 
+def _append_role_metrics(role_state: Dict, metrics: Dict[str, float], curve: Dict[str, float], per_q: Dict[int, Dict[str, float]], q_values: Sequence[int]) -> None:
+    role_state["log_odds"].append(float(metrics["log_odds"]))
+    role_state["comp"].append(float(metrics["comprehensiveness"]))
+    role_state["suff"].append(float(metrics["sufficiency"]))
+    role_state["aopc_suff"].append(float(metrics["aopc_sufficiency"]))
+    role_state["aopc_comp"].append(float(metrics["aopc_comprehensiveness"]))
+    role_state["aopc"].append(float(curve["aopc"]))
+    role_state["del_auc"].append(float(curve["deletion_auc"]))
+    role_state["ins_auc"].append(float(curve["insertion_auc"]))
+    role_state["evaluated_samples"] += 1
+    for q in q_values:
+        q_int = int(q)
+        role_state["per_q"]["comprehensiveness"][q_int].append(float(per_q[q_int]["comp"]))
+        role_state["per_q"]["sufficiency"][q_int].append(float(per_q[q_int]["suff"]))
+
+
+def _role_metrics_primary(role_state: Dict) -> Dict[str, float]:
+    return {
+        "log_odds": _safe_mean(role_state["log_odds"]),
+        "comprehensiveness": _safe_mean(role_state["comp"]),
+        "sufficiency": _safe_mean(role_state["suff"]),
+        "aopc_sufficiency": _safe_mean(role_state["aopc_suff"]),
+        "aopc_comprehensiveness": _safe_mean(role_state["aopc_comp"]),
+        "aopc": _safe_mean(role_state["aopc"]),
+        "deletion_auc": _safe_mean(role_state["del_auc"]),
+        "insertion_auc": _safe_mean(role_state["ins_auc"]),
+    }
+
+
+def _role_report(role_state: Dict, sample_count: int, role: str) -> Dict:
+    evaluated = int(role_state["evaluated_samples"])
+    return {
+        "report_role": role,
+        "metrics_primary": _role_metrics_primary(role_state),
+        "diagnosticity_vs_random": None,
+        "role_diagnostics": {
+            "evaluated_samples": evaluated,
+            "failed_samples": max(0, int(sample_count) - evaluated),
+            "error_type_counts": role_state["error_counts"],
+            "error_examples": role_state["error_examples"],
+        },
+        "per_q": _mean_per_q(role_state["per_q"]),
+    }
+
+
 def evaluate_saved_explanations(
     output_root: Path,
     bundle,
@@ -246,9 +277,18 @@ def evaluate_saved_explanations(
     verbalizers: Sequence[str],
     q_values: Sequence[int],
     random_trials: int = 5,
-    include_gradient_baseline: bool = False,
-    progress_log_interval: int = 10,
+    eval_role: str = EVAL_ROLE_FULL,
 ) -> Dict:
+    role = str(eval_role).strip().lower()
+    if role not in EVAL_ROLES:
+        raise ValueError(f"Unsupported eval_role: {eval_role}. Expected one of {EVAL_ROLES}.")
+
+    enabled_roles: List[str]
+    if role == EVAL_ROLE_FULL:
+        enabled_roles = [EVAL_ROLE_OURS, EVAL_ROLE_RANDOM, EVAL_ROLE_GRADIENT]
+    else:
+        enabled_roles = [role]
+
     sample_dir = output_root / "samples"
     if not sample_dir.exists():
         raise FileNotFoundError(f"Missing sample directory: {sample_dir}")
@@ -262,9 +302,10 @@ def evaluate_saved_explanations(
 
     sample_map = {s.sample_id: s for s in bundle.samples}
     mode_states = {
-        "gold": _init_mode_state(tracked_q_values),
-        "predicted": _init_mode_state(tracked_q_values),
+        "gold": {r: _empty_role_state(tracked_q_values) for r in (EVAL_ROLE_OURS, EVAL_ROLE_RANDOM, EVAL_ROLE_GRADIENT)},
+        "predicted": {r: _empty_role_state(tracked_q_values) for r in (EVAL_ROLE_OURS, EVAL_ROLE_RANDOM, EVAL_ROLE_GRADIENT)},
     }
+    diagnosticity_hits = {"gold": 0, "predicted": 0}
 
     sparsity_values: List[float] = []
     plaus_f1_values: List[float] = []
@@ -288,15 +329,13 @@ def evaluate_saved_explanations(
     t0 = time.time()
     counter_before = backbone.snapshot_counters()
     sample_total = len(sample_jsons)
-    interval = max(1, int(progress_log_interval))
-    print(
-        f"[eval] start samples={sample_total} random_trials={max(1, int(random_trials))} "
-        f"gradient_baseline={bool(include_gradient_baseline)}"
-    )
+    print(f"[eval] start role={role} samples={sample_total} random_trials={max(1, int(random_trials))}")
 
-    for sample_idx, sample_json in enumerate(sample_jsons, start=1):
+    progress = tqdm(sample_jsons, desc=f"eval-{role}", unit="sample", dynamic_ncols=True)
+    for sample_idx, sample_json in enumerate(progress, start=1):
         payload = json.loads(sample_json.read_text(encoding="utf-8"))
         sample_id = payload["sample_id"]
+
         if sample_id not in sample_map:
             skipped_missing_sample_id += 1
             continue
@@ -372,58 +411,21 @@ def evaluate_saved_explanations(
             plaus_iou_values.append(iou)
 
         rng = random.Random(2026 + (_stable_hash_int(sample_id) % 10_000))
-        random_rankings = [
-            _random_ranking(word_ids, rng) for _ in range(max(1, int(random_trials)))
-        ]
+        random_rankings = [_random_ranking(word_ids, rng) for _ in range(max(1, int(random_trials)))]
 
         grad_rank_cache: Dict[int, List[int]] = {}
         grad_error_cache: Dict[int, str] = {}
 
         for mode_name, target_label in (("gold", sample.label), ("predicted", pred_label)):
-            state = mode_states[mode_name]
+            role_block = mode_states[mode_name]
 
-            ours_metrics, per_q = aml_faithfulness_metrics(
-                chunks=word_units,
-                ranking=ranking_ours,
-                target_label=target_label,
-                verbalizers=verbalizers,
-                prob_fn=_prob_fn,
-                aopc_q_values=aopc_q_values,
-                extra_q_values=tracked_q_values,
-                reference_token_text=reference_token_text,
-            )
-            state["ours_log_odds"].append(float(ours_metrics["log_odds"]))
-            state["ours_comp"].append(float(ours_metrics["comprehensiveness"]))
-            state["ours_suff"].append(float(ours_metrics["sufficiency"]))
-            state["ours_aopc_suff"].append(float(ours_metrics["aopc_sufficiency"]))
-            state["ours_aopc_comp"].append(float(ours_metrics["aopc_comprehensiveness"]))
-            ours_curve = aopc_metrics(
-                chunks=word_units,
-                ranking=ranking_ours,
-                target_label=target_label,
-                verbalizers=verbalizers,
-                prob_fn=_prob_fn,
-            )
-            state["ours_aopc"].append(float(ours_curve["aopc"]))
-            state["ours_del_auc"].append(float(ours_curve["deletion_auc"]))
-            state["ours_ins_auc"].append(float(ours_curve["insertion_auc"]))
-            for q in tracked_q_values:
-                q_int = int(q)
-                state["per_q"]["ours"]["comprehensiveness"][q_int].append(float(per_q[q_int]["comp"]))
-                state["per_q"]["ours"]["sufficiency"][q_int].append(float(per_q[q_int]["suff"]))
+            ours_metrics = None
+            random_metrics = None
 
-            trial_log_odds: List[float] = []
-            trial_comp: List[float] = []
-            trial_suff: List[float] = []
-            trial_aopc_suff: List[float] = []
-            trial_aopc_comp: List[float] = []
-            trial_per_q_comp = {int(q): [] for q in tracked_q_values}
-            trial_per_q_suff = {int(q): [] for q in tracked_q_values}
-
-            for rr in random_rankings:
-                rm, pq = aml_faithfulness_metrics(
+            if EVAL_ROLE_OURS in enabled_roles:
+                om, opq = aml_faithfulness_metrics(
                     chunks=word_units,
-                    ranking=rr,
+                    ranking=ranking_ours,
                     target_label=target_label,
                     verbalizers=verbalizers,
                     prob_fn=_prob_fn,
@@ -431,35 +433,82 @@ def evaluate_saved_explanations(
                     extra_q_values=tracked_q_values,
                     reference_token_text=reference_token_text,
                 )
-                trial_log_odds.append(float(rm["log_odds"]))
-                trial_comp.append(float(rm["comprehensiveness"]))
-                trial_suff.append(float(rm["sufficiency"]))
-                trial_aopc_suff.append(float(rm["aopc_sufficiency"]))
-                trial_aopc_comp.append(float(rm["aopc_comprehensiveness"]))
-                for q in tracked_q_values:
-                    q_int = int(q)
-                    trial_per_q_comp[q_int].append(float(pq[q_int]["comp"]))
-                    trial_per_q_suff[q_int].append(float(pq[q_int]["suff"]))
+                oc = aopc_metrics(
+                    chunks=word_units,
+                    ranking=ranking_ours,
+                    target_label=target_label,
+                    verbalizers=verbalizers,
+                    prob_fn=_prob_fn,
+                )
+                _append_role_metrics(role_block[EVAL_ROLE_OURS], om, oc, opq, tracked_q_values)
+                ours_metrics = om
 
-            avg_rlo = float(mean(trial_log_odds))
-            avg_rc = float(mean(trial_comp))
-            avg_rs = float(mean(trial_suff))
-            avg_ras = float(mean(trial_aopc_suff))
-            avg_rac = float(mean(trial_aopc_comp))
-            state["random_log_odds"].append(avg_rlo)
-            state["random_comp"].append(avg_rc)
-            state["random_suff"].append(avg_rs)
-            state["random_aopc_suff"].append(avg_ras)
-            state["random_aopc_comp"].append(avg_rac)
-            for q in tracked_q_values:
-                q_int = int(q)
-                state["per_q"]["random"]["comprehensiveness"][q_int].append(float(mean(trial_per_q_comp[q_int])))
-                state["per_q"]["random"]["sufficiency"][q_int].append(float(mean(trial_per_q_suff[q_int])))
+            if EVAL_ROLE_RANDOM in enabled_roles:
+                trial_log_odds: List[float] = []
+                trial_comp: List[float] = []
+                trial_suff: List[float] = []
+                trial_aopc_suff: List[float] = []
+                trial_aopc_comp: List[float] = []
+                trial_aopc: List[float] = []
+                trial_del_auc: List[float] = []
+                trial_ins_auc: List[float] = []
+                trial_per_q_comp = {int(q): [] for q in tracked_q_values}
+                trial_per_q_suff = {int(q): [] for q in tracked_q_values}
 
-            if ours_metrics["comprehensiveness"] > avg_rc and ours_metrics["sufficiency"] < avg_rs:
-                state["diagnosticity_hits"] += 1
+                for rr in random_rankings:
+                    rm, rpq = aml_faithfulness_metrics(
+                        chunks=word_units,
+                        ranking=rr,
+                        target_label=target_label,
+                        verbalizers=verbalizers,
+                        prob_fn=_prob_fn,
+                        aopc_q_values=aopc_q_values,
+                        extra_q_values=tracked_q_values,
+                        reference_token_text=reference_token_text,
+                    )
+                    rc = aopc_metrics(
+                        chunks=word_units,
+                        ranking=rr,
+                        target_label=target_label,
+                        verbalizers=verbalizers,
+                        prob_fn=_prob_fn,
+                    )
+                    trial_log_odds.append(float(rm["log_odds"]))
+                    trial_comp.append(float(rm["comprehensiveness"]))
+                    trial_suff.append(float(rm["sufficiency"]))
+                    trial_aopc_suff.append(float(rm["aopc_sufficiency"]))
+                    trial_aopc_comp.append(float(rm["aopc_comprehensiveness"]))
+                    trial_aopc.append(float(rc["aopc"]))
+                    trial_del_auc.append(float(rc["deletion_auc"]))
+                    trial_ins_auc.append(float(rc["insertion_auc"]))
+                    for q in tracked_q_values:
+                        q_int = int(q)
+                        trial_per_q_comp[q_int].append(float(rpq[q_int]["comp"]))
+                        trial_per_q_suff[q_int].append(float(rpq[q_int]["suff"]))
 
-            if include_gradient_baseline:
+                avg_rm = {
+                    "log_odds": float(mean(trial_log_odds)),
+                    "comprehensiveness": float(mean(trial_comp)),
+                    "sufficiency": float(mean(trial_suff)),
+                    "aopc_sufficiency": float(mean(trial_aopc_suff)),
+                    "aopc_comprehensiveness": float(mean(trial_aopc_comp)),
+                }
+                avg_rc = {
+                    "aopc": float(mean(trial_aopc)),
+                    "deletion_auc": float(mean(trial_del_auc)),
+                    "insertion_auc": float(mean(trial_ins_auc)),
+                }
+                avg_rpq = {
+                    int(q): {
+                        "comp": float(mean(trial_per_q_comp[int(q)])),
+                        "suff": float(mean(trial_per_q_suff[int(q)])),
+                    }
+                    for q in tracked_q_values
+                }
+                _append_role_metrics(role_block[EVAL_ROLE_RANDOM], avg_rm, avg_rc, avg_rpq, tracked_q_values)
+                random_metrics = avg_rm
+
+            if EVAL_ROLE_GRADIENT in enabled_roles:
                 if target_label not in grad_rank_cache and target_label not in grad_error_cache:
                     try:
                         grad_rank_cache[target_label] = _gradient_ranking_with_retry(
@@ -473,11 +522,12 @@ def evaluate_saved_explanations(
                     except Exception as exc:
                         grad_error_cache[target_label] = f"{type(exc).__name__}: {exc}"
 
+                grad_state = role_block[EVAL_ROLE_GRADIENT]
                 if target_label in grad_rank_cache:
-                    grad_rank = grad_rank_cache[target_label]
+                    gr = grad_rank_cache[target_label]
                     gm, gpq = aml_faithfulness_metrics(
                         chunks=word_units,
-                        ranking=grad_rank,
+                        ranking=gr,
                         target_label=target_label,
                         verbalizers=verbalizers,
                         prob_fn=_prob_fn,
@@ -485,30 +535,23 @@ def evaluate_saved_explanations(
                         extra_q_values=tracked_q_values,
                         reference_token_text=reference_token_text,
                     )
-                    state["grad_log_odds"].append(float(gm["log_odds"]))
-                    state["grad_comp"].append(float(gm["comprehensiveness"]))
-                    state["grad_suff"].append(float(gm["sufficiency"]))
-                    state["grad_aopc_suff"].append(float(gm["aopc_sufficiency"]))
-                    state["grad_aopc_comp"].append(float(gm["aopc_comprehensiveness"]))
-                    state["grad_evaluated"] += 1
-                    for q in tracked_q_values:
-                        q_int = int(q)
-                        state["per_q"]["gradient"]["comprehensiveness"][q_int].append(float(gpq[q_int]["comp"]))
-                        state["per_q"]["gradient"]["sufficiency"][q_int].append(float(gpq[q_int]["suff"]))
+                    gc = aopc_metrics(
+                        chunks=word_units,
+                        ranking=gr,
+                        target_label=target_label,
+                        verbalizers=verbalizers,
+                        prob_fn=_prob_fn,
+                    )
+                    _append_role_metrics(grad_state, gm, gc, gpq, tracked_q_values)
                 else:
                     err = grad_error_cache[target_label]
-                    state["grad_error_counts"][err] = state["grad_error_counts"].get(err, 0) + 1
-                    if len(state["grad_error_examples"]) < 10:
-                        state["grad_error_examples"].append({"sample_id": sample_id, "error": err})
+                    grad_state["error_counts"][err] = grad_state["error_counts"].get(err, 0) + 1
+                    if len(grad_state["error_examples"]) < 10:
+                        grad_state["error_examples"].append({"sample_id": sample_id, "error": err})
 
-        if sample_idx % interval == 0 or sample_idx == sample_total:
-            elapsed_now = time.time() - t0
-            speed = sample_idx / elapsed_now if elapsed_now > 0 else 0.0
-            eta = (sample_total - sample_idx) / speed if speed > 0 else 0.0
-            print(
-                f"[eval] progress {sample_idx}/{sample_total} "
-                f"elapsed={elapsed_now:.1f}s eta={eta:.1f}s"
-            )
+            if role == EVAL_ROLE_FULL and ours_metrics is not None and random_metrics is not None:
+                if ours_metrics["comprehensiveness"] > random_metrics["comprehensiveness"] and ours_metrics["sufficiency"] < random_metrics["sufficiency"]:
+                    diagnosticity_hits[mode_name] += 1
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
@@ -517,56 +560,91 @@ def evaluate_saved_explanations(
         for k in set(counter_before.keys()).union(counter_after.keys())
     }
 
-    def _mode_report(mode_name: str) -> Dict:
-        state = mode_states[mode_name]
-        return {
+    if role == EVAL_ROLE_FULL:
+        def _full_mode_report(mode_name: str) -> Dict:
+            ours_state = mode_states[mode_name][EVAL_ROLE_OURS]
+            random_state = mode_states[mode_name][EVAL_ROLE_RANDOM]
+            grad_state = mode_states[mode_name][EVAL_ROLE_GRADIENT]
+            grad_enabled = EVAL_ROLE_GRADIENT in enabled_roles
+            return {
+                "metrics_primary": _role_metrics_primary(ours_state),
+                "diagnosticity_vs_random": (diagnosticity_hits[mode_name] / total) if total > 0 else 0.0,
+                "baselines": {
+                    "random": _role_metrics_primary(random_state),
+                    "gradient": {
+                        "enabled": bool(grad_enabled),
+                        **_role_metrics_primary(grad_state),
+                        "evaluated_samples": int(grad_state["evaluated_samples"]),
+                        "failed_samples": max(0, total - int(grad_state["evaluated_samples"])) if grad_enabled else 0,
+                        "error_type_counts": grad_state["error_counts"],
+                        "error_examples": grad_state["error_examples"],
+                    },
+                },
+                "per_q": {
+                    "ours": _mean_per_q(ours_state["per_q"]),
+                    "random": _mean_per_q(random_state["per_q"]),
+                    "gradient": _mean_per_q(grad_state["per_q"]),
+                },
+            }
+
+        mode_reports = {"gold": _full_mode_report("gold"), "predicted": _full_mode_report("predicted")}
+        report = {
+            "report_role": role,
+            "dataset": bundle.dataset_name,
+            "split": bundle.split,
+            "sample_count": total,
+            "metric_settings": {
+                "protocol": "AML",
+                "primary_top_k_percent": int(AML_PRIMARY_Q_PERCENT),
+                "aopc_top_k_percentages": [int(q) for q in aopc_q_values],
+                "aopc_average_denominator": "len(top_k_percentages)+1",
+                "log_odds_reference_token": reference_token_text,
+                "perturbation_unit": "word",
+                "word_segmentation": "whitespace-delimited spans with surrounding whitespace preserved",
+                "chunk_to_word_projection": "overlap-weighted average chunk rank; lower rank is more important",
+            },
             "metrics_primary": {
-                "log_odds": _safe_mean(state["ours_log_odds"]),
-                "comprehensiveness": _safe_mean(state["ours_comp"]),
-                "sufficiency": _safe_mean(state["ours_suff"]),
-                "aopc_sufficiency": _safe_mean(state["ours_aopc_suff"]),
-                "aopc_comprehensiveness": _safe_mean(state["ours_aopc_comp"]),
-                "aopc": _safe_mean(state["ours_aopc"]),
-                "deletion_auc": _safe_mean(state["ours_del_auc"]),
-                "insertion_auc": _safe_mean(state["ours_ins_auc"]),
+                "accuracy_full": (acc_hits / total) if total > 0 else 0.0,
+                **mode_reports["gold"]["metrics_primary"],
             },
-            "diagnosticity_vs_random": (state["diagnosticity_hits"] / total) if total > 0 else 0.0,
-            "baselines": {
-                "random": {
-                    "log_odds": _safe_mean(state["random_log_odds"]),
-                    "comprehensiveness": _safe_mean(state["random_comp"]),
-                    "sufficiency": _safe_mean(state["random_suff"]),
-                    "aopc_sufficiency": _safe_mean(state["random_aopc_suff"]),
-                    "aopc_comprehensiveness": _safe_mean(state["random_aopc_comp"]),
-                },
-                "gradient": {
-                    "enabled": bool(include_gradient_baseline),
-                    "log_odds": _safe_mean(state["grad_log_odds"]),
-                    "comprehensiveness": _safe_mean(state["grad_comp"]),
-                    "sufficiency": _safe_mean(state["grad_suff"]),
-                    "aopc_sufficiency": _safe_mean(state["grad_aopc_suff"]),
-                    "aopc_comprehensiveness": _safe_mean(state["grad_aopc_comp"]),
-                    "evaluated_samples": int(state["grad_evaluated"]),
-                    "failed_samples": max(0, total - int(state["grad_evaluated"]))
-                    if include_gradient_baseline
-                    else 0,
-                    "error_type_counts": state["grad_error_counts"],
-                    "error_examples": state["grad_error_examples"],
-                },
+            "metrics_secondary": {
+                "diagnosticity_vs_random": mode_reports["gold"]["diagnosticity_vs_random"],
+                "sparsity": _safe_mean(sparsity_values),
+                "plausibility_f1": _safe_mean(plaus_f1_values),
+                "plausibility_iou": _safe_mean(plaus_iou_values),
+                "runtime_seconds": elapsed,
+                "forward_counters_delta": counter_delta,
             },
-            "per_q": {
-                "ours": _mean_per_q(state["per_q"]["ours"]),
-                "random": _mean_per_q(state["per_q"]["random"]),
-                "gradient": _mean_per_q(state["per_q"]["gradient"]),
+            "baselines": mode_reports["gold"]["baselines"],
+            "metrics_by_target": mode_reports,
+            "dataset_diagnostics": {
+                "samples_with_empty_text": empty_text_samples,
+                "samples_without_rationale": no_rationale_samples,
+                "samples_over_backbone_max_length": over_max_length_samples,
+                "predicted_not_gold_samples": pred_not_gold_samples,
+                "token_len_eval_errors": token_len_eval_errors,
+                "skipped_missing_sample_id": skipped_missing_sample_id,
+                "skipped_empty_chunks": skipped_empty_chunks,
+                "backbone_max_length": int(max_length) if max_length is not None else None,
+                "word_count_total": int(word_count_total),
+                "words_split_across_chunks_total": int(words_split_across_chunks_total),
+                "words_split_across_chunks_rate": (
+                    float(words_split_across_chunks_total / word_count_total) if word_count_total > 0 else 0.0
+                ),
             },
+            "q_values": [int(q) for q in aopc_q_values],
+            "per_q_values": [int(q) for q in tracked_q_values],
         }
+        return report
 
+    role_state_gold = mode_states["gold"][role]
+    role_state_pred = mode_states["predicted"][role]
     mode_reports = {
-        "gold": _mode_report("gold"),
-        "predicted": _mode_report("predicted"),
+        "gold": _role_report(role_state_gold, total, role),
+        "predicted": _role_report(role_state_pred, total, role),
     }
-
     report = {
+        "report_role": role,
         "dataset": bundle.dataset_name,
         "split": bundle.split,
         "sample_count": total,
@@ -580,20 +658,19 @@ def evaluate_saved_explanations(
             "word_segmentation": "whitespace-delimited spans with surrounding whitespace preserved",
             "chunk_to_word_projection": "overlap-weighted average chunk rank; lower rank is more important",
         },
-        # Backward-compatible top-level fields: keep gold-target as default.
         "metrics_primary": {
             "accuracy_full": (acc_hits / total) if total > 0 else 0.0,
             **mode_reports["gold"]["metrics_primary"],
         },
         "metrics_secondary": {
-            "diagnosticity_vs_random": mode_reports["gold"]["diagnosticity_vs_random"],
+            "diagnosticity_vs_random": None,
             "sparsity": _safe_mean(sparsity_values),
             "plausibility_f1": _safe_mean(plaus_f1_values),
             "plausibility_iou": _safe_mean(plaus_iou_values),
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
+            "role_diagnostics": mode_reports["gold"]["role_diagnostics"],
         },
-        "baselines": mode_reports["gold"]["baselines"],
         "metrics_by_target": mode_reports,
         "dataset_diagnostics": {
             "samples_with_empty_text": empty_text_samples,

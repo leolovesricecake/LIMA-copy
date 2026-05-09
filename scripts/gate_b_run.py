@@ -9,6 +9,8 @@ import subprocess
 import sys
 from typing import List
 
+from tqdm import tqdm
+
 
 def _parse_int_csv(raw: str) -> List[int]:
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
@@ -54,7 +56,17 @@ def main() -> None:
     jobs = list(itertools.product(seeds, k_values, chunkers, searches, lambdas_values))
     print(f"[gate-b-run] jobs={len(jobs)}")
 
-    for i, (seed, k, chunker, search, lambdas) in enumerate(jobs, start=1):
+    progress = tqdm(jobs, desc="gate-b-jobs", dynamic_ncols=True, unit="job")
+    for i, (seed, k, chunker, search, lambdas) in enumerate(progress, start=1):
+        progress.set_postfix(
+            {
+                "seed": seed,
+                "k": k,
+                "chunk": chunker,
+                "search": search,
+            },
+            refresh=False,
+        )
         cmd = [
             args.python_exe,
             "-m",

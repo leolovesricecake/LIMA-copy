@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
+
+
+GATE_B_REPORT_MODES = ("auto", "legacy", "split")
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -38,7 +42,6 @@ def _group_config(run_config: Dict[str, Any]) -> Dict[str, Any]:
         "lambdas": run_config.get("lambdas"),
         "eval_q_values": run_config.get("eval_q_values"),
         "eval_random_trials": run_config.get("eval_random_trials"),
-        "eval_gradient_baseline": run_config.get("eval_gradient_baseline"),
         "max_samples": run_config.get("max_samples"),
     }
 
@@ -54,53 +57,119 @@ def _group_key(config: Dict[str, Any]) -> Tuple[Any, ...]:
         config.get("lambdas"),
         config.get("eval_q_values"),
         config.get("eval_random_trials"),
-        config.get("eval_gradient_baseline"),
         config.get("max_samples"),
     )
 
 
-def collect_gate_b_runs(results_root: Path) -> List[Dict[str, Any]]:
+def _read_json(path: Path) -> Dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _safe_seed(run_config: Dict[str, Any]) -> int | None:
+    seed = run_config.get("seed")
+    try:
+        return int(seed)
+    except Exception:
+        return None
+
+
+def _extract_gold_comp_suff(report: Dict[str, Any]) -> tuple[float, float]:
+    metrics_by_target = report.get("metrics_by_target", {})
+    gold_primary = metrics_by_target.get("gold", {}).get("metrics_primary", {})
+    return (
+        _safe_float(gold_primary.get("comprehensiveness")),
+        _safe_float(gold_primary.get("sufficiency")),
+    )
+
+
+def _collect_split_run(run_dir: Path, run_config: Dict[str, Any]) -> Dict[str, Any] | None:
+    ours_path = run_dir / "eval_report.ours.json"
+    random_path = run_dir / "eval_report.random.json"
+    ours_report = _read_json(ours_path)
+    random_report = _read_json(random_path)
+    if ours_report is None or random_report is None:
+        return None
+
+    ours_comp, ours_suff = _extract_gold_comp_suff(ours_report)
+    rand_comp, rand_suff = _extract_gold_comp_suff(random_report)
+    comp_adv = ours_comp - rand_comp
+    suff_adv = rand_suff - ours_suff
+
+    return {
+        "seed": _safe_seed(run_config),
+        "report_path": str(ours_path),
+        "report_paths": [str(ours_path), str(random_path)],
+        "report_kind": "split",
+        "config": _group_config(run_config),
+        "report": ours_report,
+        "random_reference_report": random_report,
+        "gold_comp_adv_vs_random": comp_adv,
+        "gold_suff_adv_vs_random": suff_adv,
+        "gate_b_pass_run": bool(comp_adv > 0.0 and suff_adv > 0.0),
+    }
+
+
+def _collect_legacy_run(run_dir: Path, run_config: Dict[str, Any]) -> Dict[str, Any] | None:
+    report_path = run_dir / "eval_report.json"
+    report = _read_json(report_path)
+    if report is None:
+        return None
+
+    metrics_by_target = report.get("metrics_by_target", {})
+    gold = metrics_by_target.get("gold", {})
+    gold_primary = gold.get("metrics_primary", {})
+    gold_random = gold.get("baselines", {}).get("random", {})
+
+    ours_comp = _safe_float(gold_primary.get("comprehensiveness"))
+    ours_suff = _safe_float(gold_primary.get("sufficiency"))
+    rand_comp = _safe_float(gold_random.get("comprehensiveness"))
+    rand_suff = _safe_float(gold_random.get("sufficiency"))
+    comp_adv = ours_comp - rand_comp
+    suff_adv = rand_suff - ours_suff
+
+    return {
+        "seed": _safe_seed(run_config),
+        "report_path": str(report_path),
+        "report_paths": [str(report_path)],
+        "report_kind": "legacy",
+        "config": _group_config(run_config),
+        "report": report,
+        "random_reference_report": None,
+        "gold_comp_adv_vs_random": comp_adv,
+        "gold_suff_adv_vs_random": suff_adv,
+        "gate_b_pass_run": bool(comp_adv > 0.0 and suff_adv > 0.0),
+    }
+
+
+def collect_gate_b_runs(results_root: Path, report_mode: str = "auto") -> List[Dict[str, Any]]:
+    mode = str(report_mode).lower()
+    if mode not in GATE_B_REPORT_MODES:
+        raise ValueError(f"Unsupported report_mode: {report_mode}. Expected one of {GATE_B_REPORT_MODES}.")
+
     runs: List[Dict[str, Any]] = []
-    for report_path in sorted(results_root.glob("**/eval_report.json")):
-        run_dir = report_path.parent
-        config_path = run_dir / "run_config.json"
-        if not config_path.exists():
-            continue
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            run_config = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
+    for config_path in sorted(results_root.glob("**/run_config.json")):
+        run_dir = config_path.parent
+        run_config = _read_json(config_path)
+        if run_config is None:
             continue
 
-        metrics_by_target = report.get("metrics_by_target", {})
-        gold = metrics_by_target.get("gold", {})
-        gold_primary = gold.get("metrics_primary", {})
-        gold_random = gold.get("baselines", {}).get("random", {})
+        if mode in ("auto", "split"):
+            split_run = _collect_split_run(run_dir=run_dir, run_config=run_config)
+            if split_run is not None:
+                runs.append(split_run)
+                if mode == "auto":
+                    continue
 
-        seed = run_config.get("seed")
-        try:
-            seed = int(seed)
-        except Exception:
-            seed = None
+        if mode in ("auto", "legacy"):
+            legacy_run = _collect_legacy_run(run_dir=run_dir, run_config=run_config)
+            if legacy_run is not None:
+                runs.append(legacy_run)
 
-        ours_comp = _safe_float(gold_primary.get("comprehensiveness"))
-        ours_suff = _safe_float(gold_primary.get("sufficiency"))
-        rand_comp = _safe_float(gold_random.get("comprehensiveness"))
-        rand_suff = _safe_float(gold_random.get("sufficiency"))
-        comp_adv = ours_comp - rand_comp
-        suff_adv = rand_suff - ours_suff
-
-        runs.append(
-            {
-                "seed": seed,
-                "report_path": str(report_path),
-                "config": _group_config(run_config),
-                "report": report,
-                "gold_comp_adv_vs_random": comp_adv,
-                "gold_suff_adv_vs_random": suff_adv,
-                "gate_b_pass_run": bool(comp_adv > 0.0 and suff_adv > 0.0),
-            }
-        )
     return runs
 
 
@@ -139,9 +208,12 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
         runtimes = []
         predict_calls = []
         pass_runs = 0
+        kind_counter = Counter()
 
         for run in items:
             report = run["report"]
+            kind_counter[str(run.get("report_kind", "unknown"))] += 1
+
             metrics_by_target = report.get("metrics_by_target", {})
             gold = metrics_by_target.get("gold", {})
             predicted = metrics_by_target.get("predicted", {})
@@ -157,7 +229,7 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
             gold_aopc.append(_safe_float(gold_primary.get("aopc")))
             gold_deletion_auc.append(_safe_float(gold_primary.get("deletion_auc")))
             gold_insertion_auc.append(_safe_float(gold_primary.get("insertion_auc")))
-            gold_diag.append(_safe_float(gold.get("diagnosticity_vs_random")))
+            gold_diag.append(_safe_float(gold.get("diagnosticity_vs_random"), default=0.0))
             gold_comp_adv.append(_safe_float(run.get("gold_comp_adv_vs_random")))
             gold_suff_adv.append(_safe_float(run.get("gold_suff_adv_vs_random")))
             pred_comp.append(_safe_float(pred_primary.get("comprehensiveness")))
@@ -193,6 +265,7 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
                 "config": config,
                 "n_runs": len(items),
                 "seeds": seeds,
+                "report_kind_counts": dict(kind_counter),
                 "gate_b_checks": {
                     "comp_beats_random_all": bool(min(gold_comp_adv) > 0.0),
                     "suff_beats_random_all": bool(min(gold_suff_adv) > 0.0),
@@ -225,7 +298,7 @@ def aggregate_gate_b_runs(runs: Sequence[Dict[str, Any]], min_runs: int = 1) -> 
                     "seconds": _stats(runtimes),
                     "predict_calls": _stats(predict_calls),
                 },
-                "reports": [run["report_path"] for run in items],
+                "reports": [run.get("report_paths", [run["report_path"]]) for run in items],
             }
         )
 
@@ -251,6 +324,7 @@ def write_gate_b_summary_csv(payload: Dict[str, Any], output_path: Path) -> Path
             {
                 "group_id": group.get("group_id"),
                 "n_runs": group.get("n_runs"),
+                "report_kinds": json.dumps(group.get("report_kind_counts", {}), ensure_ascii=False),
                 "seeds": ",".join(str(x) for x in group.get("seeds", [])),
                 "gold_comp_mean": _safe_float(group.get("gold_metrics", {}).get("comprehensiveness", {}).get("mean")),
                 "gold_comp_std": _safe_float(group.get("gold_metrics", {}).get("comprehensiveness", {}).get("std")),
@@ -272,6 +346,7 @@ def write_gate_b_summary_csv(payload: Dict[str, Any], output_path: Path) -> Path
     fieldnames = [
         "group_id",
         "n_runs",
+        "report_kinds",
         "seeds",
         "gold_comp_mean",
         "gold_comp_std",

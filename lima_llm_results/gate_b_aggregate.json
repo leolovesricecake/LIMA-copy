@@ -1,7 +1,7 @@
 {
   "group_count": 2,
   "run_count": 6,
-  "min_runs": 3,
+  "min_runs": 1,
   "groups": [
     {
       "group_id": "eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,1,1,1",
@@ -15,7 +15,6 @@
         "lambdas": "1,1,1,1",
         "eval_q_values": "1,5,10,20,50",
         "eval_random_trials": 5,
-        "eval_gradient_baseline": true,
         "max_samples": null
       },
       "n_runs": 3,
@@ -24,6 +23,9 @@
         43,
         44
       ],
+      "report_kind_counts": {
+        "legacy": 3
+      },
       "gate_b_checks": {
         "comp_beats_random_all": true,
         "suff_beats_random_all": true,
@@ -162,9 +164,15 @@
         }
       },
       "reports": [
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42/eval_report.json",
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-43/eval_report.json",
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-44/eval_report.json"
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42/eval_report.json"
+        ],
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-43/eval_report.json"
+        ],
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-44/eval_report.json"
+        ]
       ]
     },
     {
@@ -179,7 +187,6 @@
         "lambdas": "1,2,1,1",
         "eval_q_values": "1,5,10,20,50",
         "eval_random_trials": 5,
-        "eval_gradient_baseline": true,
         "max_samples": null
       },
       "n_runs": 3,
@@ -188,6 +195,9 @@
         43,
         44
       ],
+      "report_kind_counts": {
+        "legacy": 3
+      },
       "gate_b_checks": {
         "comp_beats_random_all": true,
         "suff_beats_random_all": true,
@@ -326,9 +336,15 @@
         }
       },
       "reports": [
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-42/eval_report.json",
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-43/eval_report.json",
-        "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-44/eval_report.json"
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-42/eval_report.json"
+        ],
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-43/eval_report.json"
+        ],
+        [
+          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-44/eval_report.json"
+        ]
       ]
     }
   ]

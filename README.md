@@ -25,8 +25,10 @@ bash scripts/run_lima_llm_v1.sh \
   --search greedy \
   --max-samples 100 \
   --output-dir lima_llm_results \
-  --run-eval
+  --run-eval --eval-role full
 ```
+
+`--eval-role` 支持 `ours/random/gradient/full`，其中 `full` 会执行三者全量评估；也可将不同角色分开在不同 GPU 独立运行。
 
 ## 原始 LIMA 说明
 

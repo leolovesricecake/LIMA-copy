@@ -19,6 +19,7 @@
   - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`diagnosticity=0.6650±0.0000`、`run_pass_rate=1.0`；
   - 聚合产物：`lima_llm_results/gate_b_aggregate.json` 与 `lima_llm_results/gate_b_aggregate.csv`。
 - 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
+- Gate B 评估支持角色拆分：`--eval-role {ours,random,gradient,full}`，可在不同 GPU 独立并行执行并产出同结构报告。
 - 结论：Gate A、Gate B 已达到工程验收口径。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
 - 提醒：性能优化（原 Gate C）暂缓，待功能方案冻结后再重启专项优化。
 

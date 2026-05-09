@@ -56,8 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-eval", action="store_true")
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
     parser.add_argument("--eval-random-trials", type=int, default=5)
-    parser.add_argument("--eval-gradient-baseline", action="store_true")
-    parser.add_argument("--eval-progress-interval", type=int, default=10)
+    parser.add_argument("--eval-role", type=str, default="full", choices=["ours", "random", "gradient", "full"])
     return parser
 
 
@@ -166,7 +165,14 @@ def main(argv: List[str] | None = None) -> None:
     ensure_dir(output_root / "samples")
 
     config_path = output_root / "run_config.json"
-    config_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
+    if not config_path.exists():
+        config_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        print(f"[config] keep existing run config: {config_path}")
+
+    if args.run_eval:
+        eval_cfg_path = output_root / f"eval_config.{args.eval_role}.json"
+        eval_cfg_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
 
     pending_samples, _ = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
     if not pending_samples:
@@ -179,7 +185,9 @@ def main(argv: List[str] | None = None) -> None:
         elapsed = time.time() - begin
         print(f"[done] processed={len(pending_samples)} elapsed={elapsed:.2f}s")
 
-    summary_path = rebuild_summary_csv(output_root)
+    summary_path = output_root / "summary.csv"
+    if pending_samples or not summary_path.exists():
+        summary_path = rebuild_summary_csv(output_root)
     print(f"[done] summary={summary_path}")
 
     if args.run_eval:
@@ -188,7 +196,7 @@ def main(argv: List[str] | None = None) -> None:
         q_values = parse_q_values(args.eval_q_values)
         print(
             f"[eval] running q_values={q_values} random_trials={args.eval_random_trials} "
-            f"gradient_baseline={bool(args.eval_gradient_baseline)} interval={max(1, int(args.eval_progress_interval))}"
+            f"role={args.eval_role}"
         )
         eval_report = evaluate_saved_explanations(
             output_root=output_root,
@@ -197,10 +205,12 @@ def main(argv: List[str] | None = None) -> None:
             verbalizers=bundle.verbalizers,
             q_values=q_values,
             random_trials=args.eval_random_trials,
-            include_gradient_baseline=args.eval_gradient_baseline,
-            progress_log_interval=args.eval_progress_interval,
+            eval_role=args.eval_role,
         )
-        report_path = output_root / "eval_report.json"
+        if args.eval_role == "full":
+            report_path = output_root / "eval_report.json"
+        else:
+            report_path = output_root / f"eval_report.{args.eval_role}.json"
         report_path.write_text(json.dumps(eval_report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[eval] report={report_path}")
 
