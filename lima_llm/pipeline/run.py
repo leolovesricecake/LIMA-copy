@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
     parser.add_argument("--eval-random-trials", type=int, default=5)
     parser.add_argument("--eval-gradient-baseline", action="store_true")
+    parser.add_argument("--eval-progress-interval", type=int, default=10)
     return parser
 
 
@@ -185,6 +186,10 @@ def main(argv: List[str] | None = None) -> None:
         from ..eval.evaluate import evaluate_saved_explanations
 
         q_values = parse_q_values(args.eval_q_values)
+        print(
+            f"[eval] running q_values={q_values} random_trials={args.eval_random_trials} "
+            f"gradient_baseline={bool(args.eval_gradient_baseline)} interval={max(1, int(args.eval_progress_interval))}"
+        )
         eval_report = evaluate_saved_explanations(
             output_root=output_root,
             bundle=bundle,
@@ -193,6 +198,7 @@ def main(argv: List[str] | None = None) -> None:
             q_values=q_values,
             random_trials=args.eval_random_trials,
             include_gradient_baseline=args.eval_gradient_baseline,
+            progress_log_interval=args.eval_progress_interval,
         )
         report_path = output_root / "eval_report.json"
         report_path.write_text(json.dumps(eval_report, ensure_ascii=False, indent=2), encoding="utf-8")

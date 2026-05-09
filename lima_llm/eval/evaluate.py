@@ -247,10 +247,14 @@ def evaluate_saved_explanations(
     q_values: Sequence[int],
     random_trials: int = 5,
     include_gradient_baseline: bool = False,
+    progress_log_interval: int = 10,
 ) -> Dict:
     sample_dir = output_root / "samples"
     if not sample_dir.exists():
         raise FileNotFoundError(f"Missing sample directory: {sample_dir}")
+    sample_jsons = sorted(sample_dir.glob("*.json"))
+    if not sample_jsons:
+        raise FileNotFoundError(f"No sample json found in: {sample_dir}")
 
     aopc_q_values = tuple(int(q) for q in q_values) if q_values else AML_AOPC_Q_VALUES
     tracked_q_values = tuple(sorted(set((*aopc_q_values, AML_PRIMARY_Q_PERCENT))))
@@ -283,8 +287,14 @@ def evaluate_saved_explanations(
 
     t0 = time.time()
     counter_before = backbone.snapshot_counters()
+    sample_total = len(sample_jsons)
+    interval = max(1, int(progress_log_interval))
+    print(
+        f"[eval] start samples={sample_total} random_trials={max(1, int(random_trials))} "
+        f"gradient_baseline={bool(include_gradient_baseline)}"
+    )
 
-    for sample_json in sorted(sample_dir.glob("*.json")):
+    for sample_idx, sample_json in enumerate(sample_jsons, start=1):
         payload = json.loads(sample_json.read_text(encoding="utf-8"))
         sample_id = payload["sample_id"]
         if sample_id not in sample_map:
@@ -324,8 +334,12 @@ def evaluate_saved_explanations(
             chunk_ranking=chunk_ranking_ours,
         )
 
+        sample_prob_cache: Dict[str, np.ndarray] = {}
+
         def _prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
-            return backbone.predict_label_probs(text, verbalizers)
+            if text not in sample_prob_cache:
+                sample_prob_cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
+            return sample_prob_cache[text]
 
         text_for_pred = sample.text if sample.text else "<EMPTY>"
         full_probs = _prob_fn(text_for_pred, verbalizers)
@@ -486,6 +500,15 @@ def evaluate_saved_explanations(
                     state["grad_error_counts"][err] = state["grad_error_counts"].get(err, 0) + 1
                     if len(state["grad_error_examples"]) < 10:
                         state["grad_error_examples"].append({"sample_id": sample_id, "error": err})
+
+        if sample_idx % interval == 0 or sample_idx == sample_total:
+            elapsed_now = time.time() - t0
+            speed = sample_idx / elapsed_now if elapsed_now > 0 else 0.0
+            eta = (sample_total - sample_idx) / speed if speed > 0 else 0.0
+            print(
+                f"[eval] progress {sample_idx}/{sample_total} "
+                f"elapsed={elapsed_now:.1f}s eta={eta:.1f}s"
+            )
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
