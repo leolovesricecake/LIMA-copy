@@ -1,7 +1,10 @@
 {
-  "group_count": 2,
-  "run_count": 6,
+  "group_count": 1,
+  "run_count": 3,
+  "paired_run_count": 1,
   "min_runs": 1,
+  "primary_method": "ours",
+  "reference_method": "random",
   "groups": [
     {
       "group_id": "eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,1,1,1",
@@ -14,337 +17,184 @@
         "k": 8,
         "lambdas": "1,1,1,1",
         "eval_q_values": "1,5,10,20,50",
-        "eval_random_trials": 5,
         "max_samples": null
       },
-      "n_runs": 3,
-      "seeds": [
-        42,
-        43,
-        44
-      ],
-      "report_kind_counts": {
-        "legacy": 3
+      "methods": {
+        "primary": "ours",
+        "reference": "random",
+        "available_run_counts": {
+          "gradient": 1,
+          "ours": 1,
+          "random": 1
+        }
       },
+      "n_runs": 1,
+      "seeds": [
+        42
+      ],
       "gate_b_checks": {
-        "comp_beats_random_all": true,
-        "suff_beats_random_all": true,
+        "comp_beats_reference_all": true,
+        "suff_beats_reference_all": true,
         "run_pass_rate": 1.0
       },
       "gold_metrics": {
         "log_odds": {
-          "mean": 0.0,
+          "mean": -0.2434805257644244,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": -0.2434805257644244,
+          "max": -0.2434805257644244
         },
         "comprehensiveness": {
-          "mean": 0.07562018026163181,
-          "std": 6.430798458376656e-05,
-          "min": 0.07557470764964819,
-          "max": 0.07571112548559905
+          "mean": 0.07470517544075847,
+          "std": 0.0,
+          "min": 0.07470517544075847,
+          "max": 0.07470517544075847
         },
         "sufficiency": {
-          "mean": -0.10143822380403678,
-          "std": 3.0407995872044215e-05,
-          "min": -0.1014812272042036,
-          "max": -0.10141672210395336
+          "mean": -0.12444316916167736,
+          "std": 0.0,
+          "min": -0.12444316916167736,
+          "max": -0.12444316916167736
         },
         "aopc_sufficiency": {
-          "mean": 0.0,
+          "mean": -0.0243521646107547,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": -0.0243521646107547,
+          "max": -0.0243521646107547
         },
         "aopc_comprehensiveness": {
-          "mean": 0.0,
+          "mean": 0.06343529643801352,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": 0.06343529643801352,
+          "max": 0.06343529643801352
         },
         "aopc": {
-          "mean": 0.15026845608294442,
-          "std": 0.00010433168086403386,
-          "min": 0.15019468244391287,
-          "max": 0.15041600336100752
+          "mean": 0.23483154345471902,
+          "std": 0.0,
+          "min": 0.23483154345471902,
+          "max": 0.23483154345471902
         },
         "deletion_auc": {
-          "mean": 0.662043524526784,
-          "std": 0.00010981792380517641,
-          "min": 0.6618882185295472,
-          "max": 0.6621211775254026
+          "mean": 0.5777194893683744,
+          "std": 0.0,
+          "min": 0.5777194893683744,
+          "max": 0.5777194893683744
         },
         "insertion_auc": {
-          "mean": 0.8401356735123017,
-          "std": 3.9617675087192606e-05,
-          "min": 0.8401076595855927,
-          "max": 0.8401917013657197
+          "mean": 0.8699524335602777,
+          "std": 0.0,
+          "min": 0.8699524335602777,
+          "max": 0.8699524335602777
         },
-        "diagnosticity_vs_random": {
-          "mean": 0.6583333333333333,
-          "std": 0.0023570226039551605,
-          "min": 0.655,
-          "max": 0.66
+        "comp_adv_vs_reference": {
+          "mean": 0.03363129014149308,
+          "std": 0.0,
+          "min": 0.03363129014149308,
+          "max": 0.03363129014149308
         },
-        "comp_adv_vs_random": {
-          "mean": 0.047339887972486526,
-          "std": 6.430798458376656e-05,
-          "min": 0.0472944153605029,
-          "max": 0.04743083319645376
+        "suff_adv_vs_reference": {
+          "mean": 0.28030727995559573,
+          "std": 0.0,
+          "min": 0.28030727995559573,
+          "max": 0.28030727995559573
+        }
+      },
+      "reference_gold_metrics": {
+        "comprehensiveness": {
+          "mean": 0.04107388529926539,
+          "std": 0.0,
+          "min": 0.04107388529926539,
+          "max": 0.04107388529926539
         },
-        "suff_adv_vs_random": {
-          "mean": 0.29013848219934546,
-          "std": 3.0407995872044215e-05,
-          "min": 0.29011698049926204,
-          "max": 0.2901814855995123
+        "sufficiency": {
+          "mean": 0.15586411079391838,
+          "std": 0.0,
+          "min": 0.15586411079391838,
+          "max": 0.15586411079391838
         }
       },
       "predicted_metrics": {
         "log_odds": {
-          "mean": 0.0,
+          "mean": -0.2225430244920896,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": -0.2225430244920896,
+          "max": -0.2225430244920896
         },
         "comprehensiveness": {
-          "mean": 0.07921346544474363,
-          "std": 0.00021035711255399408,
-          "min": 0.07891597556322813,
-          "max": 0.07936221038550138
+          "mean": 0.08041768528521061,
+          "std": 0.0,
+          "min": 0.08041768528521061,
+          "max": 0.08041768528521061
         },
         "sufficiency": {
-          "mean": 0.01259954015444964,
-          "std": 6.353785717240495e-05,
-          "min": 0.012554612104780972,
-          "max": 0.012689396253786981
+          "mean": 0.009110965807922184,
+          "std": 0.0,
+          "min": 0.009110965807922184,
+          "max": 0.009110965807922184
         },
         "aopc_sufficiency": {
-          "mean": 0.0,
+          "mean": 0.06173118657510106,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": 0.06173118657510106,
+          "max": 0.06173118657510106
         },
         "aopc_comprehensiveness": {
-          "mean": 0.0,
+          "mean": 0.06420751793930927,
           "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
+          "min": 0.06420751793930927,
+          "max": 0.06420751793930927
         },
         "aopc": {
-          "mean": 0.15847079271151474,
-          "std": 0.0003327703206141647,
-          "min": 0.15800018441094696,
-          "max": 0.15870609686179865
+          "mean": 0.22534358461837176,
+          "std": 0.0,
+          "min": 0.22534358461837176,
+          "max": 0.22534358461837176
         },
         "deletion_auc": {
-          "mean": 0.6989991158871908,
-          "std": 0.00034923778176485914,
-          "min": 0.6987521674834583,
-          "max": 0.6994930126946557
+          "mean": 0.6324489965943314,
+          "std": 0.0,
+          "min": 0.6324489965943314,
+          "max": 0.6324489965943314
         },
         "insertion_auc": {
-          "mean": 0.826103506850064,
-          "std": 0.0002019679166461436,
-          "min": 0.8258178810831788,
-          "max": 0.8262463197335066
+          "mean": 0.8375371563875423,
+          "std": 0.0,
+          "min": 0.8375371563875423,
+          "max": 0.8375371563875423
         }
       },
       "runtime": {
-        "seconds": {
-          "mean": 2594.7516881624856,
-          "std": 10.92964170087849,
-          "min": 2583.6064121723175,
-          "max": 2609.5991694927216
+        "primary_seconds": {
+          "mean": 33319.104439496994,
+          "std": 0.0,
+          "min": 33319.104439496994,
+          "max": 33319.104439496994
         },
-        "predict_calls": {
-          "mean": 24715.666666666668,
-          "std": 2.494438257849294,
-          "min": 24713.0,
-          "max": 24719.0
+        "reference_seconds": {
+          "mean": 34657.20282578468,
+          "std": 0.0,
+          "min": 34657.20282578468,
+          "max": 34657.20282578468
+        },
+        "primary_predict_calls": {
+          "mean": 304781.0,
+          "std": 0.0,
+          "min": 304781.0,
+          "max": 304781.0
+        },
+        "reference_predict_calls": {
+          "mean": 304781.0,
+          "std": 0.0,
+          "min": 304781.0,
+          "max": 304781.0
         }
       },
       "reports": [
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42/eval_report.json"
-        ],
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-43/eval_report.json"
-        ],
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-44/eval_report.json"
-        ]
-      ]
-    },
-    {
-      "group_id": "eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,2,1,1",
-      "config": {
-        "dataset": "eraser_movie_reviews",
-        "split": "validation",
-        "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
-        "chunker": "sentence",
-        "search": "greedy",
-        "k": 8,
-        "lambdas": "1,2,1,1",
-        "eval_q_values": "1,5,10,20,50",
-        "eval_random_trials": 5,
-        "max_samples": null
-      },
-      "n_runs": 3,
-      "seeds": [
-        42,
-        43,
-        44
-      ],
-      "report_kind_counts": {
-        "legacy": 3
-      },
-      "gate_b_checks": {
-        "comp_beats_random_all": true,
-        "suff_beats_random_all": true,
-        "run_pass_rate": 1.0
-      },
-      "gold_metrics": {
-        "log_odds": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "comprehensiveness": {
-          "mean": 0.07701893011666834,
-          "std": 0.0,
-          "min": 0.07701893011666834,
-          "max": 0.07701893011666834
-        },
-        "sufficiency": {
-          "mean": -0.09839444831013681,
-          "std": 1.3877787807814457e-17,
-          "min": -0.0983944483101368,
-          "max": -0.0983944483101368
-        },
-        "aopc_sufficiency": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "aopc_comprehensiveness": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "aopc": {
-          "mean": 0.15296200526512563,
-          "std": 0.0,
-          "min": 0.15296200526512563,
-          "max": 0.15296200526512563
-        },
-        "deletion_auc": {
-          "mean": 0.6592712033287443,
-          "std": 0.0,
-          "min": 0.6592712033287443,
-          "max": 0.6592712033287443
-        },
-        "insertion_auc": {
-          "mean": 0.8396896630029579,
-          "std": 0.0,
-          "min": 0.8396896630029579,
-          "max": 0.8396896630029579
-        },
-        "diagnosticity_vs_random": {
-          "mean": 0.665,
-          "std": 0.0,
-          "min": 0.665,
-          "max": 0.665
-        },
-        "comp_adv_vs_random": {
-          "mean": 0.04873863782752305,
-          "std": 0.0,
-          "min": 0.04873863782752305,
-          "max": 0.04873863782752305
-        },
-        "suff_adv_vs_random": {
-          "mean": 0.28709470670544546,
-          "std": 0.0,
-          "min": 0.28709470670544546,
-          "max": 0.28709470670544546
+        {
+          "seed": 42,
+          "primary_report_path": "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-ours/eval_report.json",
+          "reference_report_path": "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-random/eval_report.json"
         }
-      },
-      "predicted_metrics": {
-        "log_odds": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "comprehensiveness": {
-          "mean": 0.08057206567376853,
-          "std": 0.0,
-          "min": 0.08057206567376853,
-          "max": 0.08057206567376853
-        },
-        "sufficiency": {
-          "mean": 0.016731931013986467,
-          "std": 0.0,
-          "min": 0.016731931013986467,
-          "max": 0.016731931013986467
-        },
-        "aopc_sufficiency": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "aopc_comprehensiveness": {
-          "mean": 0.0,
-          "std": 0.0,
-          "min": 0.0,
-          "max": 0.0
-        },
-        "aopc": {
-          "mean": 0.16066958572161458,
-          "std": 0.0,
-          "min": 0.16066958572161458,
-          "max": 0.16066958572161458
-        },
-        "deletion_auc": {
-          "mean": 0.6967355961357017,
-          "std": 1.1102230246251565e-16,
-          "min": 0.6967355961357018,
-          "max": 0.6967355961357018
-        },
-        "insertion_auc": {
-          "mean": 0.823732558015771,
-          "std": 0.0,
-          "min": 0.823732558015771,
-          "max": 0.823732558015771
-        }
-      },
-      "runtime": {
-        "seconds": {
-          "mean": 2774.3988727728524,
-          "std": 168.8945211547985,
-          "min": 2590.70543551445,
-          "max": 2998.459734916687
-        },
-        "predict_calls": {
-          "mean": 24727.666666666668,
-          "std": 0.9428090415820634,
-          "min": 24727.0,
-          "max": 24729.0
-        }
-      },
-      "reports": [
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-42/eval_report.json"
-        ],
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-43/eval_report.json"
-        ],
-        [
-          "lima_llm_results/eraser_movie_reviews/model-Qwen2_5-7B-Instruct/chunk-sentence_search-greedy_k-8_lam-1-2-1-1_seed-44/eval_report.json"
-        ]
       ]
     }
   ]

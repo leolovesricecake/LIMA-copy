@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+
+def _read_json(path: Path) -> Dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _group_key_from_config(cfg: Dict[str, Any]) -> Tuple[Any, ...]:
+    return (
+        cfg.get("dataset"),
+        cfg.get("split"),
+        cfg.get("model_path"),
+        cfg.get("chunker"),
+        cfg.get("search"),
+        cfg.get("k"),
+        cfg.get("lambdas"),
+        cfg.get("eval_q_values"),
+        cfg.get("max_samples"),
+        cfg.get("seed"),
+    )
+
+
+def _group_id_from_config(cfg: Dict[str, Any]) -> str:
+    model = Path(str(cfg.get("model_path", ""))).name
+    return (
+        f"{cfg.get('dataset')}/{cfg.get('split')}"
+        f"|model={model}"
+        f"|chunk={cfg.get('chunker')}"
+        f"|search={cfg.get('search')}"
+        f"|k={cfg.get('k')}"
+        f"|lam={cfg.get('lambdas')}"
+        f"|seed={cfg.get('seed')}"
+    )
+
+
+def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
+    elapsed: List[float] = []
+    chunk_counts: List[float] = []
+    selected_counts: List[float] = []
+    forward_final = {
+        "predict_calls": 0,
+        "embed_calls": 0,
+        "gradient_calls": 0,
+    }
+
+    for path in sorted(sample_dir.glob("*.json")):
+        payload = _read_json(path)
+        if payload is None:
+            continue
+        meta = payload.get("metadata", {})
+        elapsed.append(_safe_float(meta.get("elapsed_seconds")))
+        chunk_counts.append(float(len(payload.get("chunks", []))))
+        selected_counts.append(float(len(payload.get("selected_chunk_ids", []))))
+
+        fc = meta.get("forward_counters", {})
+        for key in forward_final:
+            forward_final[key] = max(forward_final[key], int(_safe_float(fc.get(key), 0.0)))
+
+    n = len(elapsed)
+    if n == 0:
+        return {
+            "sample_count": 0,
+            "explain_seconds_total": 0.0,
+            "explain_seconds_mean": 0.0,
+            "explain_seconds_p50": 0.0,
+            "explain_seconds_p90": 0.0,
+            "explain_seconds_max": 0.0,
+            "chunk_count_mean": 0.0,
+            "selected_count_mean": 0.0,
+            "forward_counters_final": forward_final,
+        }
+
+    elapsed_sorted = sorted(elapsed)
+
+    def _percentile(xs: List[float], q: float) -> float:
+        if not xs:
+            return 0.0
+        idx = int(round((len(xs) - 1) * q))
+        idx = max(0, min(len(xs) - 1, idx))
+        return float(xs[idx])
+
+    return {
+        "sample_count": n,
+        "explain_seconds_total": float(sum(elapsed)),
+        "explain_seconds_mean": float(sum(elapsed) / n),
+        "explain_seconds_p50": _percentile(elapsed_sorted, 0.50),
+        "explain_seconds_p90": _percentile(elapsed_sorted, 0.90),
+        "explain_seconds_max": float(max(elapsed_sorted)),
+        "chunk_count_mean": float(sum(chunk_counts) / n),
+        "selected_count_mean": float(sum(selected_counts) / n),
+        "forward_counters_final": forward_final,
+    }
+
+
+def _extract_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
+    sec = report.get("metrics_secondary", {})
+    gold = report.get("metrics_by_target", {}).get("gold", {}).get("metrics_primary", {})
+    pred = report.get("metrics_by_target", {}).get("predicted", {}).get("metrics_primary", {})
+
+    eval_seconds = _safe_float(sec.get("runtime_seconds"))
+    row = {
+        "eval_seconds": eval_seconds,
+        "eval_forward_counters": {
+            "predict_calls": int(_safe_float(sec.get("forward_counters_delta", {}).get("predict_calls", 0.0))),
+            "embed_calls": int(_safe_float(sec.get("forward_counters_delta", {}).get("embed_calls", 0.0))),
+            "gradient_calls": int(_safe_float(sec.get("forward_counters_delta", {}).get("gradient_calls", 0.0))),
+        },
+        "plausibility_f1": _safe_float(sec.get("plausibility_f1")),
+        "plausibility_iou": _safe_float(sec.get("plausibility_iou")),
+        "sparsity": _safe_float(sec.get("sparsity")),
+        "accuracy_full": _safe_float(report.get("metrics_primary", {}).get("accuracy_full")),
+        "gold": {
+            "log_odds": _safe_float(gold.get("log_odds")),
+            "comprehensiveness": _safe_float(gold.get("comprehensiveness")),
+            "sufficiency": _safe_float(gold.get("sufficiency")),
+            "aopc": _safe_float(gold.get("aopc")),
+            "aopc_sufficiency": _safe_float(gold.get("aopc_sufficiency")),
+            "aopc_comprehensiveness": _safe_float(gold.get("aopc_comprehensiveness")),
+            "deletion_auc": _safe_float(gold.get("deletion_auc")),
+            "insertion_auc": _safe_float(gold.get("insertion_auc")),
+        },
+        "predicted": {
+            "log_odds": _safe_float(pred.get("log_odds")),
+            "comprehensiveness": _safe_float(pred.get("comprehensiveness")),
+            "sufficiency": _safe_float(pred.get("sufficiency")),
+            "aopc": _safe_float(pred.get("aopc")),
+            "aopc_sufficiency": _safe_float(pred.get("aopc_sufficiency")),
+            "aopc_comprehensiveness": _safe_float(pred.get("aopc_comprehensiveness")),
+            "deletion_auc": _safe_float(pred.get("deletion_auc")),
+            "insertion_auc": _safe_float(pred.get("insertion_auc")),
+        },
+    }
+    return row
+
+
+def _pairwise(primary: Dict[str, Any], reference: Dict[str, Any], primary_name: str, reference_name: str) -> Dict[str, Any]:
+    pg = primary["metrics"]["gold"]
+    rg = reference["metrics"]["gold"]
+    pair = {
+        "primary": primary_name,
+        "reference": reference_name,
+        "gold_comp_adv": float(pg["comprehensiveness"] - rg["comprehensiveness"]),
+        "gold_suff_adv": float(rg["sufficiency"] - pg["sufficiency"]),
+        "gold_pass": bool((pg["comprehensiveness"] > rg["comprehensiveness"]) and (pg["sufficiency"] < rg["sufficiency"])),
+        "primary_total_seconds": float(primary["timing"]["total_seconds"]),
+        "reference_total_seconds": float(reference["timing"]["total_seconds"]),
+        "primary_eval_seconds": float(primary["timing"]["eval_seconds"]),
+        "reference_eval_seconds": float(reference["timing"]["eval_seconds"]),
+        "primary_explain_seconds": float(primary["timing"]["explain_seconds_total"]),
+        "reference_explain_seconds": float(reference["timing"]["explain_seconds_total"]),
+    }
+    return pair
+
+
+def build_snapshot(results_root: Path, primary_method: str, reference_method: str) -> Dict[str, Any]:
+    runs: List[Dict[str, Any]] = []
+    for config_path in sorted(results_root.glob("**/run_config.json")):
+        run_dir = config_path.parent
+        report_path = run_dir / "eval_report.json"
+        cfg = _read_json(config_path)
+        report = _read_json(report_path)
+        if cfg is None or report is None:
+            continue
+
+        method = str(report.get("report_method") or cfg.get("explain_method") or "unknown").strip().lower()
+        explain_stats = _collect_explain_stats(run_dir / "samples")
+        metrics = _extract_metrics(report)
+        timing = {
+            "explain_seconds_total": float(explain_stats["explain_seconds_total"]),
+            "eval_seconds": float(metrics["eval_seconds"]),
+            "total_seconds": float(explain_stats["explain_seconds_total"] + metrics["eval_seconds"]),
+            "explain_seconds_mean": float(explain_stats["explain_seconds_mean"]),
+            "explain_seconds_p50": float(explain_stats["explain_seconds_p50"]),
+            "explain_seconds_p90": float(explain_stats["explain_seconds_p90"]),
+            "explain_seconds_max": float(explain_stats["explain_seconds_max"]),
+        }
+        run = {
+            "group_key": _group_key_from_config(cfg),
+            "group_id": _group_id_from_config(cfg),
+            "run_dir": str(run_dir),
+            "method": method,
+            "config": cfg,
+            "report_path": str(report_path),
+            "sample_count": int(_safe_float(report.get("sample_count"), 0.0)),
+            "metrics": metrics,
+            "timing": timing,
+            "explain": {
+                "chunk_count_mean": float(explain_stats["chunk_count_mean"]),
+                "selected_count_mean": float(explain_stats["selected_count_mean"]),
+                "forward_counters_final": explain_stats["forward_counters_final"],
+            },
+        }
+        runs.append(run)
+
+    groups: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    for run in runs:
+        key = run["group_key"]
+        if key not in groups:
+            groups[key] = {
+                "group_id": run["group_id"],
+                "methods": {},
+            }
+        groups[key]["methods"][run["method"]] = run
+
+    out_groups: List[Dict[str, Any]] = []
+    for key in sorted(groups.keys(), key=lambda x: str(x)):
+        entry = groups[key]
+        methods = entry["methods"]
+        pair = None
+        if primary_method in methods and reference_method in methods:
+            pair = _pairwise(methods[primary_method], methods[reference_method], primary_method, reference_method)
+
+        out_groups.append(
+            {
+                "group_id": entry["group_id"],
+                "methods": methods,
+                "pairwise": pair,
+            }
+        )
+
+    return {
+        "results_root": str(results_root),
+        "primary_method": primary_method,
+        "reference_method": reference_method,
+        "group_count": len(out_groups),
+        "groups": out_groups,
+    }
+
+
+def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for group in snapshot.get("groups", []):
+        gid = group.get("group_id")
+        methods = group.get("methods", {})
+        for method, run in sorted(methods.items()):
+            gold = run["metrics"]["gold"]
+            pred = run["metrics"]["predicted"]
+            timing = run["timing"]
+            rows.append(
+                {
+                    "group_id": gid,
+                    "method": method,
+                    "sample_count": run.get("sample_count"),
+                    "explain_seconds_total": timing["explain_seconds_total"],
+                    "eval_seconds": timing["eval_seconds"],
+                    "total_seconds": timing["total_seconds"],
+                    "gold_comp": gold["comprehensiveness"],
+                    "gold_suff": gold["sufficiency"],
+                    "gold_aopc": gold["aopc"],
+                    "gold_insertion_auc": gold["insertion_auc"],
+                    "gold_deletion_auc": gold["deletion_auc"],
+                    "plaus_f1": run["metrics"]["plausibility_f1"],
+                    "plaus_iou": run["metrics"]["plausibility_iou"],
+                    "pred_comp": pred["comprehensiveness"],
+                    "pred_suff": pred["sufficiency"],
+                    "accuracy_full": run["metrics"]["accuracy_full"],
+                    "eval_predict_calls": run["metrics"]["eval_forward_counters"]["predict_calls"],
+                    "eval_embed_calls": run["metrics"]["eval_forward_counters"]["embed_calls"],
+                    "eval_gradient_calls": run["metrics"]["eval_forward_counters"]["gradient_calls"],
+                    "explain_predict_calls": run["explain"]["forward_counters_final"]["predict_calls"],
+                    "explain_embed_calls": run["explain"]["forward_counters_final"]["embed_calls"],
+                    "explain_gradient_calls": run["explain"]["forward_counters_final"]["gradient_calls"],
+                }
+            )
+    return rows
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Build unified analysis snapshot from run directories")
+    p.add_argument("--results-root", type=str, default="lima_llm_results")
+    p.add_argument("--primary-method", type=str, default="ours")
+    p.add_argument("--reference-method", type=str, default="gradient")
+    p.add_argument("--output-json", type=str, default=None)
+    p.add_argument("--output-csv", type=str, default=None)
+    return p
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    root = Path(args.results_root)
+    out_json = Path(args.output_json) if args.output_json else (root / "analysis_snapshot.json")
+    out_csv = Path(args.output_csv) if args.output_csv else (root / "analysis_snapshot.csv")
+
+    snapshot = build_snapshot(
+        results_root=root,
+        primary_method=str(args.primary_method).strip().lower(),
+        reference_method=str(args.reference_method).strip().lower(),
+    )
+
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    rows = _flatten_rows(snapshot)
+    fieldnames = [
+        "group_id",
+        "method",
+        "sample_count",
+        "explain_seconds_total",
+        "eval_seconds",
+        "total_seconds",
+        "gold_comp",
+        "gold_suff",
+        "gold_aopc",
+        "gold_insertion_auc",
+        "gold_deletion_auc",
+        "plaus_f1",
+        "plaus_iou",
+        "pred_comp",
+        "pred_suff",
+        "accuracy_full",
+        "eval_predict_calls",
+        "eval_embed_calls",
+        "eval_gradient_calls",
+        "explain_predict_calls",
+        "explain_embed_calls",
+        "explain_gradient_calls",
+    ]
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    print(f"[snapshot] groups={snapshot.get('group_count', 0)}")
+    print(f"[snapshot] json={out_json}")
+    print(f"[snapshot] csv={out_csv}")
+
+
+if __name__ == "__main__":
+    main()

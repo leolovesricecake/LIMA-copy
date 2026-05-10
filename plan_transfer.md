@@ -1,11 +1,11 @@
 # 全流程计划
 
-## 最终目标（不变）
+## 最终目标
 - `v1`：在判别任务上得到“可信、可复现、可对账”的解释方法与评估报告。
 - `v2`：在保证结果等价的前提下系统优化效率与稳定性。
 - `v3`：扩展到生成任务（token/span 级解释），形成可复现实验基线。
 
-## 当前状态（2026-04-25）
+## 当前状态（2026-05-10）
 - 代码层：`lima_llm/` 主链路已完整（数据、chunking、目标函数、搜索、评估、落盘、resume）。
 - 实验层（ERASER Movie Reviews, validation）：
   - `accuracy_full=0.89`（稳定）
@@ -14,14 +14,10 @@
   - `metrics_by_target` 已包含 `gold/predicted` 双口径；
   - `per_q`（`q=1/5/10/20/50`）已输出；
   - `gradient baseline`: `evaluated_samples=200/200`、`failed_samples=0`。
-- Gate B 多 seed 验收已完成：
-  - `sentence + greedy + k=8 + lambdas=1,1,1,1`：3 seeds，`comp_adv_mean=0.0473`、`suff_adv_mean=0.2901`、`run_pass_rate=1.0`；
-  - `sentence + greedy + k=8 + lambdas=1,2,1,1`：3 seeds，`comp_adv_mean=0.0487`、`suff_adv_mean=0.2871`、`run_pass_rate=1.0`；
-  - 聚合产物：`lima_llm_results/gate_b_aggregate.json` 与 `lima_llm_results/gate_b_aggregate.csv`。
 - 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
-- Gate B 评估已切换为方法级独立运行：`--explain-method {ours,random,gradient}`，可在不同 GPU 独立并行执行。
-- 结论：Gate A、Gate B 已达到工程验收口径。由于主评估粒度已切到 word-level，论文定稿前需要按新协议重跑一次 Gate B 作为回归复核。
-- 提醒：性能优化（原 Gate C）暂缓，待功能方案冻结后再重启专项优化。
+- 新增单组对账工具：`scripts/analysis_snapshot.py` / `scripts/analysis_snapshot_diff.py`。
+- 结论：Gate A 已达到工程验收口径，主线转入“正确性不退化前提下的单组优化”。
+- 提醒：多组聚合回归暂缓，待方法与实现冻结后再统一重启。
 
 ## Phase 0：仓库与工程基线（已完成）
 - 建立迁移分支并将文本迁移实现与原始图像版代码解耦。
@@ -42,6 +38,21 @@
 - 增强可观测性：按样本阶段打点（chunking / scoring / search / eval）与性能 profile。
 - 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
 
+## 优化方向
+- 切分方法：
+  - 保持共享 partition 的前提下，补充 `ngram / sentence / semantic` 可比实验接口；
+  - 增加“切分诊断”指标：chunk 数、长度分布、覆盖率、跨句断裂率。
+- 打分函数：
+  - 对四项分数（`confidence/effectiveness/consistency/collaboration`）增加分量级 trace 导出；
+  - 做 `lambda` 小网格与分量消融，定位当前 `comp` 与 `suff` 的主要牵引项；
+  - 优先优化 `ours` 的缓存与调度，不引入近似或随机项。
+- 搜索方法：
+  - 保持 `greedy/bidirectional` 主线，补齐步级对账（每步候选增益排序一致性）；
+  - 引入可开关的候选剪枝实验位，但默认关闭，确保主线语义稳定。
+- 评估协议：
+  - 主口径固定 `gold`，`predicted` 作为辅诊断；
+  - 单组对账固定输出 `explain/eval/total` 时长与 forward counters，避免口径歧义。
+
 ## Phase 3：效率优化（后续专项）
 - 暂缓执行，待功能方案冻结后再重启专项优化。
 
@@ -50,34 +61,6 @@
 - 扩展评分定义到生成任务（基于目标序列 logprob 与隐藏态轨迹）。
 - 支持多轮对话与超长上下文的解释稳定性评估。
 - 引入人类评审与任务级指标（正确性、可读性、实用性）联合报告。
-
-## Gate A：评估真实性与可诊断性（已通过）
-- 验收口径：
-  - 评估报告同时输出双口径 + `per_q`；
-  - gradient 覆盖率 >= 95%（目标 100%）；
-  - 失败样本可定位（error type + sample id）。
-- 当前结论：已满足，后续仅做回归监控。
-
-## Gate B：方法效果稳定性（已验收）
-- 目标：证明“不是单次幸运”，而是稳定优势。
-- 任务：
-  - 小网格：`k`、`lambdas`、`chunker`、`search`；
-  - 多 seed 重复（建议 >=3）；
-  - 输出均值/方差与相对 random 的优势区间。
-- 验收标准：
-  - `COMP` 持续高于 random；
-  - `SUFF` 持续低于 random；
-  - `run_pass_rate` 在多 seed 上稳定。
-- 当前结论：
-  - 两个 lambda 配置均完成 `seed=42/43/44`；
-  - 所有 run 均满足 `COMP > random` 且 `SUFF < random`；
-  - `run_pass_rate=1.0`。
-  - 注意：这些产物来自 word-level 统一评估前的报告；新协议下需要重跑聚合作为论文最终表格。
-
-## Gate D：生成式任务扩展（最终阶段）
-- 目标：从分类解释迁移到生成目标 token/span 解释。
-- 任务：重定义目标与评分、扩展数据与评估协议、形成可复现实验模板。
-- 验收标准：至少 1 个生成任务集上的完整对比报告。
 
 # v1
 
@@ -182,7 +165,7 @@
   - 远程 URL：`--eraser-root https://.../eraser_movie_reviews.tar.gz`
 
 
-# 前言
+# 调研
 ## 背景
 现代 LLM 拥有数千亿参数，其推理过程涉及复杂的注意力机制与专家混合架构（MoE），这使得传统基于梯度或单一注意力的解释方法在面对长文本输入与自回归输出时，往往表现出显著的噪声干扰、计算瓶颈以及保真度不足等缺陷。现有的文本归因方法主要可以归纳为梯度基方法、扰动基方法和博弈论基方法三类，但它们在迁移到如 DeepSeek 或 Qwen 等模型时均面临特定局限。
 

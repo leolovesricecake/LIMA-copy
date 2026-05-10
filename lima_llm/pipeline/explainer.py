@@ -83,7 +83,13 @@ class TextLIMAExplainer:
         method = str(self.config.explain_method).strip().lower()
 
         if method == "ours":
-            chunk_embeddings = [self.backbone.embed_text(chunk.text if chunk.text else "<EMPTY>") for chunk in chunks]
+            chunk_embeddings = []
+            chunk_embed_cache: Dict[str, Sequence[float]] = {}
+            for chunk in chunks:
+                chunk_text = chunk.text if chunk.text else "<EMPTY>"
+                if chunk_text not in chunk_embed_cache:
+                    chunk_embed_cache[chunk_text] = self.backbone.embed_text(chunk_text)
+                chunk_embeddings.append(chunk_embed_cache[chunk_text])
             objective = TextSubmodularObjective(
                 backbone=self.backbone,
                 text=sample.text,
@@ -103,9 +109,13 @@ class TextLIMAExplainer:
 
             selected_set = set(selected)
             singleton_gain: Dict[int, float] = {}
-            for cid in candidate_ids:
-                gain, _, _ = objective.evaluate_gain([], int(cid))
+            _, singleton_batch = objective.evaluate_gains([], candidate_ids)
+            for cid, gain, _ in singleton_batch:
                 singleton_gain[int(cid)] = float(gain)
+            for cid in candidate_ids:
+                if int(cid) not in singleton_gain:
+                    gain, _, _ = objective.evaluate_gain([], int(cid))
+                    singleton_gain[int(cid)] = float(gain)
 
             remaining = [cid for cid in candidate_ids if cid not in selected_set]
             remaining_sorted = sorted(remaining, key=lambda cid: (-singleton_gain[cid], cid))
