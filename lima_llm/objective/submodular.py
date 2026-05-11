@@ -11,9 +11,9 @@ from ..chunking.utils import complement_chunk_ids, compose_text_from_chunk_ids
 from ..scoring import (
     collaboration_score,
     consistency_score,
+    effectiveness_score,
 )
 from ..types import ScoreComponents, SubsetScore, TextChunk, normalize_subset
-from ..utils import cosine_similarity
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,6 @@ class TextSubmodularObjective:
         self.cache: Dict[Tuple[int, ...], SubsetScore] = {}
         self._prob_cache: Dict[str, np.ndarray] = {}
         self._embed_cache: Dict[str, np.ndarray] = {}
-        self._chunk_distances = self._build_chunk_distance_matrix(self.chunk_embeddings)
         self.anchor_embedding = self._embed_text_cached(self.text if self.text else self.empty_text_token)
 
     def _subset_text(self, subset: Sequence[int]) -> str:
@@ -103,29 +102,6 @@ class TextSubmodularObjective:
             self._embed_cache[text] = np.asarray(self.backbone.embed_text(text), dtype=np.float32)
         return self._embed_cache[text]
 
-    @staticmethod
-    def _build_chunk_distance_matrix(chunk_embeddings: Sequence[np.ndarray]) -> np.ndarray:
-        n = len(chunk_embeddings)
-        dist = np.zeros((n, n), dtype=np.float64)
-        for i in range(n):
-            for j in range(n):
-                if i == j:
-                    continue
-                sim = cosine_similarity(chunk_embeddings[i], chunk_embeddings[j])
-                dist[i, j] = float(1.0 - sim)
-        return dist
-
-    def _effectiveness_from_subset(self, subset: Sequence[int]) -> float:
-        ids = sorted(set(int(i) for i in subset))
-        if len(ids) <= 1:
-            return 0.0
-
-        local = self._chunk_distances[np.ix_(ids, ids)].astype(np.float64, copy=True)
-        np.fill_diagonal(local, np.inf)
-        mins = np.min(local, axis=1)
-        mins = np.where(np.isfinite(mins), mins, 0.0)
-        return float(np.sum(mins, dtype=np.float64))
-
     def _prefetch_embed_texts(self, texts: Sequence[str]) -> None:
         missing: List[str] = []
         seen = set()
@@ -171,7 +147,7 @@ class TextSubmodularObjective:
             target_prob = float(label_probs[self.target_label])
 
             conf = target_prob
-            eff = self._effectiveness_from_subset(subset_key)
+            eff = effectiveness_score(self.chunk_embeddings, subset_key)
             cons = consistency_score(self._embed_text_cached(subset_text), self.anchor_embedding)
             col = collaboration_score(self._embed_text_cached(complement_text), self.anchor_embedding)
 

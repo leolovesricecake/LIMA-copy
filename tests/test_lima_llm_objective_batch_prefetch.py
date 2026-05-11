@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from lima_llm.backbone.mock_backbone import MockBackbone
 from lima_llm.objective.submodular import ObjectiveWeights, TextSubmodularObjective
-from lima_llm.scoring import effectiveness_score
 from lima_llm.search.algorithms import run_forward_greedy
 from lima_llm.types import TextChunk
 
@@ -57,20 +56,3 @@ def test_batch_prefetch_toggle_keeps_greedy_selection_identical() -> None:
     assert len(trace_batch) == len(trace_single)
     for left, right in zip(trace_batch, trace_single):
         assert abs(float(left.total_score) - float(right.total_score)) <= 1e-6
-
-
-def test_effectiveness_fast_path_matches_reference() -> None:
-    objective = _build_objective(enable_batch_prefetch=True)
-    subsets = [
-        [],
-        [0],
-        [1],
-        [0, 1],
-        [0, 2, 3],
-        [3, 2, 0],
-        [0, 0, 1, 1, 2],
-    ]
-    for subset in subsets:
-        fast = objective._effectiveness_from_subset(subset)
-        ref = effectiveness_score(objective.chunk_embeddings, subset)
-        assert abs(float(fast) - float(ref)) <= 1e-12

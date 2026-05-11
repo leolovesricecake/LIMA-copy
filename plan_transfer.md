@@ -39,6 +39,10 @@
 - 建立 CI：最小数据集端到端回归测试 + 关键指标阈值守护。
 
 ## 优化方向
+- 已回退尝试（仅记录思路，当前不启用）：
+  - `objective`：预计算 chunk 距离矩阵并改走子集快速 `effectiveness`。
+  - `explainer`：`singleton gain` 批量计算与 chunk embedding 去重。
+  - 回退原因：单组 200 样本出现主指标漂移（`comp/suff` 退化）；后续仅在样本级等价闸门通过后再重启。
 - 切分方法：
   - 保持共享 partition 的前提下，补充 `ngram / sentence / semantic` 可比实验接口；
   - 增加“切分诊断”指标：chunk 数、长度分布、覆盖率、跨句断裂率。
