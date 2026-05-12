@@ -1,2 +1,0 @@
-group_id,n_runs,seeds,primary_method,reference_method,gold_comp_mean,gold_comp_std,gold_suff_mean,gold_suff_std,ref_comp_mean,ref_suff_mean,comp_adv_mean,suff_adv_mean,run_pass_rate
-"eraser_movie_reviews/validation|model=Qwen2.5-7B-Instruct|chunk=sentence|search=greedy|k=8|lam=1,1,1,1",1,42,ours,random,0.07470517544075847,0.0,-0.12444316916167736,0.0,0.04107388529926539,0.15586411079391838,0.03363129014149308,0.28030727995559573,1.0
