@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List
@@ -13,6 +14,8 @@ from ..chunking import build_chunker
 from ..data import load_dataset_bundle
 from ..objective.submodular import ObjectiveWeights
 from ..utils import (
+    build_provenance,
+    configure_determinism,
     ensure_dir,
     format_label_distribution,
     parse_lambdas,
@@ -46,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])
 
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--dry-run", type=int, default=0)
     parser.add_argument("--verbose-chunks", action="store_true")
@@ -55,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--run-eval", action="store_true")
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
+    parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
     parser.add_argument("--explain-method", type=str, default="ours", choices=["ours", "random", "gradient"])
     return parser
 
@@ -99,9 +104,30 @@ def _scan_resume(samples, output_root: Path, resume_mode: str):
     return pending, completed
 
 
+def _write_json(path: Path, payload: Dict) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_json_if_possible(path: Path) -> Dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def main(argv: List[str] | None = None) -> None:
+    run_started = time.time()
     parser = build_parser()
     args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else list(sys.argv[1:])
+
+    deterministic_info = configure_determinism(args.deterministic)
+    if args.deterministic:
+        print(f"[deterministic] enabled info={deterministic_info}")
+    else:
+        print("[deterministic] disabled")
 
     weights = ObjectiveWeights(*parse_lambdas(args.lambdas))
 
@@ -166,15 +192,43 @@ def main(argv: List[str] | None = None) -> None:
     ensure_dir(output_root)
     ensure_dir(output_root / "samples")
 
+    run_config_payload = dict(vars(args))
+    run_config_payload["provenance"] = build_provenance(
+        stage="run_config",
+        parsed_args=vars(args),
+        raw_argv=raw_argv,
+        deterministic_info=deterministic_info,
+        start_time=run_started,
+        end_time=time.time(),
+        cwd=Path.cwd(),
+    )
+
     config_path = output_root / "run_config.json"
-    if not config_path.exists():
-        config_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
+    if config_path.exists():
+        existing = _load_json_if_possible(config_path)
+        if isinstance(existing, dict) and "provenance" in existing:
+            print(f"[config] keep existing run config: {config_path}")
+        else:
+            merged = dict(existing) if isinstance(existing, dict) else {}
+            merged.update(run_config_payload)
+            _write_json(config_path, merged)
+            print(f"[config] updated run config with provenance: {config_path}")
     else:
-        print(f"[config] keep existing run config: {config_path}")
+        _write_json(config_path, run_config_payload)
 
     if args.run_eval:
         eval_cfg_path = output_root / "eval_config.json"
-        eval_cfg_path.write_text(json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8")
+        eval_cfg_payload = dict(vars(args))
+        eval_cfg_payload["provenance"] = build_provenance(
+            stage="eval_config",
+            parsed_args=vars(args),
+            raw_argv=raw_argv,
+            deterministic_info=deterministic_info,
+            start_time=run_started,
+            end_time=time.time(),
+            cwd=Path.cwd(),
+        )
+        _write_json(eval_cfg_path, eval_cfg_payload)
 
     pending_samples, _ = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
     if not pending_samples:
@@ -197,6 +251,7 @@ def main(argv: List[str] | None = None) -> None:
 
         q_values = parse_q_values(args.eval_q_values)
         print(f"[eval] running q_values={q_values} method={args.explain_method}")
+        eval_started = time.time()
         eval_report = evaluate_saved_explanations(
             output_root=output_root,
             bundle=bundle,
@@ -204,9 +259,19 @@ def main(argv: List[str] | None = None) -> None:
             verbalizers=bundle.verbalizers,
             q_values=q_values,
             explain_method=args.explain_method,
+            eval_granularity=args.eval_granularity,
+        )
+        eval_report["provenance"] = build_provenance(
+            stage="eval_report",
+            parsed_args=vars(args),
+            raw_argv=raw_argv,
+            deterministic_info=deterministic_info,
+            start_time=eval_started,
+            end_time=time.time(),
+            cwd=Path.cwd(),
         )
         report_path = output_root / "eval_report.json"
-        report_path.write_text(json.dumps(eval_report, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(report_path, eval_report)
         print(f"[eval] report={report_path}")
 
 

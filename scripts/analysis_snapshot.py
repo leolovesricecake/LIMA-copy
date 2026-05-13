@@ -24,6 +24,13 @@ def _read_json(path: Path) -> Dict[str, Any] | None:
         return None
 
 
+def _normalized_eval_granularity(cfg: Dict[str, Any]) -> str:
+    value = str(cfg.get("eval_granularity", "word")).strip().lower()
+    if value not in {"word", "token"}:
+        return "word"
+    return value
+
+
 def _group_key_from_config(cfg: Dict[str, Any]) -> Tuple[Any, ...]:
     return (
         cfg.get("dataset"),
@@ -34,6 +41,7 @@ def _group_key_from_config(cfg: Dict[str, Any]) -> Tuple[Any, ...]:
         cfg.get("k"),
         cfg.get("lambdas"),
         cfg.get("eval_q_values"),
+        _normalized_eval_granularity(cfg),
         cfg.get("max_samples"),
         cfg.get("seed"),
     )
@@ -48,6 +56,7 @@ def _group_id_from_config(cfg: Dict[str, Any]) -> str:
         f"|search={cfg.get('search')}"
         f"|k={cfg.get('k')}"
         f"|lam={cfg.get('lambdas')}"
+        f"|eval={_normalized_eval_granularity(cfg)}"
         f"|seed={cfg.get('seed')}"
     )
 
@@ -258,6 +267,7 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
             rows.append(
                 {
                     "group_id": gid,
+                    "eval_granularity": _normalized_eval_granularity(run.get("config", {})),
                     "method": method,
                     "sample_count": run.get("sample_count"),
                     "explain_seconds_total": timing["explain_seconds_total"],
@@ -312,6 +322,7 @@ def main() -> None:
     rows = _flatten_rows(snapshot)
     fieldnames = [
         "group_id",
+        "eval_granularity",
         "method",
         "sample_count",
         "explain_seconds_total",

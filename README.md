@@ -20,6 +20,7 @@ bash scripts/run_lima_llm_v1.sh \
   --dataset sst2 \
   --split validation \
   --mock-backbone \
+  --deterministic \
   --k 8 \
   --chunker sentence \
   --search greedy \
@@ -30,6 +31,8 @@ bash scripts/run_lima_llm_v1.sh \
 ```
 
 `--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
+
+`--deterministic` 可开启更强确定性设置（用于回归对账/复现实验）。运行产物 `run_config.json`、`eval_config.json`、`eval_report.json` 会包含 `provenance` 字段（git/命令/环境/时间信息）。
 
 可用 `python scripts/analysis_snapshot.py --results-root lima_llm_results --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
 

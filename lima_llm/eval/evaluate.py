@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 from tqdm import tqdm
 
-from ..chunking.utils import chunk_char_length
+from ..chunking.utils import chunk_char_length, compose_text_from_chunk_ids
 from ..types import TextChunk
 from ..utils import f1_iou_from_masks, spans_to_char_mask
-from .metrics import AML_AOPC_Q_VALUES, AML_PRIMARY_Q_PERCENT, aml_faithfulness_metrics, aopc_metrics
+from .metrics import (
+    AML_AOPC_Q_VALUES,
+    AML_PRIMARY_Q_PERCENT,
+    DEFAULT_REFERENCE_TOKEN_TEXT,
+    EMPTY_PERTURBATION_TEXT,
+    aml_faithfulness_metrics,
+    aopc_metrics,
+    ranking_to_top_ids,
+)
 
 _WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
+_EVAL_GRANULARITIES = {"token", "word"}
 
 
 def _safe_mean(xs: Sequence[float]) -> float:
@@ -62,6 +72,119 @@ def _word_units_from_text(text: str) -> List[TextChunk]:
     return units
 
 
+def _normalize_eval_granularity(eval_granularity: str | None) -> str:
+    value = str(eval_granularity or "token").strip().lower()
+    if value not in _EVAL_GRANULARITIES:
+        raise ValueError(f"Unsupported eval granularity: {eval_granularity!r}. Expected one of {_EVAL_GRANULARITIES}.")
+    return value
+
+
+def _repair_units_to_full_coverage(
+    text: str,
+    units: Sequence[TextChunk],
+    *,
+    keep_token_span: bool,
+) -> List[TextChunk]:
+    if text == "":
+        return [TextChunk(chunk_id=0, start_char=0, end_char=0, text="")]
+
+    spans: List[Tuple[int, int, Any, Any]] = []
+    text_len = len(text)
+    for unit in units:
+        start = max(0, min(int(unit.start_char), text_len))
+        end = max(0, min(int(unit.end_char), text_len))
+        if end < start:
+            continue
+        spans.append((start, end, unit.token_start, unit.token_end))
+
+    if not spans:
+        return [TextChunk(chunk_id=0, start_char=0, end_char=text_len, text=text)]
+
+    spans.sort(key=lambda item: (item[0], item[1]))
+
+    starts: List[int] = []
+    prev = 0
+    for idx, (start, _end, _tok_start, _tok_end) in enumerate(spans):
+        cur = start
+        if idx == 0:
+            cur = 0
+        elif cur < prev:
+            cur = prev
+        starts.append(cur)
+        prev = cur
+
+    repaired: List[TextChunk] = []
+    for idx in range(len(spans)):
+        start = starts[idx]
+        end = starts[idx + 1] if idx < len(spans) - 1 else text_len
+        if end < start:
+            end = start
+        tok_start = int(spans[idx][2]) if keep_token_span and spans[idx][2] is not None else None
+        tok_end = int(spans[idx][3]) if keep_token_span and spans[idx][3] is not None else None
+        repaired.append(
+            TextChunk(
+                chunk_id=idx,
+                start_char=start,
+                end_char=end,
+                text=text[start:end],
+                token_start=tok_start,
+                token_end=tok_end,
+            )
+        )
+    return repaired
+
+
+def _token_units_from_text(text: str, tokenizer) -> tuple[List[TextChunk], bool]:
+    if text == "":
+        return [TextChunk(chunk_id=0, start_char=0, end_char=0, text="")], False
+
+    if tokenizer is not None:
+        try:
+            encoded = tokenizer(
+                text,
+                return_offsets_mapping=True,
+                add_special_tokens=False,
+                truncation=False,
+            )
+            offsets = encoded.get("offset_mapping", None)
+            if offsets:
+                token_units: List[TextChunk] = []
+                for idx, offset in enumerate(offsets):
+                    if offset is None or len(offset) < 2:
+                        continue
+                    start, end = int(offset[0]), int(offset[1])
+                    if end < start:
+                        continue
+                    token_units.append(
+                        TextChunk(
+                            chunk_id=idx,
+                            start_char=start,
+                            end_char=end,
+                            text=text[start:end],
+                            token_start=idx,
+                            token_end=idx + 1,
+                        )
+                    )
+                if token_units:
+                    return _repair_units_to_full_coverage(text=text, units=token_units, keep_token_span=True), False
+        except Exception:
+            pass
+
+    fallback_units = _word_units_from_text(text)
+    return _repair_units_to_full_coverage(text=text, units=fallback_units, keep_token_span=False), True
+
+
+def _build_eval_units(text: str, eval_granularity: str, tokenizer) -> tuple[List[TextChunk], bool, str]:
+    granularity = _normalize_eval_granularity(eval_granularity)
+    if granularity == "word":
+        word_units = _repair_units_to_full_coverage(text=text, units=_word_units_from_text(text), keep_token_span=False)
+        return word_units, False, "word_whitespace_spans"
+
+    token_units, fallback = _token_units_from_text(text=text, tokenizer=tokenizer)
+    strategy = "tokenizer_offset_mapping" if not fallback else "whitespace_fallback_without_tokenizer_offsets"
+    return token_units, fallback, strategy
+
+
 def _content_span(unit: TextChunk) -> tuple[int, int]:
     leading_len = len(unit.text) - len(unit.text.lstrip())
     trailing_len = len(unit.text) - len(unit.text.rstrip())
@@ -72,8 +195,8 @@ def _content_span(unit: TextChunk) -> tuple[int, int]:
     return start, end
 
 
-def _project_chunk_ranking_to_word_ranking(
-    word_units: Sequence[TextChunk],
+def _project_chunk_ranking_to_unit_ranking(
+    eval_units: Sequence[TextChunk],
     chunks: Sequence[TextChunk],
     chunk_ranking: Sequence[int],
 ) -> List[int]:
@@ -81,39 +204,55 @@ def _project_chunk_ranking_to_word_ranking(
     fallback_rank = len(chunk_rank) + len(chunks) + 1
 
     projected = []
-    for word in word_units:
-        word_start, word_end = _content_span(word)
+    for unit in eval_units:
+        unit_start, unit_end = _content_span(unit)
         weighted_rank = 0.0
         overlap_total = 0
 
         for chunk in chunks:
-            overlap = max(0, min(word_end, chunk.end_char) - max(word_start, chunk.start_char))
+            overlap = max(0, min(unit_end, chunk.end_char) - max(unit_start, chunk.start_char))
             if overlap <= 0:
                 continue
             weighted_rank += float(overlap) * float(chunk_rank.get(chunk.chunk_id, fallback_rank))
             overlap_total += int(overlap)
 
         if overlap_total <= 0:
-            projected_rank = float(fallback_rank + word.chunk_id)
+            projected_rank = float(fallback_rank + unit.chunk_id)
         else:
             projected_rank = weighted_rank / float(overlap_total)
-        projected.append((word.chunk_id, projected_rank))
+        projected.append((unit.chunk_id, projected_rank))
 
-    return [word_id for word_id, _ in sorted(projected, key=lambda item: (item[1], item[0]))]
+    return [unit_id for unit_id, _ in sorted(projected, key=lambda item: (item[1], item[0]))]
 
 
-def _count_words_split_across_chunks(word_units: Sequence[TextChunk], chunks: Sequence[TextChunk]) -> int:
+def _count_units_split_across_chunks(eval_units: Sequence[TextChunk], chunks: Sequence[TextChunk]) -> int:
     split_count = 0
-    for word in word_units:
-        word_start, word_end = _content_span(word)
+    for unit in eval_units:
+        unit_start, unit_end = _content_span(unit)
         overlaps = 0
         for chunk in chunks:
-            if min(word_end, chunk.end_char) > max(word_start, chunk.start_char):
+            if min(unit_end, chunk.end_char) > max(unit_start, chunk.start_char):
                 overlaps += 1
                 if overlaps > 1:
                     split_count += 1
                     break
     return split_count
+
+
+def _project_chunk_ranking_to_word_ranking(
+    word_units: Sequence[TextChunk],
+    chunks: Sequence[TextChunk],
+    chunk_ranking: Sequence[int],
+) -> List[int]:
+    return _project_chunk_ranking_to_unit_ranking(
+        eval_units=word_units,
+        chunks=chunks,
+        chunk_ranking=chunk_ranking,
+    )
+
+
+def _count_words_split_across_chunks(word_units: Sequence[TextChunk], chunks: Sequence[TextChunk]) -> int:
+    return _count_units_split_across_chunks(word_units, chunks)
 
 
 def _empty_mode_state(q_values: Sequence[int]) -> Dict:
@@ -216,6 +355,113 @@ def _normalize_chunk_ranking(payload: Dict, chunks: Sequence[TextChunk]) -> List
     return ranking
 
 
+def _nonempty_text(text: str) -> str:
+    return text if text != "" else EMPTY_PERTURBATION_TEXT
+
+
+def _compose_text_replacing_chunk_ids(
+    chunks: Sequence[TextChunk],
+    chunk_ids: Sequence[int],
+    replacement_text: str,
+) -> str:
+    replace_ids = {int(i) for i in chunk_ids}
+    parts: List[str] = []
+    for chunk in sorted(chunks, key=lambda c: (c.start_char, c.chunk_id)):
+        if chunk.chunk_id not in replace_ids:
+            parts.append(chunk.text)
+            continue
+
+        leading_len = len(chunk.text) - len(chunk.text.lstrip())
+        trailing_len = len(chunk.text) - len(chunk.text.rstrip())
+        leading = chunk.text[:leading_len]
+        trailing = chunk.text[len(chunk.text) - trailing_len :] if trailing_len > 0 else ""
+        parts.append(f"{leading}{replacement_text}{trailing}")
+    return "".join(parts)
+
+
+def _collect_required_metric_texts(
+    chunks: Sequence[TextChunk],
+    ranking: Sequence[int],
+    tracked_q_values: Sequence[int],
+    primary_q_percent: int,
+    reference_token_text: str,
+) -> List[str]:
+    all_ids = [chunk.chunk_id for chunk in chunks]
+    seen = set()
+    texts: List[str] = []
+
+    def _append(text: str) -> None:
+        if text in seen:
+            return
+        seen.add(text)
+        texts.append(text)
+
+    full_text = _nonempty_text(compose_text_from_chunk_ids(chunks, all_ids))
+    _append(full_text)
+
+    for q in tracked_q_values:
+        top_ids = ranking_to_top_ids(ranking, len(chunks), int(q))
+        if not top_ids:
+            continue
+        top_set = set(int(x) for x in top_ids)
+        removed_ids = [i for i in all_ids if i not in top_set]
+        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, removed_ids)))
+        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, top_ids)))
+
+    top_for_log_odds = ranking_to_top_ids(ranking, len(chunks), int(primary_q_percent))
+    if top_for_log_odds:
+        _append(
+            _nonempty_text(
+                _compose_text_replacing_chunk_ids(
+                    chunks=chunks,
+                    chunk_ids=top_for_log_odds,
+                    replacement_text=reference_token_text or DEFAULT_REFERENCE_TOKEN_TEXT,
+                )
+            )
+        )
+
+    m = len(all_ids)
+    for step in range(0, m + 1):
+        top = list(ranking[:step])
+        top_set = set(int(x) for x in top)
+        keep_after_delete = [i for i in all_ids if i not in top_set]
+        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, keep_after_delete)))
+        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, top)))
+
+    return texts
+
+
+def _prefetch_prob_cache(
+    *,
+    backbone,
+    verbalizers: Sequence[str],
+    texts: Sequence[str],
+    cache: Dict[str, np.ndarray],
+    enable_batch: bool,
+) -> None:
+    missing = []
+    seen = set()
+    for text in texts:
+        if text in cache or text in seen:
+            continue
+        missing.append(text)
+        seen.add(text)
+    if not missing:
+        return
+
+    if enable_batch:
+        try:
+            probs = np.asarray(backbone.predict_label_probs_batch(missing, verbalizers), dtype=np.float32)
+            for idx, text in enumerate(missing):
+                cache[text] = probs[idx]
+            return
+        except Exception:
+            pass
+
+    for text in missing:
+        cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
+
+
 def evaluate_saved_explanations(
     output_root: Path,
     bundle,
@@ -223,8 +469,10 @@ def evaluate_saved_explanations(
     verbalizers: Sequence[str],
     q_values: Sequence[int],
     explain_method: str,
+    eval_granularity: str = "token",
 ) -> Dict:
     method = str(explain_method).strip().lower()
+    granularity = _normalize_eval_granularity(eval_granularity)
 
     sample_dir = output_root / "samples"
     if not sample_dir.exists():
@@ -236,6 +484,8 @@ def evaluate_saved_explanations(
     aopc_q_values = tuple(int(q) for q in q_values) if q_values else AML_AOPC_Q_VALUES
     tracked_q_values = tuple(sorted(set((*aopc_q_values, AML_PRIMARY_Q_PERCENT))))
     reference_token_text = _reference_token_text(backbone)
+    eval_batch_prefetch = os.getenv("LIMA_EVAL_BATCH_PREFETCH", "1").strip().lower() not in ("0", "false", "off", "no")
+    tokenizer = getattr(backbone, "tokenizer", None)
 
     sample_map = {s.sample_id: s for s in bundle.samples}
     mode_states = {
@@ -257,8 +507,11 @@ def evaluate_saved_explanations(
     over_max_length_samples = 0
     pred_not_gold_samples = 0
     token_len_eval_errors = 0
-    word_count_total = 0
-    words_split_across_chunks_total = 0
+    eval_unit_count_total = 0
+    units_split_across_chunks_total = 0
+    tokenizer_fallback_samples = 0
+    tokenizer_fallback_unit_total = 0
+    unit_segmentation_counter: Dict[str, int] = {}
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -284,15 +537,23 @@ def evaluate_saved_explanations(
 
         sample = sample_map[sample_id]
         chunks = _to_chunks(payload["chunks"])
-        word_units = _word_units_from_text(sample.text)
+        eval_units, fallback_used, segmentation_strategy = _build_eval_units(
+            text=sample.text,
+            eval_granularity=granularity,
+            tokenizer=tokenizer,
+        )
         selected = [int(x) for x in payload.get("selected_chunk_ids", [])]
         if not chunks:
             skipped_empty_chunks += 1
             continue
 
         total += 1
-        word_count_total += len(word_units)
-        words_split_across_chunks_total += _count_words_split_across_chunks(word_units, chunks)
+        eval_unit_count_total += len(eval_units)
+        units_split_across_chunks_total += _count_units_split_across_chunks(eval_units, chunks)
+        unit_segmentation_counter[segmentation_strategy] = unit_segmentation_counter.get(segmentation_strategy, 0) + 1
+        if fallback_used:
+            tokenizer_fallback_samples += 1
+            tokenizer_fallback_unit_total += len(eval_units)
 
         if sample.text.strip() == "":
             empty_text_samples += 1
@@ -307,20 +568,35 @@ def evaluate_saved_explanations(
                 token_len_eval_errors += 1
 
         chunk_ranking = _normalize_chunk_ranking(payload=payload, chunks=chunks)
-        ranking_words = _project_chunk_ranking_to_word_ranking(
-            word_units=word_units,
+        ranking_units = _project_chunk_ranking_to_unit_ranking(
+            eval_units=eval_units,
             chunks=chunks,
             chunk_ranking=chunk_ranking,
         )
 
         sample_prob_cache: Dict[str, np.ndarray] = {}
 
+        required_texts = _collect_required_metric_texts(
+            chunks=eval_units,
+            ranking=ranking_units,
+            tracked_q_values=tracked_q_values,
+            primary_q_percent=AML_PRIMARY_Q_PERCENT,
+            reference_token_text=reference_token_text,
+        )
+        _prefetch_prob_cache(
+            backbone=backbone,
+            verbalizers=verbalizers,
+            texts=required_texts,
+            cache=sample_prob_cache,
+            enable_batch=eval_batch_prefetch,
+        )
+
         def _prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
             if text not in sample_prob_cache:
                 sample_prob_cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
             return sample_prob_cache[text]
 
-        text_for_pred = sample.text if sample.text else "<EMPTY>"
+        text_for_pred = sample.text if sample.text else EMPTY_PERTURBATION_TEXT
         full_probs = _prob_fn(text_for_pred, verbalizers)
         pred_label = int(np.argmax(full_probs))
         if pred_label == sample.label:
@@ -354,8 +630,8 @@ def evaluate_saved_explanations(
             mode_state = mode_states[mode_name]
             try:
                 metrics, per_q = aml_faithfulness_metrics(
-                    chunks=word_units,
-                    ranking=ranking_words,
+                    chunks=eval_units,
+                    ranking=ranking_units,
                     target_label=target_label,
                     verbalizers=verbalizers,
                     prob_fn=_prob_fn,
@@ -364,8 +640,8 @@ def evaluate_saved_explanations(
                     reference_token_text=reference_token_text,
                 )
                 curve = aopc_metrics(
-                    chunks=word_units,
-                    ranking=ranking_words,
+                    chunks=eval_units,
+                    ranking=ranking_units,
                     target_label=target_label,
                     verbalizers=verbalizers,
                     prob_fn=_prob_fn,
@@ -400,9 +676,15 @@ def evaluate_saved_explanations(
             "aopc_top_k_percentages": [int(q) for q in aopc_q_values],
             "aopc_average_denominator": "len(top_k_percentages)+1",
             "log_odds_reference_token": reference_token_text,
-            "perturbation_unit": "word",
-            "word_segmentation": "whitespace-delimited spans with surrounding whitespace preserved",
-            "chunk_to_word_projection": "overlap-weighted average chunk rank; lower rank is more important",
+            "perturbation_unit": granularity,
+            "unit_segmentation": (
+                "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable"
+                if granularity == "token"
+                else "whitespace-delimited spans with surrounding whitespace preserved"
+            ),
+            "chunk_to_unit_projection": "overlap-weighted average chunk rank; lower rank is more important",
+            "unit_segmentation_counts": {k: int(v) for k, v in sorted(unit_segmentation_counter.items())},
+            "eval_batch_prefetch_enabled": bool(eval_batch_prefetch),
         },
         "metrics_primary": {
             "accuracy_full": (acc_hits / total) if total > 0 else 0.0,
@@ -426,11 +708,13 @@ def evaluate_saved_explanations(
             "skipped_missing_sample_id": skipped_missing_sample_id,
             "skipped_empty_chunks": skipped_empty_chunks,
             "backbone_max_length": int(max_length) if max_length is not None else None,
-            "word_count_total": int(word_count_total),
-            "words_split_across_chunks_total": int(words_split_across_chunks_total),
-            "words_split_across_chunks_rate": (
-                float(words_split_across_chunks_total / word_count_total) if word_count_total > 0 else 0.0
+            "eval_unit_count_total": int(eval_unit_count_total),
+            "units_split_across_chunks_total": int(units_split_across_chunks_total),
+            "units_split_across_chunks_rate": (
+                float(units_split_across_chunks_total / eval_unit_count_total) if eval_unit_count_total > 0 else 0.0
             ),
+            "tokenizer_fallback_samples": int(tokenizer_fallback_samples),
+            "tokenizer_fallback_unit_total": int(tokenizer_fallback_unit_total),
         },
         "q_values": [int(q) for q in aopc_q_values],
         "per_q_values": [int(q) for q in tracked_q_values],

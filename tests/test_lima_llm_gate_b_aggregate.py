@@ -15,6 +15,7 @@ def _write_method_run(
     pred_suff: float,
     predict_calls: float,
     runtime: float,
+    eval_granularity: str | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     run_config = {
@@ -30,6 +31,8 @@ def _write_method_run(
         "seed": seed,
         "explain_method": method,
     }
+    if eval_granularity is not None:
+        run_config["eval_granularity"] = eval_granularity
     report = {
         "report_method": method,
         "metrics_secondary": {
@@ -176,3 +179,97 @@ def test_gate_b_aggregate_respects_min_runs(tmp_path: Path) -> None:
     runs = collect_gate_b_runs(root)
     payload = aggregate_gate_b_runs(runs=runs, min_runs=2, primary_method="ours", reference_method="random")
     assert payload["group_count"] == 0
+
+
+def test_gate_b_aggregate_isolates_eval_granularity(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+
+    _write_method_run(
+        root / "a_seed42_ours_token",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=0.03,
+        pred_comp=0.09,
+        pred_suff=0.04,
+        predict_calls=120,
+        runtime=12.0,
+        eval_granularity="token",
+    )
+    _write_method_run(
+        root / "a_seed42_random_token",
+        seed=42,
+        method="random",
+        comp=0.05,
+        suff=0.21,
+        pred_comp=0.05,
+        pred_suff=0.20,
+        predict_calls=90,
+        runtime=8.0,
+        eval_granularity="token",
+    )
+    _write_method_run(
+        root / "b_seed42_ours_word",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=0.03,
+        pred_comp=0.09,
+        pred_suff=0.04,
+        predict_calls=120,
+        runtime=12.0,
+        eval_granularity="word",
+    )
+    _write_method_run(
+        root / "b_seed42_random_word",
+        seed=42,
+        method="random",
+        comp=0.05,
+        suff=0.21,
+        pred_comp=0.05,
+        pred_suff=0.20,
+        predict_calls=90,
+        runtime=8.0,
+        eval_granularity="word",
+    )
+
+    runs = collect_gate_b_runs(root)
+    payload = aggregate_gate_b_runs(runs=runs, min_runs=1, primary_method="ours", reference_method="random")
+    assert payload["group_count"] == 2
+    group_ids = [group["group_id"] for group in payload["groups"]]
+    assert any("|eval=token" in gid for gid in group_ids)
+    assert any("|eval=word" in gid for gid in group_ids)
+
+
+def test_gate_b_aggregate_legacy_missing_granularity_defaults_to_word(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+
+    _write_method_run(
+        root / "legacy_seed42_ours",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=0.03,
+        pred_comp=0.10,
+        pred_suff=0.03,
+        predict_calls=120,
+        runtime=12.0,
+        eval_granularity=None,
+    )
+    _write_method_run(
+        root / "explicit_seed42_random_word",
+        seed=42,
+        method="random",
+        comp=0.05,
+        suff=0.20,
+        pred_comp=0.05,
+        pred_suff=0.20,
+        predict_calls=90,
+        runtime=8.0,
+        eval_granularity="word",
+    )
+
+    runs = collect_gate_b_runs(root)
+    payload = aggregate_gate_b_runs(runs=runs, min_runs=1, primary_method="ours", reference_method="random")
+    assert payload["group_count"] == 1
+    assert "|eval=word" in payload["groups"][0]["group_id"]

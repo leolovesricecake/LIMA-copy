@@ -20,6 +20,7 @@ def _write_run(
     suff: float,
     eval_seconds: float,
     explain_elapsed: float,
+    eval_granularity: str | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     run_config = {
@@ -35,6 +36,8 @@ def _write_run(
         "seed": seed,
         "explain_method": method,
     }
+    if eval_granularity is not None:
+        run_config["eval_granularity"] = eval_granularity
     report = {
         "report_method": method,
         "sample_count": 1,
@@ -178,3 +181,91 @@ def test_analysis_snapshot_diff(tmp_path: Path) -> None:
     ]
     assert len(matched) == 1
     assert matched[0]["delta"] < 0.0
+
+
+def test_analysis_snapshot_groups_by_eval_granularity(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "analysis_snapshot.py"
+    mod = _load_module(script, "analysis_snapshot")
+
+    root = tmp_path / "results"
+    base = root / "eraser_movie_reviews" / "model-Qwen2_5-7B-Instruct"
+
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-ours-token",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=-0.10,
+        eval_seconds=10.0,
+        explain_elapsed=2.0,
+        eval_granularity="token",
+    )
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-gradient-token",
+        seed=42,
+        method="gradient",
+        comp=0.12,
+        suff=0.20,
+        eval_seconds=11.0,
+        explain_elapsed=1.0,
+        eval_granularity="token",
+    )
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-ours-word",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=-0.10,
+        eval_seconds=10.0,
+        explain_elapsed=2.0,
+        eval_granularity="word",
+    )
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-gradient-word",
+        seed=42,
+        method="gradient",
+        comp=0.12,
+        suff=0.20,
+        eval_seconds=11.0,
+        explain_elapsed=1.0,
+        eval_granularity="word",
+    )
+
+    snapshot = mod.build_snapshot(root, primary_method="ours", reference_method="gradient")
+    assert snapshot["group_count"] == 2
+    group_ids = [group["group_id"] for group in snapshot["groups"]]
+    assert any("|eval=token|" in gid for gid in group_ids)
+    assert any("|eval=word|" in gid for gid in group_ids)
+
+
+def test_analysis_snapshot_legacy_missing_granularity_defaults_to_word(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "analysis_snapshot.py"
+    mod = _load_module(script, "analysis_snapshot")
+
+    root = tmp_path / "results"
+    base = root / "eraser_movie_reviews" / "model-Qwen2_5-7B-Instruct"
+
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-ours",
+        seed=42,
+        method="ours",
+        comp=0.10,
+        suff=-0.10,
+        eval_seconds=10.0,
+        explain_elapsed=2.0,
+        eval_granularity=None,
+    )
+    _write_run(
+        base / "chunk-sentence_search-greedy_k-8_lam-1-1-1-1_seed-42_method-gradient",
+        seed=42,
+        method="gradient",
+        comp=0.12,
+        suff=0.20,
+        eval_seconds=11.0,
+        explain_elapsed=1.0,
+        eval_granularity="word",
+    )
+
+    snapshot = mod.build_snapshot(root, primary_method="ours", reference_method="gradient")
+    assert snapshot["group_count"] == 1
+    assert "|eval=word|" in snapshot["groups"][0]["group_id"]

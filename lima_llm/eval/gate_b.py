@@ -28,6 +28,13 @@ def _stats(values: Sequence[float]) -> Dict[str, float]:
     }
 
 
+def _normalized_eval_granularity(run_config: Dict[str, Any]) -> str:
+    value = str(run_config.get("eval_granularity", "word")).strip().lower()
+    if value not in {"word", "token"}:
+        return "word"
+    return value
+
+
 def _group_config(run_config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "dataset": run_config.get("dataset"),
@@ -38,6 +45,7 @@ def _group_config(run_config: Dict[str, Any]) -> Dict[str, Any]:
         "k": run_config.get("k"),
         "lambdas": run_config.get("lambdas"),
         "eval_q_values": run_config.get("eval_q_values"),
+        "eval_granularity": _normalized_eval_granularity(run_config),
         "max_samples": run_config.get("max_samples"),
     }
 
@@ -52,6 +60,7 @@ def _group_key(config: Dict[str, Any]) -> Tuple[Any, ...]:
         config.get("k"),
         config.get("lambdas"),
         config.get("eval_q_values"),
+        config.get("eval_granularity"),
         config.get("max_samples"),
     )
 
@@ -270,6 +279,7 @@ def aggregate_gate_b_runs(
             f"|search={config.get('search')}"
             f"|k={config.get('k')}"
             f"|lam={config.get('lambdas')}"
+            f"|eval={config.get('eval_granularity')}"
         )
 
         out_groups.append(

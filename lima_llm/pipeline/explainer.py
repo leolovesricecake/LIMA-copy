@@ -29,6 +29,16 @@ def _stable_hash_int(text: str) -> int:
     return int(digest[:16], 16)
 
 
+def _counter_delta(before: Dict[str, int], after: Dict[str, int]) -> Dict[str, int]:
+    keys = set(before.keys()).union(after.keys())
+    return {k: int(after.get(k, 0) - before.get(k, 0)) for k in sorted(keys)}
+
+
+def _ranking_digest(ids: Sequence[int]) -> str:
+    raw = ",".join(str(int(x)) for x in ids)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def _build_rank_trace(
     selected: Sequence[int],
     score_by_chunk: Dict[int, float],
@@ -66,6 +76,7 @@ class TextLIMAExplainer:
 
     def explain_sample(self, sample: TextSample, verbose: bool = False) -> ExplanationResult:
         t0 = time.time()
+        counters_before = self.backbone.snapshot_counters()
         chunks: List[TextChunk] = self.chunker(sample.text)
         ok, msg = validate_chunk_coverage(sample.text, chunks)
         if not ok:
@@ -83,7 +94,14 @@ class TextLIMAExplainer:
         method = str(self.config.explain_method).strip().lower()
 
         if method == "ours":
-            chunk_embeddings = [self.backbone.embed_text(chunk.text if chunk.text else "<EMPTY>") for chunk in chunks]
+            chunk_embeddings = []
+            chunk_embed_cache: Dict[str, Sequence[float]] = {}
+            for chunk in chunks:
+                chunk_text = chunk.text if chunk.text else "<EMPTY>"
+                if chunk_text not in chunk_embed_cache:
+                    chunk_embed_cache[chunk_text] = self.backbone.embed_text(chunk_text)
+                chunk_embeddings.append(chunk_embed_cache[chunk_text])
+
             objective = TextSubmodularObjective(
                 backbone=self.backbone,
                 text=sample.text,
@@ -94,6 +112,11 @@ class TextLIMAExplainer:
                 weights=self.config.weights,
             )
 
+            singleton_gain: Dict[int, float] = {}
+            _, singleton_batch = objective.evaluate_gains([], candidate_ids)
+            for cid, gain, _ in singleton_batch:
+                singleton_gain[int(cid)] = float(gain)
+
             if self.config.search == "greedy":
                 selected, trace = run_forward_greedy(objective, candidate_ids=candidate_ids, k=max_k)
             elif self.config.search == "bidirectional":
@@ -102,8 +125,9 @@ class TextLIMAExplainer:
                 raise ValueError(f"Unsupported search method: {self.config.search}")
 
             selected_set = set(selected)
-            singleton_gain: Dict[int, float] = {}
             for cid in candidate_ids:
+                if int(cid) in singleton_gain:
+                    continue
                 gain, _, _ = objective.evaluate_gain([], int(cid))
                 singleton_gain[int(cid)] = float(gain)
 
@@ -184,13 +208,27 @@ class TextLIMAExplainer:
         selected_text = compose_text_from_chunk_ids(chunks, selected)
 
         elapsed = time.time() - t0
+        counters_after = self.backbone.snapshot_counters()
+        counter_delta = _counter_delta(counters_before, counters_after)
+        chunk_id_set = set(candidate_ids)
+        ranking_set = set(int(x) for x in chunk_ranking)
         metadata = {
             "elapsed_seconds": elapsed,
             "chunk_count": len(chunks),
             "search": self.config.search,
             "k": self.config.k,
             "explain_method": method,
-            "forward_counters": self.backbone.snapshot_counters(),
+            "forward_counters": counters_after,
+            "forward_counters_before": counters_before,
+            "forward_counters_after": counters_after,
+            "forward_counters_delta": counter_delta,
+            "ranking_digest": _ranking_digest(chunk_ranking),
+            "selected_digest": _ranking_digest(selected),
+            "ranking_checks": {
+                "covers_all_chunks": ranking_set == chunk_id_set,
+                "has_duplicates": len(chunk_ranking) != len(ranking_set),
+                "selected_is_prefix": list(selected) == list(chunk_ranking[: len(selected)]),
+            },
         }
 
         return ExplanationResult(
