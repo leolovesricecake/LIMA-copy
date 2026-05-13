@@ -31,6 +31,8 @@ bash scripts/run_lima_llm_v1.sh \
 
 `--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
 
+可用 `python scripts/analysis_snapshot.py --results-root lima_llm_results --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
+
 ## 原始 LIMA 说明
 
 原始代码已迁入 `lima_origin/`。若需使用历史图像版流程，请参考：

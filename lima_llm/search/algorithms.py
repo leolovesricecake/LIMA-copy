@@ -32,10 +32,16 @@ def run_forward_greedy(
 
         gains = []
         candidate_scores = {}
-        for cid in remaining:
-            gain, _, aug = objective.evaluate_gain(selected, cid)
-            gains.append((cid, gain))
-            candidate_scores[cid] = aug
+        if hasattr(objective, "evaluate_gains"):
+            _, batch = objective.evaluate_gains(selected, remaining)
+            for cid, gain, aug in batch:
+                gains.append((cid, gain))
+                candidate_scores[cid] = aug
+        else:
+            for cid in remaining:
+                gain, _, aug = objective.evaluate_gain(selected, cid)
+                gains.append((cid, gain))
+                candidate_scores[cid] = aug
 
         best_id, best_gain = _argmax_with_tiebreak(gains)
         selected.append(best_id)
@@ -74,10 +80,16 @@ def run_bidirectional_search(
         # Forward add: exact marginal-gain scan.
         add_gains = []
         add_scores = {}
-        for cid in remaining:
-            gain, _, aug = objective.evaluate_gain(selected, cid)
-            add_gains.append((cid, gain))
-            add_scores[cid] = aug
+        if hasattr(objective, "evaluate_gains"):
+            _, batch = objective.evaluate_gains(selected, remaining)
+            for cid, gain, aug in batch:
+                add_gains.append((cid, gain))
+                add_scores[cid] = aug
+        else:
+            for cid in remaining:
+                gain, _, aug = objective.evaluate_gain(selected, cid)
+                add_gains.append((cid, gain))
+                add_scores[cid] = aug
 
         add_id, add_gain = _argmax_with_tiebreak(add_gains)
         selected.append(add_id)
