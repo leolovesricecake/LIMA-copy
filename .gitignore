@@ -1,5 +1,6 @@
 datasets
 logs
+_arch
 dev
 explanation_results
 explanation_insertion_results
@@ -7,7 +8,7 @@ submodular_results
 lima_origin/explanation_results
 lima_origin/explanation_insertion_results
 lima_origin/submodular_results
-lima_llm_results
+lima_llm_results*
 
 **cache**
 __pycache__/

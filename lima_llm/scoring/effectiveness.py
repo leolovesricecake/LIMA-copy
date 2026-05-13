@@ -7,23 +7,27 @@ import numpy as np
 from ..utils import cosine_similarity
 
 
-def effectiveness_score(chunk_embeddings: Sequence[np.ndarray], selected_chunk_ids: Sequence[int]) -> float:
+def effectiveness_score(
+    chunk_embeddings: Sequence[np.ndarray],
+    selected_chunk_ids: Sequence[int],
+) -> float:
     ids = sorted(set(int(i) for i in selected_chunk_ids))
-    if len(ids) <= 1:
+    m = len(ids)
+
+    if m <= 1:
         return 0.0
 
-    selected = [chunk_embeddings[i] for i in ids]
-    m = len(selected)
-    dist = np.zeros((m, m), dtype=np.float64)
-    for i in range(m):
-        for j in range(m):
-            if i == j:
-                continue
-            sim = cosine_similarity(selected[i], selected[j])
-            dist[i, j] = 1.0 - sim
+    mins = np.full(m, np.inf, dtype=np.float64)
 
-    mins = []
     for i in range(m):
-        candidates = [dist[i, j] for j in range(m) if j != i]
-        mins.append(min(candidates) if candidates else 0.0)
+        emb_i = chunk_embeddings[ids[i]]
+
+        for j in range(i + 1, m):
+            d = 1.0 - cosine_similarity(emb_i, chunk_embeddings[ids[j]])
+
+            if d < mins[i]:
+                mins[i] = d
+            if d < mins[j]:
+                mins[j] = d
+
     return float(np.sum(mins))
