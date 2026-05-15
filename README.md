@@ -36,9 +36,44 @@ bash scripts/run_lima_llm_v1.sh \
 
 可用 `python scripts/analysis_snapshot.py --results-root lima_llm_results --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
 
-## 原始 LIMA 说明
 
-原始代码已迁入 `lima_origin/`。若需使用历史图像版流程，请参考：
+## 20 - deterministic
+```
+python -m lima_llm \
+  --dataset eraser_movie_reviews \
+  --split validation \
+  --eraser-root hf://eraser-benchmark/movie_rationales \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --dtype bfloat16 \
+  --k 8 \
+  --chunker sentence \
+  --search greedy \
+  --lambdas 1,1,1,1 \
+  --dataset-cache-dir /mnt/huawei/nsq/LIMA-copy/datasets \
+  --resume-check strict \
+  --run-eval \
+  --explain-method ours \
+  --deterministic --max-samples 20 \
+  --output-dir lima_llm_results-20-0515-deter --device cuda:1
+```
 
-- `lima_origin/README_origin.md`
-- `lima_origin/说明.md`
+
+## 20 - prefetch sort
+```
+LIMA_EVAL_PREFETCH_LENGTH_SORT=1 python -m lima_llm \
+  --dataset eraser_movie_reviews \
+  --split validation \
+  --eraser-root hf://eraser-benchmark/movie_rationales \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --dtype bfloat16 \
+  --k 8 \
+  --chunker sentence \
+  --search greedy \
+  --lambdas 1,1,1,1 \
+  --dataset-cache-dir /mnt/huawei/nsq/LIMA-copy/datasets \
+  --resume-check strict \
+  --run-eval \
+  --explain-method ours \
+  --deterministic --max-samples 20 \
+  --output-dir lima_llm_results-20-0515-deter-sort --device cuda:1
+```

@@ -111,6 +111,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = torch.ones_like(input_ids)
 
         with torch.no_grad():
+            self.forward_counters["model_forward_calls"] += 1
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
             logits = outputs.logits[:, :-1, :]
             targets = input_ids[:, 1:]
@@ -170,6 +171,7 @@ class HFBackbone(BaseBackbone):
             label_lens.append(int(label_len))
 
         with torch.no_grad():
+            self.forward_counters["model_forward_calls"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -189,17 +191,20 @@ class HFBackbone(BaseBackbone):
         return np.asarray(scores, dtype=np.float32)
 
     def predict_label_probs(self, text: str, verbalizers: Sequence[str]) -> np.ndarray:
-        self.forward_counters["predict_calls"] += 1
-        scores = [self._label_conditional_logprob(text, label) for label in verbalizers]
-        arr = np.asarray(scores, dtype=np.float64)
-        arr = arr - arr.max()
-        probs = np.exp(arr)
-        probs = probs / probs.sum()
-        return probs.astype(np.float32)
+        probs = self._predict_label_probs_batch_impl([text], verbalizers, record_batch=False)
+        return probs[0]
 
-    def _predict_label_probs_batch_impl(self, texts: Sequence[str], verbalizers: Sequence[str]) -> np.ndarray:
+    def _predict_label_probs_batch_impl(
+        self,
+        texts: Sequence[str],
+        verbalizers: Sequence[str],
+        record_batch: bool = True,
+    ) -> np.ndarray:
         if not texts:
             return np.zeros((0, len(verbalizers)), dtype=np.float32)
+        if record_batch:
+            self.forward_counters["batch_calls"] += 1
+            self.forward_counters["batch_rows"] += len(texts)
         self.forward_counters["predict_calls"] += len(texts)
         outputs: List[np.ndarray] = []
         idx = 0
@@ -217,6 +222,7 @@ class HFBackbone(BaseBackbone):
             except Exception as exc:
                 if self._is_oom_error(exc) and batch_size > 1:
                     self._clear_cuda_cache()
+                    self.forward_counters["oom_shrink_events"] += 1
                     batch_size = max(1, batch_size // 2)
                     continue
                 raise
@@ -235,6 +241,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
+            self.forward_counters["model_forward_calls"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -273,6 +280,7 @@ class HFBackbone(BaseBackbone):
         attention_mask = encoded["attention_mask"].to(self.device)
 
         with torch.no_grad():
+            self.forward_counters["model_forward_calls"] += 1
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -311,6 +319,7 @@ class HFBackbone(BaseBackbone):
             except Exception as exc:
                 if self._is_oom_error(exc) and batch_size > 1:
                     self._clear_cuda_cache()
+                    self.forward_counters["oom_shrink_events"] += 1
                     batch_size = max(1, batch_size // 2)
                     continue
                 raise
@@ -355,6 +364,7 @@ class HFBackbone(BaseBackbone):
         emb_layer = self.model.get_input_embeddings()
         full_embeds = emb_layer(full_ids).detach().requires_grad_(True)
 
+        self.forward_counters["model_forward_calls"] += 1
         outputs = self.model(inputs_embeds=full_embeds, use_cache=False)
         logits = outputs.logits[:, :-1, :]
         targets = full_ids[:, 1:]

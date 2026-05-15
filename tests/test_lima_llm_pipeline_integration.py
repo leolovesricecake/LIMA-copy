@@ -71,6 +71,15 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert run_cfg["eval_granularity"] == "token"
     assert eval_cfg["eval_granularity"] == "token"
     assert eval_report["metric_settings"]["perturbation_unit"] == "token"
+    assert "timing_breakdown" in eval_report
+    assert "cache_stats" in eval_report
+    assert "prefetch_stats" in eval_report
+    assert "backbone_batch_stats" in eval_report
+    assert "timing_breakdown" in eval_report["metrics_secondary"]
+    assert "cache_stats" in eval_report["metrics_secondary"]
+    assert "prefetch_stats" in eval_report["metrics_secondary"]
+    assert "backbone_batch_stats" in eval_report["metrics_secondary"]
+    assert eval_report["prefetch_stats"]["batch_fallback_count"] == 0
 
     for payload in (run_cfg, eval_cfg, eval_report):
         assert "provenance" in payload

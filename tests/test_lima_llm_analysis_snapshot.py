@@ -62,8 +62,6 @@ def _write_run(
                     "aopc": 0.3,
                     "aopc_sufficiency": 0.2,
                     "aopc_comprehensiveness": 0.1,
-                    "deletion_auc": 0.5,
-                    "insertion_auc": 0.6,
                 }
             },
             "predicted": {
@@ -74,8 +72,6 @@ def _write_run(
                     "aopc": 0.3,
                     "aopc_sufficiency": 0.2,
                     "aopc_comprehensiveness": 0.1,
-                    "deletion_auc": 0.5,
-                    "insertion_auc": 0.6,
                 }
             },
         },

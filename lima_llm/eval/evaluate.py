@@ -10,17 +10,16 @@ from typing import Any, Dict, List, Sequence, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from ..chunking.utils import chunk_char_length, compose_text_from_chunk_ids
+from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
 from ..utils import f1_iou_from_masks, spans_to_char_mask
 from .metrics import (
     AML_AOPC_Q_VALUES,
     AML_PRIMARY_Q_PERCENT,
-    DEFAULT_REFERENCE_TOKEN_TEXT,
     EMPTY_PERTURBATION_TEXT,
     aml_faithfulness_metrics,
     aopc_metrics,
-    ranking_to_top_ids,
+    build_perturbation_plan,
 )
 
 _WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
@@ -264,8 +263,6 @@ def _empty_mode_state(q_values: Sequence[int]) -> Dict:
         "aopc_suff": [],
         "aopc_comp": [],
         "aopc": [],
-        "del_auc": [],
-        "ins_auc": [],
         "per_q": {
             "comprehensiveness": {q: [] for q in q_ints},
             "sufficiency": {q: [] for q in q_ints},
@@ -279,7 +276,7 @@ def _empty_mode_state(q_values: Sequence[int]) -> Dict:
 def _append_mode_metrics(
     mode_state: Dict,
     metrics: Dict[str, float],
-    curve: Dict[str, float],
+    aopc_payload: Dict[str, float],
     per_q: Dict[int, Dict[str, float]],
     q_values: Sequence[int],
 ) -> None:
@@ -288,9 +285,7 @@ def _append_mode_metrics(
     mode_state["suff"].append(float(metrics["sufficiency"]))
     mode_state["aopc_suff"].append(float(metrics["aopc_sufficiency"]))
     mode_state["aopc_comp"].append(float(metrics["aopc_comprehensiveness"]))
-    mode_state["aopc"].append(float(curve["aopc"]))
-    mode_state["del_auc"].append(float(curve["deletion_auc"]))
-    mode_state["ins_auc"].append(float(curve["insertion_auc"]))
+    mode_state["aopc"].append(float(aopc_payload["aopc"]))
     mode_state["evaluated_samples"] += 1
     for q in q_values:
         q_int = int(q)
@@ -317,8 +312,6 @@ def _mode_metrics_primary(mode_state: Dict) -> Dict[str, float]:
         "aopc_sufficiency": _safe_mean(mode_state["aopc_suff"]),
         "aopc_comprehensiveness": _safe_mean(mode_state["aopc_comp"]),
         "aopc": _safe_mean(mode_state["aopc"]),
-        "deletion_auc": _safe_mean(mode_state["del_auc"]),
-        "insertion_auc": _safe_mean(mode_state["ins_auc"]),
     }
 
 
@@ -355,80 +348,14 @@ def _normalize_chunk_ranking(payload: Dict, chunks: Sequence[TextChunk]) -> List
     return ranking
 
 
-def _nonempty_text(text: str) -> str:
-    return text if text != "" else EMPTY_PERTURBATION_TEXT
-
-
-def _compose_text_replacing_chunk_ids(
-    chunks: Sequence[TextChunk],
-    chunk_ids: Sequence[int],
-    replacement_text: str,
-) -> str:
-    replace_ids = {int(i) for i in chunk_ids}
-    parts: List[str] = []
-    for chunk in sorted(chunks, key=lambda c: (c.start_char, c.chunk_id)):
-        if chunk.chunk_id not in replace_ids:
-            parts.append(chunk.text)
-            continue
-
-        leading_len = len(chunk.text) - len(chunk.text.lstrip())
-        trailing_len = len(chunk.text) - len(chunk.text.rstrip())
-        leading = chunk.text[:leading_len]
-        trailing = chunk.text[len(chunk.text) - trailing_len :] if trailing_len > 0 else ""
-        parts.append(f"{leading}{replacement_text}{trailing}")
-    return "".join(parts)
-
-
-def _collect_required_metric_texts(
-    chunks: Sequence[TextChunk],
-    ranking: Sequence[int],
-    tracked_q_values: Sequence[int],
-    primary_q_percent: int,
-    reference_token_text: str,
-) -> List[str]:
-    all_ids = [chunk.chunk_id for chunk in chunks]
-    seen = set()
-    texts: List[str] = []
-
-    def _append(text: str) -> None:
-        if text in seen:
-            return
-        seen.add(text)
-        texts.append(text)
-
-    full_text = _nonempty_text(compose_text_from_chunk_ids(chunks, all_ids))
-    _append(full_text)
-
-    for q in tracked_q_values:
-        top_ids = ranking_to_top_ids(ranking, len(chunks), int(q))
-        if not top_ids:
-            continue
-        top_set = set(int(x) for x in top_ids)
-        removed_ids = [i for i in all_ids if i not in top_set]
-        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, removed_ids)))
-        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, top_ids)))
-
-    top_for_log_odds = ranking_to_top_ids(ranking, len(chunks), int(primary_q_percent))
-    if top_for_log_odds:
-        _append(
-            _nonempty_text(
-                _compose_text_replacing_chunk_ids(
-                    chunks=chunks,
-                    chunk_ids=top_for_log_odds,
-                    replacement_text=reference_token_text or DEFAULT_REFERENCE_TOKEN_TEXT,
-                )
-            )
+def _normalize_prefetch_fallback_policy(raw: str | None) -> str:
+    policy = str(raw or "warn").strip().lower()
+    if policy not in {"warn", "fail"}:
+        raise ValueError(
+            "Unsupported prefetch fallback policy: "
+            f"{raw!r}. Expected one of ('warn', 'fail')."
         )
-
-    m = len(all_ids)
-    for step in range(0, m + 1):
-        top = list(ranking[:step])
-        top_set = set(int(x) for x in top)
-        keep_after_delete = [i for i in all_ids if i not in top_set]
-        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, keep_after_delete)))
-        _append(_nonempty_text(compose_text_from_chunk_ids(chunks, top)))
-
-    return texts
+    return policy
 
 
 def _prefetch_prob_cache(
@@ -438,7 +365,8 @@ def _prefetch_prob_cache(
     texts: Sequence[str],
     cache: Dict[str, np.ndarray],
     enable_batch: bool,
-) -> None:
+    fallback_policy: str,
+) -> Dict[str, Any]:
     missing = []
     seen = set()
     for text in texts:
@@ -446,20 +374,45 @@ def _prefetch_prob_cache(
             continue
         missing.append(text)
         seen.add(text)
+
+    stats: Dict[str, Any] = {
+        "required_text_count": int(len(texts)),
+        "missing_text_count": int(len(missing)),
+        "prefetched_text_count": 0,
+        "batch_attempted": False,
+        "batch_succeeded": False,
+        "batch_fallback_count": 0,
+        "batch_error": None,
+    }
     if not missing:
-        return
+        return stats
 
     if enable_batch:
+        stats["batch_attempted"] = True
         try:
             probs = np.asarray(backbone.predict_label_probs_batch(missing, verbalizers), dtype=np.float32)
             for idx, text in enumerate(missing):
                 cache[text] = probs[idx]
-            return
-        except Exception:
-            pass
+            stats["batch_succeeded"] = True
+            stats["prefetched_text_count"] = int(len(missing))
+            return stats
+        except Exception as exc:
+            stats["batch_fallback_count"] = 1
+            stats["batch_error"] = f"{type(exc).__name__}: {exc}"
+            if fallback_policy == "fail":
+                raise RuntimeError(
+                    "Batch prefetch failed and fallback policy is 'fail'. "
+                    f"missing={len(missing)} error={stats['batch_error']}"
+                ) from exc
+            print(
+                "[eval][prefetch] batch prefetch failed, fallback to single-call path. "
+                f"missing={len(missing)} error={stats['batch_error']}"
+            )
 
     for text in missing:
         cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
+    stats["prefetched_text_count"] = int(len(missing))
+    return stats
 
 
 def evaluate_saved_explanations(
@@ -485,6 +438,13 @@ def evaluate_saved_explanations(
     tracked_q_values = tuple(sorted(set((*aopc_q_values, AML_PRIMARY_Q_PERCENT))))
     reference_token_text = _reference_token_text(backbone)
     eval_batch_prefetch = os.getenv("LIMA_EVAL_BATCH_PREFETCH", "1").strip().lower() not in ("0", "false", "off", "no")
+    prefetch_fallback_policy = _normalize_prefetch_fallback_policy(os.getenv("LIMA_PREFETCH_FALLBACK_POLICY", "warn"))
+    prefetch_length_sort = os.getenv("LIMA_EVAL_PREFETCH_LENGTH_SORT", "0").strip().lower() not in (
+        "0",
+        "false",
+        "off",
+        "no",
+    )
     tokenizer = getattr(backbone, "tokenizer", None)
 
     sample_map = {s.sample_id: s for s in bundle.samples}
@@ -512,6 +472,27 @@ def evaluate_saved_explanations(
     tokenizer_fallback_samples = 0
     tokenizer_fallback_unit_total = 0
     unit_segmentation_counter: Dict[str, int] = {}
+    timing_breakdown = {
+        "unit_build_seconds": 0.0,
+        "text_build_seconds": 0.0,
+        "prefetch_seconds": 0.0,
+        "metric_compute_seconds": 0.0,
+    }
+    cache_runtime = {
+        "required_text_count": 0,
+        "unique_text_count": 0,
+        "requests": 0,
+        "hits": 0,
+        "misses": 0,
+    }
+    prefetch_runtime = {
+        "batch_attempt_count": 0,
+        "batch_success_count": 0,
+        "batch_fallback_count": 0,
+        "prefetched_text_count": 0,
+        "missing_text_count": 0,
+        "fallback_error_examples": [],
+    }
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -536,6 +517,7 @@ def evaluate_saved_explanations(
             continue
 
         sample = sample_map[sample_id]
+        t_unit = time.time()
         chunks = _to_chunks(payload["chunks"])
         eval_units, fallback_used, segmentation_strategy = _build_eval_units(
             text=sample.text,
@@ -546,6 +528,13 @@ def evaluate_saved_explanations(
         if not chunks:
             skipped_empty_chunks += 1
             continue
+        chunk_ranking = _normalize_chunk_ranking(payload=payload, chunks=chunks)
+        ranking_units = _project_chunk_ranking_to_unit_ranking(
+            eval_units=eval_units,
+            chunks=chunks,
+            chunk_ranking=chunk_ranking,
+        )
+        timing_breakdown["unit_build_seconds"] += time.time() - t_unit
 
         total += 1
         eval_unit_count_total += len(eval_units)
@@ -567,35 +556,53 @@ def evaluate_saved_explanations(
             except Exception:
                 token_len_eval_errors += 1
 
-        chunk_ranking = _normalize_chunk_ranking(payload=payload, chunks=chunks)
-        ranking_units = _project_chunk_ranking_to_unit_ranking(
-            eval_units=eval_units,
-            chunks=chunks,
-            chunk_ranking=chunk_ranking,
-        )
-
-        sample_prob_cache: Dict[str, np.ndarray] = {}
-
-        required_texts = _collect_required_metric_texts(
+        t_text_build = time.time()
+        perturbation_plan = build_perturbation_plan(
             chunks=eval_units,
             ranking=ranking_units,
-            tracked_q_values=tracked_q_values,
+            q_values=tracked_q_values,
             primary_q_percent=AML_PRIMARY_Q_PERCENT,
             reference_token_text=reference_token_text,
         )
-        _prefetch_prob_cache(
+        required_texts = list(perturbation_plan.get("required_texts", []))
+        cache_runtime["required_text_count"] += int(perturbation_plan.get("required_text_count", len(required_texts)))
+        cache_runtime["unique_text_count"] += int(
+            perturbation_plan.get("unique_required_text_count", len(required_texts))
+        )
+        if prefetch_length_sort:
+            required_texts = sorted(required_texts, key=lambda text: (len(text), text))
+        timing_breakdown["text_build_seconds"] += time.time() - t_text_build
+
+        sample_prob_cache: Dict[str, np.ndarray] = {}
+        t_prefetch = time.time()
+        prefetch_meta = _prefetch_prob_cache(
             backbone=backbone,
             verbalizers=verbalizers,
             texts=required_texts,
             cache=sample_prob_cache,
             enable_batch=eval_batch_prefetch,
+            fallback_policy=prefetch_fallback_policy,
         )
+        timing_breakdown["prefetch_seconds"] += time.time() - t_prefetch
+        prefetch_runtime["batch_attempt_count"] += int(prefetch_meta.get("batch_attempted", False))
+        prefetch_runtime["batch_success_count"] += int(prefetch_meta.get("batch_succeeded", False))
+        prefetch_runtime["batch_fallback_count"] += int(prefetch_meta.get("batch_fallback_count", 0))
+        prefetch_runtime["prefetched_text_count"] += int(prefetch_meta.get("prefetched_text_count", 0))
+        prefetch_runtime["missing_text_count"] += int(prefetch_meta.get("missing_text_count", 0))
+        batch_error = prefetch_meta.get("batch_error")
+        if batch_error and len(prefetch_runtime["fallback_error_examples"]) < 10:
+            prefetch_runtime["fallback_error_examples"].append({"sample_id": sample_id, "error": str(batch_error)})
 
         def _prob_fn(text: str, _verbalizers: Sequence[str]) -> np.ndarray:
-            if text not in sample_prob_cache:
-                sample_prob_cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
+            cache_runtime["requests"] += 1
+            if text in sample_prob_cache:
+                cache_runtime["hits"] += 1
+                return sample_prob_cache[text]
+            cache_runtime["misses"] += 1
+            sample_prob_cache[text] = np.asarray(backbone.predict_label_probs(text, verbalizers), dtype=np.float32)
             return sample_prob_cache[text]
 
+        t_metric_compute = time.time()
         text_for_pred = sample.text if sample.text else EMPTY_PERTURBATION_TEXT
         full_probs = _prob_fn(text_for_pred, verbalizers)
         pred_label = int(np.argmax(full_probs))
@@ -638,26 +645,57 @@ def evaluate_saved_explanations(
                     aopc_q_values=aopc_q_values,
                     extra_q_values=tracked_q_values,
                     reference_token_text=reference_token_text,
+                    perturbation_plan=perturbation_plan,
                 )
-                curve = aopc_metrics(
+                aopc_payload = aopc_metrics(
                     chunks=eval_units,
                     ranking=ranking_units,
                     target_label=target_label,
                     verbalizers=verbalizers,
                     prob_fn=_prob_fn,
+                    perturbation_plan=perturbation_plan,
                 )
-                _append_mode_metrics(mode_state, metrics, curve, per_q, tracked_q_values)
+                _append_mode_metrics(mode_state, metrics, aopc_payload, per_q, tracked_q_values)
             except Exception as exc:
                 err = f"{type(exc).__name__}: {exc}"
                 mode_state["error_counts"][err] = mode_state["error_counts"].get(err, 0) + 1
                 if len(mode_state["error_examples"]) < 10:
                     mode_state["error_examples"].append({"sample_id": sample_id, "error": err})
+        timing_breakdown["metric_compute_seconds"] += time.time() - t_metric_compute
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
     counter_delta = {
         k: int(counter_after.get(k, 0) - counter_before.get(k, 0))
         for k in set(counter_before.keys()).union(counter_after.keys())
+    }
+    total_cache_requests = int(cache_runtime["requests"])
+    cache_hit_rate = float(cache_runtime["hits"] / total_cache_requests) if total_cache_requests > 0 else 0.0
+    cache_stats = {
+        "required_text_count": int(cache_runtime["required_text_count"]),
+        "unique_text_count": int(cache_runtime["unique_text_count"]),
+        "cache_requests": total_cache_requests,
+        "cache_hits": int(cache_runtime["hits"]),
+        "cache_misses": int(cache_runtime["misses"]),
+        "cache_hit_rate": cache_hit_rate,
+    }
+    prefetch_stats = {
+        "batch_enabled": bool(eval_batch_prefetch),
+        "fallback_policy": prefetch_fallback_policy,
+        "length_sort_enabled": bool(prefetch_length_sort),
+        "batch_attempt_count": int(prefetch_runtime["batch_attempt_count"]),
+        "batch_success_count": int(prefetch_runtime["batch_success_count"]),
+        "batch_fallback_count": int(prefetch_runtime["batch_fallback_count"]),
+        "prefetched_text_count": int(prefetch_runtime["prefetched_text_count"]),
+        "missing_text_count": int(prefetch_runtime["missing_text_count"]),
+        "fallback_error_examples": list(prefetch_runtime["fallback_error_examples"]),
+    }
+    timing_breakdown_payload = {k: float(v) for k, v in timing_breakdown.items()}
+    backbone_batch_stats = {
+        "batch_calls": int(counter_delta.get("batch_calls", 0)),
+        "batch_rows": int(counter_delta.get("batch_rows", 0)),
+        "model_forward_calls": int(counter_delta.get("model_forward_calls", 0)),
+        "oom_shrink_events": int(counter_delta.get("oom_shrink_events", 0)),
     }
 
     mode_reports = {
@@ -685,6 +723,8 @@ def evaluate_saved_explanations(
             "chunk_to_unit_projection": "overlap-weighted average chunk rank; lower rank is more important",
             "unit_segmentation_counts": {k: int(v) for k, v in sorted(unit_segmentation_counter.items())},
             "eval_batch_prefetch_enabled": bool(eval_batch_prefetch),
+            "prefetch_fallback_policy": prefetch_fallback_policy,
+            "prefetch_length_sort_enabled": bool(prefetch_length_sort),
         },
         "metrics_primary": {
             "accuracy_full": (acc_hits / total) if total > 0 else 0.0,
@@ -697,6 +737,10 @@ def evaluate_saved_explanations(
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
             "method_diagnostics": mode_reports["gold"]["method_diagnostics"],
+            "timing_breakdown": timing_breakdown_payload,
+            "cache_stats": cache_stats,
+            "prefetch_stats": prefetch_stats,
+            "backbone_batch_stats": backbone_batch_stats,
         },
         "metrics_by_target": mode_reports,
         "dataset_diagnostics": {
@@ -718,5 +762,9 @@ def evaluate_saved_explanations(
         },
         "q_values": [int(q) for q in aopc_q_values],
         "per_q_values": [int(q) for q in tracked_q_values],
+        "timing_breakdown": timing_breakdown_payload,
+        "cache_stats": cache_stats,
+        "prefetch_stats": prefetch_stats,
+        "backbone_batch_stats": backbone_batch_stats,
     }
     return report

@@ -5,7 +5,9 @@ import numpy as np
 from lima_llm.eval.metrics import (
     AML_AOPC_Q_VALUES,
     AML_PRIMARY_Q_PERCENT,
+    aopc_metrics,
     aml_faithfulness_metrics,
+    build_perturbation_plan,
     top_percent_chunk_count,
 )
 from lima_llm.eval.evaluate import (
@@ -38,6 +40,9 @@ def test_aml_faithfulness_metrics_match_reference_settings() -> None:
         "bcde": np.asarray([0.2, 0.8], dtype=np.float32),
         "a": np.asarray([0.6, 0.4], dtype=np.float32),
         "cde": np.asarray([0.4, 0.6], dtype=np.float32),
+        "de": np.asarray([0.45, 0.55], dtype=np.float32),
+        "e": np.asarray([0.48, 0.52], dtype=np.float32),
+        "<EMPTY>": np.asarray([0.5, 0.5], dtype=np.float32),
         "ab": np.asarray([0.5, 0.5], dtype=np.float32),
         "<UNK>bcde": np.asarray([0.3, 0.7], dtype=np.float32),
     }
@@ -150,3 +155,79 @@ def test_token_granularity_falls_back_without_tokenizer() -> None:
     assert fallback is True
     assert strategy == "whitespace_fallback_without_tokenizer_offsets"
     assert "".join(unit.text for unit in units) == "hello world"
+
+
+def test_perturbation_plan_matches_non_plan_metric_results() -> None:
+    chunks = [
+        TextChunk(chunk_id=0, start_char=0, end_char=1, text="a"),
+        TextChunk(chunk_id=1, start_char=1, end_char=2, text="b"),
+        TextChunk(chunk_id=2, start_char=2, end_char=3, text="c"),
+        TextChunk(chunk_id=3, start_char=3, end_char=4, text="d"),
+        TextChunk(chunk_id=4, start_char=4, end_char=5, text="e"),
+    ]
+    ranking = [0, 1, 2, 3, 4]
+    probs_by_text = {
+        "abcde": np.asarray([0.1, 0.9], dtype=np.float32),
+        "bcde": np.asarray([0.2, 0.8], dtype=np.float32),
+        "a": np.asarray([0.6, 0.4], dtype=np.float32),
+        "cde": np.asarray([0.4, 0.6], dtype=np.float32),
+        "de": np.asarray([0.45, 0.55], dtype=np.float32),
+        "e": np.asarray([0.48, 0.52], dtype=np.float32),
+        "<EMPTY>": np.asarray([0.5, 0.5], dtype=np.float32),
+        "ab": np.asarray([0.5, 0.5], dtype=np.float32),
+        "<UNK>bcde": np.asarray([0.3, 0.7], dtype=np.float32),
+    }
+
+    def prob_fn(text, verbalizers):
+        return probs_by_text[text]
+
+    q_values = AML_AOPC_Q_VALUES
+    plan = build_perturbation_plan(
+        chunks=chunks,
+        ranking=ranking,
+        q_values=q_values,
+        primary_q_percent=AML_PRIMARY_Q_PERCENT,
+        reference_token_text="<UNK>",
+    )
+    metrics_plan, per_q_plan = aml_faithfulness_metrics(
+        chunks=chunks,
+        ranking=ranking,
+        target_label=1,
+        verbalizers=["NEG", "POS"],
+        prob_fn=prob_fn,
+        primary_q_percent=AML_PRIMARY_Q_PERCENT,
+        aopc_q_values=q_values,
+        reference_token_text="<UNK>",
+        perturbation_plan=plan,
+    )
+    metrics_raw, per_q_raw = aml_faithfulness_metrics(
+        chunks=chunks,
+        ranking=ranking,
+        target_label=1,
+        verbalizers=["NEG", "POS"],
+        prob_fn=prob_fn,
+        primary_q_percent=AML_PRIMARY_Q_PERCENT,
+        aopc_q_values=q_values,
+        reference_token_text="<UNK>",
+    )
+    aopc_plan = aopc_metrics(
+        chunks=chunks,
+        ranking=ranking,
+        target_label=1,
+        verbalizers=["NEG", "POS"],
+        prob_fn=prob_fn,
+        perturbation_plan=plan,
+    )
+    aopc_raw = aopc_metrics(
+        chunks=chunks,
+        ranking=ranking,
+        target_label=1,
+        verbalizers=["NEG", "POS"],
+        prob_fn=prob_fn,
+    )
+
+    assert plan["unique_required_text_count"] <= plan["required_text_count"]
+    for key in metrics_raw:
+        assert math.isclose(float(metrics_plan[key]), float(metrics_raw[key]), rel_tol=1e-9, abs_tol=1e-9)
+    assert per_q_plan == per_q_raw
+    assert math.isclose(float(aopc_plan["aopc"]), float(aopc_raw["aopc"]), rel_tol=1e-9, abs_tol=1e-9)

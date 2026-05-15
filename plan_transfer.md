@@ -14,7 +14,7 @@
   - `metrics_by_target` 已包含 `gold/predicted` 双口径；
   - `per_q`（`q=1/5/10/20/50`）已输出；
   - `gradient baseline`: `evaluated_samples=200/200`、`failed_samples=0`。
-- 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C`，同时保留 `deletion_auc / insertion_auc / aopc` 诊断项。
+- 评估协议已从 method-native chunk 统一为 word-level perturbation，并补齐 AML 指标集合：`LO@20 / Comp@20 / Suff@20 / A-S / A-C / AOPC`。
 - 新增单组对账工具：`scripts/analysis_snapshot.py` / `scripts/analysis_snapshot_diff.py`。
 - 结论：Gate A 已达到工程验收口径，主线转入“正确性不退化前提下的单组优化”。
 - 提醒：多组聚合回归暂缓，待方法与实现冻结后再统一重启。
@@ -30,7 +30,7 @@
 - 子区域划分：`sentence` 为主、`fixed_token` 兜底，强制覆盖率与无重叠。
 - 子模评分：`confidence/effectiveness/consistency/collaboration` + `F(S)`。
 - 搜索：`forward greedy`（默认）+ `bidirectional`（精确遍历版本，不做近似剪枝）。
-- 评估：`Comprehensiveness / Sufficiency / AOPC / Deletion-AUC / Insertion-AUC`，并输出 `random` 与 `gradient` baseline。
+- 评估：`Comprehensiveness / Sufficiency / AOPC`，并输出 `random` 与 `gradient` baseline。
 
 ## Phase 2：稳定性与规模化
 - 提升长任务稳定性：统一 GPU 映射策略、失败重试/熔断策略。

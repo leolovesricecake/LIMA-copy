@@ -144,8 +144,6 @@ def _extract_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
             "aopc": _safe_float(gold.get("aopc")),
             "aopc_sufficiency": _safe_float(gold.get("aopc_sufficiency")),
             "aopc_comprehensiveness": _safe_float(gold.get("aopc_comprehensiveness")),
-            "deletion_auc": _safe_float(gold.get("deletion_auc")),
-            "insertion_auc": _safe_float(gold.get("insertion_auc")),
         },
         "predicted": {
             "log_odds": _safe_float(pred.get("log_odds")),
@@ -154,8 +152,6 @@ def _extract_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
             "aopc": _safe_float(pred.get("aopc")),
             "aopc_sufficiency": _safe_float(pred.get("aopc_sufficiency")),
             "aopc_comprehensiveness": _safe_float(pred.get("aopc_comprehensiveness")),
-            "deletion_auc": _safe_float(pred.get("deletion_auc")),
-            "insertion_auc": _safe_float(pred.get("insertion_auc")),
         },
     }
     return row
@@ -276,8 +272,6 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "gold_comp": gold["comprehensiveness"],
                     "gold_suff": gold["sufficiency"],
                     "gold_aopc": gold["aopc"],
-                    "gold_insertion_auc": gold["insertion_auc"],
-                    "gold_deletion_auc": gold["deletion_auc"],
                     "plaus_f1": run["metrics"]["plausibility_f1"],
                     "plaus_iou": run["metrics"]["plausibility_iou"],
                     "pred_comp": pred["comprehensiveness"],
@@ -331,8 +325,6 @@ def main() -> None:
         "gold_comp",
         "gold_suff",
         "gold_aopc",
-        "gold_insertion_auc",
-        "gold_deletion_auc",
         "plaus_f1",
         "plaus_iou",
         "pred_comp",

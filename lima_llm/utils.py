@@ -276,6 +276,8 @@ def build_provenance(
         "LIMA_PREDICT_BATCH_SIZE",
         "LIMA_EMBED_BATCH_SIZE",
         "LIMA_EVAL_BATCH_PREFETCH",
+        "LIMA_PREFETCH_FALLBACK_POLICY",
+        "LIMA_EVAL_PREFETCH_LENGTH_SORT",
         "CUBLAS_WORKSPACE_CONFIG",
     ]
     env_snapshot: Dict[str, str] = {}

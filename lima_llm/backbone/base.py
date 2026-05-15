@@ -12,6 +12,10 @@ class BaseBackbone(ABC):
             "predict_calls": 0,
             "embed_calls": 0,
             "gradient_calls": 0,
+            "batch_calls": 0,
+            "batch_rows": 0,
+            "model_forward_calls": 0,
+            "oom_shrink_events": 0,
         }
 
     def snapshot_counters(self) -> Dict[str, int]:
