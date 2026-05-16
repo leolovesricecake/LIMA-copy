@@ -130,6 +130,92 @@ def test_eval_batch_prefetch_keeps_metrics_identical(monkeypatch, tmp_path: Path
     assert report_batch["dataset_diagnostics"]["tokenizer_fallback_samples"] == report_batch["sample_count"]
     assert report_batch["prefetch_stats"]["batch_fallback_count"] == 0
     assert report_single["prefetch_stats"]["batch_fallback_count"] == 0
+    assert "batch_tokenize_seconds" in report_batch["backbone_batch_stats"]
+    assert "batch_pack_seconds" in report_batch["backbone_batch_stats"]
+    assert "batch_forward_seconds" in report_batch["backbone_batch_stats"]
+
+
+def test_eval_prefetch_length_sort_env_is_deprecated_noop(monkeypatch, tmp_path: Path, capsys) -> None:
+    eraser_root = tmp_path / "eraser"
+    _build_tiny_eraser(eraser_root)
+
+    results_root = tmp_path / "results"
+    main(
+        [
+            "--dataset",
+            "eraser_movie_reviews",
+            "--split",
+            "validation",
+            "--eraser-root",
+            str(eraser_root),
+            "--mock-backbone",
+            "--chunker",
+            "sentence",
+            "--search",
+            "greedy",
+            "--k",
+            "2",
+            "--output-dir",
+            str(results_root),
+        ]
+    )
+
+    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-1-1_seed-42_method-ours"))
+    bundle = load_dataset_bundle(
+        dataset_name="eraser_movie_reviews",
+        split="validation",
+        eraser_root=str(eraser_root),
+        max_samples=None,
+    )
+    q_values = parse_q_values("1,5,10,20,50")
+    monkeypatch.setenv("LIMA_EVAL_BATCH_PREFETCH", "1")
+    monkeypatch.setenv("LIMA_PREFETCH_FALLBACK_POLICY", "fail")
+
+    monkeypatch.delenv("LIMA_EVAL_PREFETCH_LENGTH_SORT", raising=False)
+    report_default = evaluate_saved_explanations(
+        output_root=run_dir,
+        bundle=bundle,
+        backbone=build_backbone(
+            model_path="Qwen/Qwen2.5-7B-Instruct",
+            device="cpu",
+            use_mock_backbone=True,
+            max_length=2048,
+            embedding_layer_ratio=0.7,
+            dtype="bfloat16",
+        ),
+        verbalizers=bundle.verbalizers,
+        q_values=q_values,
+        explain_method="ours",
+        eval_granularity="token",
+    )
+    out_default = capsys.readouterr().out
+    assert "deprecated and ignored" not in out_default
+
+    monkeypatch.setenv("LIMA_EVAL_PREFETCH_LENGTH_SORT", "1")
+    report_legacy = evaluate_saved_explanations(
+        output_root=run_dir,
+        bundle=bundle,
+        backbone=build_backbone(
+            model_path="Qwen/Qwen2.5-7B-Instruct",
+            device="cpu",
+            use_mock_backbone=True,
+            max_length=2048,
+            embedding_layer_ratio=0.7,
+            dtype="bfloat16",
+        ),
+        verbalizers=bundle.verbalizers,
+        q_values=q_values,
+        explain_method="ours",
+        eval_granularity="token",
+    )
+    out_legacy = capsys.readouterr().out
+    assert "deprecated and ignored" in out_legacy
+
+    assert _canonical_report(report_default) == _canonical_report(report_legacy)
+    assert report_default["metric_settings"]["prefetch_length_sort_enabled"] is False
+    assert report_legacy["metric_settings"]["prefetch_length_sort_enabled"] is False
+    assert report_default["prefetch_stats"]["length_sort_enabled"] is False
+    assert report_legacy["prefetch_stats"]["length_sort_enabled"] is False
 
 
 class _BatchFailBackbone(MockBackbone):

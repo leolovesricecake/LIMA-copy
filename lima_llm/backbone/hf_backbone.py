@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import os
-from typing import List, Sequence, Tuple
+import time
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
@@ -88,6 +89,47 @@ class HFBackbone(BaseBackbone):
         ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
         return [int(x) for x in ids]
 
+    def _add_counter(self, key: str, delta: float = 1.0) -> None:
+        self.forward_counters[key] = self.forward_counters.get(key, 0) + delta
+
+    def _truncate_prefix_and_label_ids(
+        self,
+        prefix_ids: Sequence[int],
+        label_ids: Sequence[int],
+    ) -> Tuple[List[int], List[int]]:
+        max_total = max(2, int(self.max_length))
+        max_label = max_total - 1
+        label_ids_trim = list(int(x) for x in label_ids)
+        if len(label_ids_trim) > max_label:
+            label_ids_trim = label_ids_trim[-max_label:]
+        max_prefix = max_total - len(label_ids_trim)
+        if max_prefix <= 0:
+            return [], label_ids_trim
+        return list(int(x) for x in prefix_ids[-max_prefix:]), label_ids_trim
+
+    def _tokenize_prefix_batch(self, texts: Sequence[str]) -> List[List[int]]:
+        if not texts:
+            return []
+        prefixes = [f"Text:\n{text}\nLabel:" for text in texts]
+        encoded = self.tokenizer(
+            prefixes,
+            add_special_tokens=False,
+            padding=False,
+            truncation=False,
+        )
+        return [[int(x) for x in ids] for ids in encoded["input_ids"]]
+
+    def _label_token_ids_cache(self, verbalizers: Sequence[str]) -> Dict[str, List[int]]:
+        cache: Dict[str, List[int]] = {}
+        max_total = max(2, int(self.max_length))
+        max_label = max_total - 1
+        for label in verbalizers:
+            ids = self._token_ids_no_special(" " + str(label))
+            if len(ids) > max_label:
+                ids = ids[-max_label:]
+            cache[str(label)] = [int(x) for x in ids]
+        return cache
+
     def tokenize_len(self, text: str) -> int:
         ids = self._token_ids_no_special(text)
         return max(1, len(ids))
@@ -131,47 +173,61 @@ class HFBackbone(BaseBackbone):
         label_text: str,
     ) -> Tuple[List[int], int, int]:
         prefix = f"Text:\n{text}\nLabel:"
-        prefix_ids = self._token_ids_no_special(prefix)
-        label_ids = self._token_ids_no_special(" " + label_text)
-
-        max_total = max(2, int(self.max_length))
-        max_label = max_total - 1
-        if len(label_ids) > max_label:
-            label_ids = label_ids[-max_label:]
-        max_prefix = max_total - len(label_ids)
-        prefix_ids = prefix_ids[-max_prefix:]
-
-        full_ids = prefix_ids + label_ids
+        prefix_ids_raw = self._token_ids_no_special(prefix)
+        label_ids_raw = self._token_ids_no_special(" " + label_text)
+        prefix_ids, label_ids = self._truncate_prefix_and_label_ids(prefix_ids_raw, label_ids_raw)
+        full_ids = list(prefix_ids) + list(label_ids)
         return full_ids, len(prefix_ids), len(label_ids)
 
-    def _label_conditional_logprob_batch(self, texts: Sequence[str], label_text: str) -> np.ndarray:
-        if not texts:
+    def _label_conditional_logprob_batch_from_token_ids(
+        self,
+        prefix_ids_batch: Sequence[Sequence[int]],
+        label_ids: Sequence[int],
+    ) -> np.ndarray:
+        if not prefix_ids_batch:
             return np.zeros((0,), dtype=np.float32)
 
+        t_pack0 = time.perf_counter()
         torch = self.torch
-        packed = [self._build_full_ids_for_label(text=text, label_text=label_text) for text in texts]
-        max_seq = max(len(item[0]) for item in packed)
-        pad_id = int(self.tokenizer.pad_token_id)
+        max_total = max(2, int(self.max_length))
+        max_label = max_total - 1
+        label_ids_trim = list(int(x) for x in label_ids)
+        if len(label_ids_trim) > max_label:
+            label_ids_trim = label_ids_trim[-max_label:]
 
+        packed_full_ids: List[List[int]] = []
+        prefix_lens: List[int] = []
+        label_lens: List[int] = []
+        max_seq = 0
+        for prefix_ids_raw in prefix_ids_batch:
+            prefix_ids, label_ids_cur = self._truncate_prefix_and_label_ids(prefix_ids_raw, label_ids_trim)
+            full_ids = list(prefix_ids) + list(label_ids_cur)
+            packed_full_ids.append(full_ids)
+            prefix_lens.append(len(prefix_ids))
+            label_lens.append(len(label_ids_cur))
+            if len(full_ids) > max_seq:
+                max_seq = len(full_ids)
+
+        pad_id = int(self.tokenizer.pad_token_id)
         input_ids = torch.full(
-            (len(packed), max_seq),
+            (len(packed_full_ids), max_seq),
             fill_value=pad_id,
             dtype=torch.long,
             device=self.device,
         )
         attention_mask = torch.zeros_like(input_ids)
-
-        prefix_lens: List[int] = []
-        label_lens: List[int] = []
-        for row, (full_ids, prefix_len, label_len) in enumerate(packed):
+        for row, full_ids in enumerate(packed_full_ids):
             seq_len = len(full_ids)
-            input_ids[row, :seq_len] = torch.tensor(full_ids, dtype=torch.long, device=self.device)
+            input_ids[row, :seq_len] = torch.as_tensor(full_ids, dtype=torch.long, device=self.device)
             attention_mask[row, :seq_len] = 1
-            prefix_lens.append(int(prefix_len))
-            label_lens.append(int(label_len))
 
+        self._add_counter("batch_pack_calls", 1)
+        self._add_counter("batch_pack_seconds", time.perf_counter() - t_pack0)
+
+        t_forward0 = time.perf_counter()
         with torch.no_grad():
             self.forward_counters["model_forward_calls"] += 1
+            self._add_counter("batch_forward_calls", 1)
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -181,14 +237,25 @@ class HFBackbone(BaseBackbone):
             targets = input_ids[:, 1:]
             logprobs = self.nnf.log_softmax(logits, dim=-1)
             token_lp = logprobs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+        self._add_counter("batch_forward_seconds", time.perf_counter() - t_forward0)
 
-        scores: List[float] = []
+        scores = np.zeros((len(packed_full_ids),), dtype=np.float32)
         for row, (prefix_len, label_len) in enumerate(zip(prefix_lens, label_lens)):
             start = prefix_len - 1
             end = start + label_len
             label_lp = token_lp[row, start:end]
-            scores.append(float(label_lp.mean().item()))
-        return np.asarray(scores, dtype=np.float32)
+            scores[row] = float(label_lp.mean().item())
+        return scores
+
+    def _label_conditional_logprob_batch(self, texts: Sequence[str], label_text: str) -> np.ndarray:
+        if not texts:
+            return np.zeros((0,), dtype=np.float32)
+        t_tokenize0 = time.perf_counter()
+        prefix_ids_batch = self._tokenize_prefix_batch(texts)
+        label_ids = self._label_token_ids_cache([label_text])[str(label_text)]
+        self._add_counter("batch_tokenize_calls", 1)
+        self._add_counter("batch_tokenize_seconds", time.perf_counter() - t_tokenize0)
+        return self._label_conditional_logprob_batch_from_token_ids(prefix_ids_batch, label_ids)
 
     def predict_label_probs(self, text: str, verbalizers: Sequence[str]) -> np.ndarray:
         probs = self._predict_label_probs_batch_impl([text], verbalizers, record_batch=False)
@@ -209,10 +276,21 @@ class HFBackbone(BaseBackbone):
         outputs: List[np.ndarray] = []
         idx = 0
         batch_size = min(self.predict_batch_size, len(texts))
+        label_ids_cache = self._label_token_ids_cache(verbalizers)
         while idx < len(texts):
             cur = list(texts[idx : idx + batch_size])
             try:
-                score_cols = [self._label_conditional_logprob_batch(cur, label) for label in verbalizers]
+                t_tokenize0 = time.perf_counter()
+                prefix_ids_batch = self._tokenize_prefix_batch(cur)
+                self._add_counter("batch_tokenize_calls", 1)
+                self._add_counter("batch_tokenize_seconds", time.perf_counter() - t_tokenize0)
+                score_cols = [
+                    self._label_conditional_logprob_batch_from_token_ids(
+                        prefix_ids_batch=prefix_ids_batch,
+                        label_ids=label_ids_cache[str(label)],
+                    )
+                    for label in verbalizers
+                ]
                 score_mat = np.stack(score_cols, axis=1).astype(np.float64)
                 score_mat = score_mat - score_mat.max(axis=1, keepdims=True)
                 probs = np.exp(score_mat)

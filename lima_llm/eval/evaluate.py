@@ -24,6 +24,11 @@ from .metrics import (
 
 _WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
 _EVAL_GRANULARITIES = {"token", "word"}
+_FLOAT_FORWARD_COUNTER_KEYS = {
+    "batch_tokenize_seconds",
+    "batch_pack_seconds",
+    "batch_forward_seconds",
+}
 
 
 def _safe_mean(xs: Sequence[float]) -> float:
@@ -439,12 +444,18 @@ def evaluate_saved_explanations(
     reference_token_text = _reference_token_text(backbone)
     eval_batch_prefetch = os.getenv("LIMA_EVAL_BATCH_PREFETCH", "1").strip().lower() not in ("0", "false", "off", "no")
     prefetch_fallback_policy = _normalize_prefetch_fallback_policy(os.getenv("LIMA_PREFETCH_FALLBACK_POLICY", "warn"))
-    prefetch_length_sort = os.getenv("LIMA_EVAL_PREFETCH_LENGTH_SORT", "0").strip().lower() not in (
+    prefetch_length_sort_requested = os.getenv("LIMA_EVAL_PREFETCH_LENGTH_SORT", "0").strip().lower() not in (
         "0",
         "false",
         "off",
         "no",
     )
+    prefetch_length_sort = False
+    if prefetch_length_sort_requested:
+        print(
+            "[eval][prefetch] LIMA_EVAL_PREFETCH_LENGTH_SORT is deprecated and ignored. "
+            "Evaluation keeps original perturbation text order."
+        )
     tokenizer = getattr(backbone, "tokenizer", None)
 
     sample_map = {s.sample_id: s for s in bundle.samples}
@@ -569,8 +580,6 @@ def evaluate_saved_explanations(
         cache_runtime["unique_text_count"] += int(
             perturbation_plan.get("unique_required_text_count", len(required_texts))
         )
-        if prefetch_length_sort:
-            required_texts = sorted(required_texts, key=lambda text: (len(text), text))
         timing_breakdown["text_build_seconds"] += time.time() - t_text_build
 
         sample_prob_cache: Dict[str, np.ndarray] = {}
@@ -665,10 +674,13 @@ def evaluate_saved_explanations(
 
     elapsed = time.time() - t0
     counter_after = backbone.snapshot_counters()
-    counter_delta = {
-        k: int(counter_after.get(k, 0) - counter_before.get(k, 0))
-        for k in set(counter_before.keys()).union(counter_after.keys())
-    }
+    counter_delta: Dict[str, float | int] = {}
+    for key in set(counter_before.keys()).union(counter_after.keys()):
+        delta = counter_after.get(key, 0) - counter_before.get(key, 0)
+        if key in _FLOAT_FORWARD_COUNTER_KEYS:
+            counter_delta[key] = float(delta)
+        else:
+            counter_delta[key] = int(delta)
     total_cache_requests = int(cache_runtime["requests"])
     cache_hit_rate = float(cache_runtime["hits"] / total_cache_requests) if total_cache_requests > 0 else 0.0
     cache_stats = {
@@ -696,6 +708,12 @@ def evaluate_saved_explanations(
         "batch_rows": int(counter_delta.get("batch_rows", 0)),
         "model_forward_calls": int(counter_delta.get("model_forward_calls", 0)),
         "oom_shrink_events": int(counter_delta.get("oom_shrink_events", 0)),
+        "batch_tokenize_calls": int(counter_delta.get("batch_tokenize_calls", 0)),
+        "batch_pack_calls": int(counter_delta.get("batch_pack_calls", 0)),
+        "batch_forward_calls": int(counter_delta.get("batch_forward_calls", 0)),
+        "batch_tokenize_seconds": float(counter_delta.get("batch_tokenize_seconds", 0.0)),
+        "batch_pack_seconds": float(counter_delta.get("batch_pack_seconds", 0.0)),
+        "batch_forward_seconds": float(counter_delta.get("batch_forward_seconds", 0.0)),
     }
 
     mode_reports = {

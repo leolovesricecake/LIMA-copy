@@ -16,9 +16,15 @@ class BaseBackbone(ABC):
             "batch_rows": 0,
             "model_forward_calls": 0,
             "oom_shrink_events": 0,
+            "batch_tokenize_calls": 0,
+            "batch_pack_calls": 0,
+            "batch_forward_calls": 0,
+            "batch_tokenize_seconds": 0.0,
+            "batch_pack_seconds": 0.0,
+            "batch_forward_seconds": 0.0,
         }
 
-    def snapshot_counters(self) -> Dict[str, int]:
+    def snapshot_counters(self) -> Dict[str, float | int]:
         return dict(self.forward_counters)
 
     @abstractmethod
