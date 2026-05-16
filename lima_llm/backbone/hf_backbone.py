@@ -179,34 +179,30 @@ class HFBackbone(BaseBackbone):
         full_ids = list(prefix_ids) + list(label_ids)
         return full_ids, len(prefix_ids), len(label_ids)
 
-    def _label_conditional_logprob_batch_from_token_ids(
+    def _label_conditional_logprob_matrix_from_prefix_batch(
         self,
         prefix_ids_batch: Sequence[Sequence[int]],
-        label_ids: Sequence[int],
+        verbalizers: Sequence[str],
+        label_ids_cache: Dict[str, List[int]],
     ) -> np.ndarray:
         if not prefix_ids_batch:
-            return np.zeros((0,), dtype=np.float32)
+            return np.zeros((0, len(verbalizers)), dtype=np.float32)
 
         t_pack0 = time.perf_counter()
         torch = self.torch
-        max_total = max(2, int(self.max_length))
-        max_label = max_total - 1
-        label_ids_trim = list(int(x) for x in label_ids)
-        if len(label_ids_trim) > max_label:
-            label_ids_trim = label_ids_trim[-max_label:]
 
         packed_full_ids: List[List[int]] = []
-        prefix_lens: List[int] = []
-        label_lens: List[int] = []
+        row_meta: List[Tuple[int, int, int, int]] = []
         max_seq = 0
-        for prefix_ids_raw in prefix_ids_batch:
-            prefix_ids, label_ids_cur = self._truncate_prefix_and_label_ids(prefix_ids_raw, label_ids_trim)
-            full_ids = list(prefix_ids) + list(label_ids_cur)
-            packed_full_ids.append(full_ids)
-            prefix_lens.append(len(prefix_ids))
-            label_lens.append(len(label_ids_cur))
-            if len(full_ids) > max_seq:
-                max_seq = len(full_ids)
+        for text_idx, prefix_ids_raw in enumerate(prefix_ids_batch):
+            for label_idx, label in enumerate(verbalizers):
+                label_ids = label_ids_cache[str(label)]
+                prefix_ids, label_ids_cur = self._truncate_prefix_and_label_ids(prefix_ids_raw, label_ids)
+                full_ids = list(prefix_ids) + list(label_ids_cur)
+                packed_full_ids.append(full_ids)
+                row_meta.append((text_idx, label_idx, len(prefix_ids), len(label_ids_cur)))
+                if len(full_ids) > max_seq:
+                    max_seq = len(full_ids)
 
         pad_id = int(self.tokenizer.pad_token_id)
         input_ids = torch.full(
@@ -239,12 +235,12 @@ class HFBackbone(BaseBackbone):
             token_lp = logprobs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
         self._add_counter("batch_forward_seconds", time.perf_counter() - t_forward0)
 
-        scores = np.zeros((len(packed_full_ids),), dtype=np.float32)
-        for row, (prefix_len, label_len) in enumerate(zip(prefix_lens, label_lens)):
+        scores = np.zeros((len(prefix_ids_batch), len(verbalizers)), dtype=np.float32)
+        for row, (text_idx, label_idx, prefix_len, label_len) in enumerate(row_meta):
             start = prefix_len - 1
             end = start + label_len
             label_lp = token_lp[row, start:end]
-            scores[row] = float(label_lp.mean().item())
+            scores[text_idx, label_idx] = float(label_lp.mean().item())
         return scores
 
     def _label_conditional_logprob_batch(self, texts: Sequence[str], label_text: str) -> np.ndarray:
@@ -252,10 +248,15 @@ class HFBackbone(BaseBackbone):
             return np.zeros((0,), dtype=np.float32)
         t_tokenize0 = time.perf_counter()
         prefix_ids_batch = self._tokenize_prefix_batch(texts)
-        label_ids = self._label_token_ids_cache([label_text])[str(label_text)]
+        label_ids_cache = self._label_token_ids_cache([label_text])
         self._add_counter("batch_tokenize_calls", 1)
         self._add_counter("batch_tokenize_seconds", time.perf_counter() - t_tokenize0)
-        return self._label_conditional_logprob_batch_from_token_ids(prefix_ids_batch, label_ids)
+        score_matrix = self._label_conditional_logprob_matrix_from_prefix_batch(
+            prefix_ids_batch=prefix_ids_batch,
+            verbalizers=[label_text],
+            label_ids_cache=label_ids_cache,
+        )
+        return score_matrix[:, 0]
 
     def predict_label_probs(self, text: str, verbalizers: Sequence[str]) -> np.ndarray:
         probs = self._predict_label_probs_batch_impl([text], verbalizers, record_batch=False)
@@ -277,26 +278,23 @@ class HFBackbone(BaseBackbone):
         idx = 0
         batch_size = min(self.predict_batch_size, len(texts))
         label_ids_cache = self._label_token_ids_cache(verbalizers)
+        t_tokenize0 = time.perf_counter()
+        prefix_ids_all = self._tokenize_prefix_batch(texts)
+        self._add_counter("batch_tokenize_calls", 1)
+        self._add_counter("batch_tokenize_seconds", time.perf_counter() - t_tokenize0)
         while idx < len(texts):
-            cur = list(texts[idx : idx + batch_size])
+            cur_prefix_ids_batch = prefix_ids_all[idx : idx + batch_size]
             try:
-                t_tokenize0 = time.perf_counter()
-                prefix_ids_batch = self._tokenize_prefix_batch(cur)
-                self._add_counter("batch_tokenize_calls", 1)
-                self._add_counter("batch_tokenize_seconds", time.perf_counter() - t_tokenize0)
-                score_cols = [
-                    self._label_conditional_logprob_batch_from_token_ids(
-                        prefix_ids_batch=prefix_ids_batch,
-                        label_ids=label_ids_cache[str(label)],
-                    )
-                    for label in verbalizers
-                ]
-                score_mat = np.stack(score_cols, axis=1).astype(np.float64)
+                score_mat = self._label_conditional_logprob_matrix_from_prefix_batch(
+                    prefix_ids_batch=cur_prefix_ids_batch,
+                    verbalizers=verbalizers,
+                    label_ids_cache=label_ids_cache,
+                ).astype(np.float64)
                 score_mat = score_mat - score_mat.max(axis=1, keepdims=True)
                 probs = np.exp(score_mat)
                 probs = probs / probs.sum(axis=1, keepdims=True)
                 outputs.append(probs.astype(np.float32))
-                idx += len(cur)
+                idx += len(cur_prefix_ids_batch)
             except Exception as exc:
                 if self._is_oom_error(exc) and batch_size > 1:
                     self._clear_cuda_cache()
