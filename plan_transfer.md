@@ -45,6 +45,7 @@
   - 回退原因：单组 200 样本出现主指标漂移（`comp/suff` 退化）；后续仅在样本级等价闸门通过后再重启。
 - 切分方法：
   - 保持共享 partition 的前提下，补充 `ngram / sentence / semantic` 可比实验接口；
+  - 可以考虑设计自适应切分策略，根据样本长度与上下文动态调整切分粒度，或coarse-to-fine 策略。
   - 增加“切分诊断”指标：chunk 数、长度分布、覆盖率、跨句断裂率。
 - 打分函数：
   - 对四项分数（`confidence/effectiveness/consistency/collaboration`）增加分量级 trace 导出；
@@ -53,9 +54,6 @@
 - 搜索方法：
   - 保持 `greedy/bidirectional` 主线，补齐步级对账（每步候选增益排序一致性）；
   - 引入可开关的候选剪枝实验位，但默认关闭，确保主线语义稳定。
-- 评估协议：
-  - 主口径固定 `gold`，`predicted` 作为辅诊断；
-  - 单组对账固定输出 `explain/eval/total` 时长与 forward counters，避免口径歧义。
 
 ## Phase 3：效率优化（后续专项）
 - 暂缓执行，待功能方案冻结后再重启专项优化。

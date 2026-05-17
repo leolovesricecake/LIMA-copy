@@ -22,11 +22,12 @@ def run_forward_greedy(
     k: int,
 ) -> Tuple[List[int], List[ScoreTrace]]:
     selected: List[int] = []
+    selected_set = set()
     traces: List[ScoreTrace] = []
 
     max_k = min(max(0, int(k)), len(candidate_ids))
     for step in range(max_k):
-        remaining = [idx for idx in candidate_ids if idx not in selected]
+        remaining = [idx for idx in candidate_ids if idx not in selected_set]
         if not remaining:
             break
 
@@ -45,6 +46,7 @@ def run_forward_greedy(
 
         best_id, best_gain = _argmax_with_tiebreak(gains)
         selected.append(best_id)
+        selected_set.add(best_id)
 
         best_score = candidate_scores[best_id]
         traces.append(
@@ -66,14 +68,16 @@ def run_bidirectional_search(
     k: int,
 ) -> Tuple[List[int], List[ScoreTrace]]:
     selected: List[int] = []
+    selected_set = set()
     removed: List[int] = []
+    removed_set = set()
     traces: List[ScoreTrace] = []
 
     max_k = min(max(0, int(k)), len(candidate_ids))
     step = 0
 
     while len(selected) < max_k:
-        remaining = [idx for idx in candidate_ids if idx not in selected and idx not in removed]
+        remaining = [idx for idx in candidate_ids if idx not in selected_set and idx not in removed_set]
         if not remaining:
             break
 
@@ -93,6 +97,7 @@ def run_bidirectional_search(
 
         add_id, add_gain = _argmax_with_tiebreak(add_gains)
         selected.append(add_id)
+        selected_set.add(add_id)
         add_score = add_scores[add_id]
         traces.append(
             ScoreTrace(
@@ -108,13 +113,11 @@ def run_bidirectional_search(
             break
 
         # Reverse prune: exact contribution scan on current universe minus removed.
-        remaining_after_add = [
-            idx for idx in candidate_ids if idx not in selected and idx not in removed
-        ]
+        remaining_after_add = [idx for idx in candidate_ids if idx not in selected_set and idx not in removed_set]
         if not remaining_after_add:
             break
 
-        universe = [idx for idx in candidate_ids if idx not in removed]
+        universe = [idx for idx in candidate_ids if idx not in removed_set]
         score_universe = objective.evaluate_subset(universe)
 
         contributions: List[Tuple[int, float]] = []
@@ -125,5 +128,6 @@ def run_bidirectional_search(
 
         remove_id, _ = _argmin_with_tiebreak(contributions)
         removed.append(remove_id)
+        removed_set.add(remove_id)
 
     return selected, traces

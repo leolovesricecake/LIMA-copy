@@ -56,3 +56,24 @@ def test_batch_prefetch_toggle_keeps_greedy_selection_identical() -> None:
     assert len(trace_batch) == len(trace_single)
     for left, right in zip(trace_batch, trace_single):
         assert abs(float(left.total_score) - float(right.total_score)) <= 1e-6
+
+
+def test_objective_cache_stats_are_exposed() -> None:
+    objective = _build_objective(enable_batch_prefetch=True)
+    _ = objective.evaluate_subset([0, 1])
+    _ = objective.evaluate_gains([0], [1, 2, 3])
+
+    stats = objective.cache_stats()
+    assert int(stats["evaluate_subset_calls"]) >= 1
+    assert int(stats["evaluate_gains_calls"]) >= 1
+    assert int(stats["subset_requested"]) >= 1
+    assert int(stats["subset_cache_hits"]) >= 0
+    assert int(stats["subset_cache_misses"]) >= 0
+    assert int(stats["prob_cache_entries"]) >= 1
+    assert int(stats["embed_cache_entries"]) >= 1
+    assert float(stats["subset_cache_hit_rate"]) >= 0.0
+    assert float(stats["subset_cache_hit_rate"]) <= 1.0
+    assert float(stats["prob_cache_hit_rate"]) >= 0.0
+    assert float(stats["prob_cache_hit_rate"]) <= 1.0
+    assert float(stats["embed_cache_hit_rate"]) >= 0.0
+    assert float(stats["embed_cache_hit_rate"]) <= 1.0

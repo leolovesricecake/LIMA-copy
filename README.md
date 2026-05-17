@@ -36,6 +36,10 @@ bash scripts/run_lima_llm_v1.sh \
 
 可用 `python scripts/analysis_snapshot.py --results-root lima_llm_results --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
 
+可用 `python scripts/lambda_sweep_report.py --baseline-run-dir <baseline_run_dir> --candidate-run-dirs <run_dir_1> <run_dir_2>` 生成 `lambda` 小网格的 Faithfulness 五指标方向判定与速度/稳定性副作用汇总。
+
+可用 `python scripts/trace_component_profile.py --run-dir <run_dir>` 聚合每步 `confidence/effectiveness/consistency/collaboration` 分量轨迹，辅助定位 `comp/suff` 的主要牵引项。
+
 
 ## 20 - deterministic
 ```

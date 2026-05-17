@@ -54,6 +54,9 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
 
     sample_jsons = list(out.glob("**/samples/*.json"))
     assert len(sample_jsons) == 2
+    sample_payload = json.loads(sample_jsons[0].read_text(encoding="utf-8"))
+    assert "explain_timing_breakdown" in sample_payload.get("metadata", {})
+    assert "objective_cache_stats" in sample_payload.get("metadata", {})
 
     summary = list(out.glob("**/summary.csv"))
     report = list(out.glob("**/eval_report.json"))

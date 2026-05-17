@@ -77,10 +77,12 @@ class TextLIMAExplainer:
     def explain_sample(self, sample: TextSample, verbose: bool = False) -> ExplanationResult:
         t0 = time.time()
         counters_before = self.backbone.snapshot_counters()
+        t_chunk0 = time.perf_counter()
         chunks: List[TextChunk] = self.chunker(sample.text)
         ok, msg = validate_chunk_coverage(sample.text, chunks)
         if not ok:
             raise ValueError(f"Chunk coverage invalid for {sample.sample_id}: {msg}")
+        chunk_build_seconds = time.perf_counter() - t_chunk0
 
         if verbose:
             for chunk in chunks:
@@ -92,6 +94,9 @@ class TextLIMAExplainer:
         candidate_ids = [chunk.chunk_id for chunk in chunks]
         max_k = min(max(0, int(self.config.k)), len(candidate_ids))
         method = str(self.config.explain_method).strip().lower()
+        t_search0 = time.perf_counter()
+        objective_cache_stats: Dict[str, float | int] = {}
+        model_prefetch_seconds = 0.0
 
         if method == "ours":
             chunk_embeddings = []
@@ -146,6 +151,8 @@ class TextLIMAExplainer:
                 "target_probability": final_score.target_probability,
                 "label_probabilities": list(final_score.label_probabilities),
             }
+            objective_cache_stats = objective.cache_stats()
+            model_prefetch_seconds = float(objective_cache_stats.get("model_prefetch_seconds", 0.0))
         elif method == "random":
             seed = int(self.config.seed) + (_stable_hash_int(sample.sample_id) % 10_000)
             rng = random.Random(seed)
@@ -205,6 +212,7 @@ class TextLIMAExplainer:
         else:
             raise ValueError(f"Unsupported explain method: {method}")
 
+        search_seconds = time.perf_counter() - t_search0
         selected_text = compose_text_from_chunk_ids(chunks, selected)
 
         elapsed = time.time() - t0
@@ -214,6 +222,12 @@ class TextLIMAExplainer:
         ranking_set = set(int(x) for x in chunk_ranking)
         metadata = {
             "elapsed_seconds": elapsed,
+            "explain_timing_breakdown": {
+                "chunk_build_seconds": float(chunk_build_seconds),
+                "search_seconds": float(search_seconds),
+                "model_prefetch_seconds": float(model_prefetch_seconds),
+            },
+            "objective_cache_stats": objective_cache_stats,
             "chunk_count": len(chunks),
             "search": self.config.search,
             "k": self.config.k,

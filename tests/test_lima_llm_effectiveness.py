@@ -5,7 +5,7 @@ from typing import Sequence
 
 import numpy as np
 
-from lima_llm.scoring.effectiveness import effectiveness_score
+from lima_llm.scoring.effectiveness import build_chunk_distance_matrix, effectiveness_score
 from lima_llm.utils import cosine_similarity
 
 
@@ -62,17 +62,22 @@ def test_effectiveness_matches_reference_impl() -> None:
         ids = [int(x) for x in rng.integers(0, len(embs), size=(k,)).tolist()]
         cases.append(ids)
 
+    dist = build_chunk_distance_matrix(embs)
+
     try:
         for ids in cases:
             os.environ["LIMA_EFFECTIVENESS_REFERENCE"] = "1"
             got_ref_path = effectiveness_score(embs, ids)
             os.environ["LIMA_EFFECTIVENESS_REFERENCE"] = "0"
             got_opt_path = effectiveness_score(embs, ids)
+            got_mat_path = effectiveness_score(embs, ids, distance_matrix=dist)
             ref = _reference_effectiveness(embs, ids)
 
             assert abs(float(got_ref_path) - float(ref)) <= 1e-12
             assert abs(float(got_opt_path) - float(ref)) <= 1e-12
+            assert abs(float(got_mat_path) - float(ref)) <= 1e-12
             assert abs(float(got_opt_path) - float(got_ref_path)) <= 1e-12
+            assert abs(float(got_mat_path) - float(got_ref_path)) <= 1e-12
     finally:
         if original_flag is None:
             os.environ.pop("LIMA_EFFECTIVENESS_REFERENCE", None)

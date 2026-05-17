@@ -65,6 +65,22 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
     elapsed: List[float] = []
     chunk_counts: List[float] = []
     selected_counts: List[float] = []
+    timing_totals = {
+        "chunk_build_seconds": 0.0,
+        "search_seconds": 0.0,
+        "model_prefetch_seconds": 0.0,
+    }
+    cache_totals = {
+        "subset_requested": 0,
+        "subset_cache_hits": 0,
+        "subset_cache_misses": 0,
+        "prob_cache_hits": 0,
+        "prob_cache_misses": 0,
+        "embed_cache_hits": 0,
+        "embed_cache_misses": 0,
+        "evaluate_gains_calls": 0,
+    }
+    cache_samples = 0
     forward_final = {
         "predict_calls": 0,
         "embed_calls": 0,
@@ -79,6 +95,15 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
         elapsed.append(_safe_float(meta.get("elapsed_seconds")))
         chunk_counts.append(float(len(payload.get("chunks", []))))
         selected_counts.append(float(len(payload.get("selected_chunk_ids", []))))
+        timing_payload = meta.get("explain_timing_breakdown", {})
+        for key in timing_totals:
+            timing_totals[key] += _safe_float(timing_payload.get(key))
+
+        cache_payload = meta.get("objective_cache_stats")
+        if isinstance(cache_payload, dict):
+            cache_samples += 1
+            for key in cache_totals:
+                cache_totals[key] += int(_safe_float(cache_payload.get(key), 0.0))
 
         fc = meta.get("forward_counters", {})
         for key in forward_final:
@@ -96,6 +121,14 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             "chunk_count_mean": 0.0,
             "selected_count_mean": 0.0,
             "forward_counters_final": forward_final,
+            "explain_timing_breakdown_totals": timing_totals,
+            "objective_cache_stats": {
+                **cache_totals,
+                "samples_with_cache_stats": 0,
+                "subset_cache_hit_rate": 0.0,
+                "prob_cache_hit_rate": 0.0,
+                "embed_cache_hit_rate": 0.0,
+            },
         }
 
     elapsed_sorted = sorted(elapsed)
@@ -107,6 +140,10 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
         idx = max(0, min(len(xs) - 1, idx))
         return float(xs[idx])
 
+    subset_requested = int(cache_totals["subset_requested"])
+    prob_total = int(cache_totals["prob_cache_hits"] + cache_totals["prob_cache_misses"])
+    embed_total = int(cache_totals["embed_cache_hits"] + cache_totals["embed_cache_misses"])
+
     return {
         "sample_count": n,
         "explain_seconds_total": float(sum(elapsed)),
@@ -117,6 +154,26 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
         "chunk_count_mean": float(sum(chunk_counts) / n),
         "selected_count_mean": float(sum(selected_counts) / n),
         "forward_counters_final": forward_final,
+        "explain_timing_breakdown_totals": timing_totals,
+        "objective_cache_stats": {
+            **cache_totals,
+            "samples_with_cache_stats": int(cache_samples),
+            "subset_cache_hit_rate": (
+                float(cache_totals["subset_cache_hits"]) / float(subset_requested)
+                if subset_requested > 0
+                else 0.0
+            ),
+            "prob_cache_hit_rate": (
+                float(cache_totals["prob_cache_hits"]) / float(prob_total)
+                if prob_total > 0
+                else 0.0
+            ),
+            "embed_cache_hit_rate": (
+                float(cache_totals["embed_cache_hits"]) / float(embed_total)
+                if embed_total > 0
+                else 0.0
+            ),
+        },
     }
 
 
@@ -212,6 +269,8 @@ def build_snapshot(results_root: Path, primary_method: str, reference_method: st
                 "chunk_count_mean": float(explain_stats["chunk_count_mean"]),
                 "selected_count_mean": float(explain_stats["selected_count_mean"]),
                 "forward_counters_final": explain_stats["forward_counters_final"],
+                "timing_breakdown_totals": explain_stats["explain_timing_breakdown_totals"],
+                "objective_cache_stats": explain_stats["objective_cache_stats"],
             },
         }
         runs.append(run)
@@ -283,6 +342,15 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "explain_predict_calls": run["explain"]["forward_counters_final"]["predict_calls"],
                     "explain_embed_calls": run["explain"]["forward_counters_final"]["embed_calls"],
                     "explain_gradient_calls": run["explain"]["forward_counters_final"]["gradient_calls"],
+                    "explain_chunk_build_seconds_total": run["explain"]["timing_breakdown_totals"]["chunk_build_seconds"],
+                    "explain_search_seconds_total": run["explain"]["timing_breakdown_totals"]["search_seconds"],
+                    "explain_model_prefetch_seconds_total": run["explain"]["timing_breakdown_totals"][
+                        "model_prefetch_seconds"
+                    ],
+                    "explain_subset_cache_hit_rate": run["explain"]["objective_cache_stats"]["subset_cache_hit_rate"],
+                    "explain_prob_cache_hit_rate": run["explain"]["objective_cache_stats"]["prob_cache_hit_rate"],
+                    "explain_embed_cache_hit_rate": run["explain"]["objective_cache_stats"]["embed_cache_hit_rate"],
+                    "explain_evaluate_gains_calls": run["explain"]["objective_cache_stats"]["evaluate_gains_calls"],
                 }
             )
     return rows
@@ -336,6 +404,13 @@ def main() -> None:
         "explain_predict_calls",
         "explain_embed_calls",
         "explain_gradient_calls",
+        "explain_chunk_build_seconds_total",
+        "explain_search_seconds_total",
+        "explain_model_prefetch_seconds_total",
+        "explain_subset_cache_hit_rate",
+        "explain_prob_cache_hit_rate",
+        "explain_embed_cache_hit_rate",
+        "explain_evaluate_gains_calls",
     ]
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", encoding="utf-8", newline="") as f:

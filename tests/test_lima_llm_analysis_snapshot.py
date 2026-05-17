@@ -83,6 +83,21 @@ def _write_run(
         "selected_chunk_ids": [0],
         "metadata": {
             "elapsed_seconds": explain_elapsed,
+            "explain_timing_breakdown": {
+                "chunk_build_seconds": 0.1,
+                "search_seconds": max(0.0, explain_elapsed - 0.2),
+                "model_prefetch_seconds": 0.05,
+            },
+            "objective_cache_stats": {
+                "subset_requested": 10,
+                "subset_cache_hits": 4,
+                "subset_cache_misses": 6,
+                "prob_cache_hits": 8,
+                "prob_cache_misses": 2,
+                "embed_cache_hits": 7,
+                "embed_cache_misses": 3,
+                "evaluate_gains_calls": 5,
+            },
             "forward_counters": {
                 "predict_calls": 3,
                 "embed_calls": 4,
@@ -134,6 +149,12 @@ def test_analysis_snapshot_and_pairwise(tmp_path: Path) -> None:
     assert pair["gold_comp_adv"] == -0.01999999999999999
     assert pair["gold_suff_adv"] == 0.30000000000000004
     assert pair["gold_pass"] is False
+
+    ours = group["methods"]["ours"]
+    assert ours["explain"]["timing_breakdown_totals"]["chunk_build_seconds"] == 0.1
+    assert ours["explain"]["timing_breakdown_totals"]["model_prefetch_seconds"] == 0.05
+    assert ours["explain"]["objective_cache_stats"]["evaluate_gains_calls"] == 5
+    assert abs(ours["explain"]["objective_cache_stats"]["subset_cache_hit_rate"] - 0.4) <= 1e-12
 
 
 def test_analysis_snapshot_diff(tmp_path: Path) -> None:
