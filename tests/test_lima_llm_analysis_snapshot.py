@@ -98,6 +98,20 @@ def _write_run(
                 "embed_cache_misses": 3,
                 "evaluate_gains_calls": 5,
             },
+            "chunk_diagnostics": {
+                "chunk_strategy_requested": "sentence_v2",
+                "chunk_strategy": "sentence_v2",
+                "chunk_count": 1,
+                "chunk_len_chars_min": 2.0,
+                "chunk_len_chars_mean": 2.0,
+                "chunk_len_chars_p90": 2.0,
+                "chunk_len_chars_max": 2.0,
+                "singleton_orphan_punctuation_chunks": 0,
+                "cross_newline_boundary_chunks": 0,
+                "fallback_applied": False,
+                "fallback_reason": None,
+                "pre_fallback_chunk_count": 1,
+            },
             "forward_counters": {
                 "predict_calls": 3,
                 "embed_calls": 4,
@@ -155,6 +169,8 @@ def test_analysis_snapshot_and_pairwise(tmp_path: Path) -> None:
     assert ours["explain"]["timing_breakdown_totals"]["model_prefetch_seconds"] == 0.05
     assert ours["explain"]["objective_cache_stats"]["evaluate_gains_calls"] == 5
     assert abs(ours["explain"]["objective_cache_stats"]["subset_cache_hit_rate"] - 0.4) <= 1e-12
+    assert ours["explain"]["chunk_diagnostics"]["chunk_strategy_counts"]["sentence_v2"] == 1
+    assert ours["explain"]["chunk_diagnostics"]["fallback_rate"] == 0.0
 
 
 def test_analysis_snapshot_diff(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -81,6 +82,13 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
         "evaluate_gains_calls": 0,
     }
     cache_samples = 0
+    chunk_diag_samples = 0
+    chunk_strategy_counter: Counter[str] = Counter()
+    fallback_count = 0
+    orphan_chunks_total = 0.0
+    orphan_samples = 0
+    cross_newline_total = 0.0
+    cross_newline_samples = 0
     forward_final = {
         "predict_calls": 0,
         "embed_calls": 0,
@@ -105,6 +113,21 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             for key in cache_totals:
                 cache_totals[key] += int(_safe_float(cache_payload.get(key), 0.0))
 
+        chunk_diag = meta.get("chunk_diagnostics")
+        if isinstance(chunk_diag, dict):
+            chunk_diag_samples += 1
+            chunk_strategy_counter[str(chunk_diag.get("chunk_strategy", "unknown"))] += 1
+            if bool(chunk_diag.get("fallback_applied", False)):
+                fallback_count += 1
+            orphan_val = _safe_float(chunk_diag.get("singleton_orphan_punctuation_chunks"), 0.0)
+            cross_val = _safe_float(chunk_diag.get("cross_newline_boundary_chunks"), 0.0)
+            orphan_chunks_total += orphan_val
+            cross_newline_total += cross_val
+            if orphan_val > 0.0:
+                orphan_samples += 1
+            if cross_val > 0.0:
+                cross_newline_samples += 1
+
         fc = meta.get("forward_counters", {})
         for key in forward_final:
             forward_final[key] = max(forward_final[key], int(_safe_float(fc.get(key), 0.0)))
@@ -128,6 +151,15 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
                 "subset_cache_hit_rate": 0.0,
                 "prob_cache_hit_rate": 0.0,
                 "embed_cache_hit_rate": 0.0,
+            },
+            "chunk_diagnostics": {
+                "samples_with_chunk_diagnostics": 0,
+                "chunk_strategy_counts": {},
+                "fallback_rate": 0.0,
+                "orphan_chunks_mean": 0.0,
+                "orphan_samples_ratio": 0.0,
+                "cross_newline_chunks_mean": 0.0,
+                "cross_newline_samples_ratio": 0.0,
             },
         }
 
@@ -171,6 +203,31 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             "embed_cache_hit_rate": (
                 float(cache_totals["embed_cache_hits"]) / float(embed_total)
                 if embed_total > 0
+                else 0.0
+            ),
+        },
+        "chunk_diagnostics": {
+            "samples_with_chunk_diagnostics": int(chunk_diag_samples),
+            "chunk_strategy_counts": dict(chunk_strategy_counter),
+            "fallback_rate": (float(fallback_count) / float(chunk_diag_samples)) if chunk_diag_samples > 0 else 0.0,
+            "orphan_chunks_mean": (
+                float(orphan_chunks_total) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
+                else 0.0
+            ),
+            "orphan_samples_ratio": (
+                float(orphan_samples) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
+                else 0.0
+            ),
+            "cross_newline_chunks_mean": (
+                float(cross_newline_total) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
+                else 0.0
+            ),
+            "cross_newline_samples_ratio": (
+                float(cross_newline_samples) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
                 else 0.0
             ),
         },
@@ -271,6 +328,7 @@ def build_snapshot(results_root: Path, primary_method: str, reference_method: st
                 "forward_counters_final": explain_stats["forward_counters_final"],
                 "timing_breakdown_totals": explain_stats["explain_timing_breakdown_totals"],
                 "objective_cache_stats": explain_stats["objective_cache_stats"],
+                "chunk_diagnostics": explain_stats["chunk_diagnostics"],
             },
         }
         runs.append(run)
@@ -351,6 +409,15 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "explain_prob_cache_hit_rate": run["explain"]["objective_cache_stats"]["prob_cache_hit_rate"],
                     "explain_embed_cache_hit_rate": run["explain"]["objective_cache_stats"]["embed_cache_hit_rate"],
                     "explain_evaluate_gains_calls": run["explain"]["objective_cache_stats"]["evaluate_gains_calls"],
+                    "chunk_diag_fallback_rate": run["explain"]["chunk_diagnostics"]["fallback_rate"],
+                    "chunk_diag_orphan_chunks_mean": run["explain"]["chunk_diagnostics"]["orphan_chunks_mean"],
+                    "chunk_diag_orphan_samples_ratio": run["explain"]["chunk_diagnostics"]["orphan_samples_ratio"],
+                    "chunk_diag_cross_newline_chunks_mean": run["explain"]["chunk_diagnostics"][
+                        "cross_newline_chunks_mean"
+                    ],
+                    "chunk_diag_cross_newline_samples_ratio": run["explain"]["chunk_diagnostics"][
+                        "cross_newline_samples_ratio"
+                    ],
                 }
             )
     return rows
@@ -411,6 +478,11 @@ def main() -> None:
         "explain_prob_cache_hit_rate",
         "explain_embed_cache_hit_rate",
         "explain_evaluate_gains_calls",
+        "chunk_diag_fallback_rate",
+        "chunk_diag_orphan_chunks_mean",
+        "chunk_diag_orphan_samples_ratio",
+        "chunk_diag_cross_newline_chunks_mean",
+        "chunk_diag_cross_newline_samples_ratio",
     ]
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", encoding="utf-8", newline="") as f:

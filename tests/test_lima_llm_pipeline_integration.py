@@ -57,6 +57,14 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     sample_payload = json.loads(sample_jsons[0].read_text(encoding="utf-8"))
     assert "explain_timing_breakdown" in sample_payload.get("metadata", {})
     assert "objective_cache_stats" in sample_payload.get("metadata", {})
+    assert "chunk_diagnostics" in sample_payload.get("metadata", {})
+    chunk_diag = sample_payload["metadata"]["chunk_diagnostics"]
+    assert "chunk_strategy" in chunk_diag
+    assert "chunk_count" in chunk_diag
+    assert "singleton_orphan_punctuation_chunks" in chunk_diag
+    assert "cross_newline_boundary_chunks" in chunk_diag
+    assert "fallback_applied" in chunk_diag
+    assert "fallback_reason" in chunk_diag
 
     summary = list(out.glob("**/summary.csv"))
     report = list(out.glob("**/eval_report.json"))

@@ -83,6 +83,23 @@ class TextLIMAExplainer:
         if not ok:
             raise ValueError(f"Chunk coverage invalid for {sample.sample_id}: {msg}")
         chunk_build_seconds = time.perf_counter() - t_chunk0
+        chunk_diagnostics = dict(getattr(self.chunker, "last_diagnostics", {}) or {})
+        if not chunk_diagnostics:
+            lengths = [max(0, int(chunk.end_char) - int(chunk.start_char)) for chunk in chunks]
+            chunk_diagnostics = {
+                "chunk_strategy_requested": "unknown",
+                "chunk_strategy": "unknown",
+                "chunk_count": len(chunks),
+                "chunk_len_chars_min": float(min(lengths)) if lengths else 0.0,
+                "chunk_len_chars_mean": (float(sum(lengths)) / float(len(lengths))) if lengths else 0.0,
+                "chunk_len_chars_p90": float(max(lengths)) if lengths else 0.0,
+                "chunk_len_chars_max": float(max(lengths)) if lengths else 0.0,
+                "singleton_orphan_punctuation_chunks": 0,
+                "cross_newline_boundary_chunks": 0,
+                "fallback_applied": False,
+                "fallback_reason": None,
+                "pre_fallback_chunk_count": None,
+            }
 
         if verbose:
             for chunk in chunks:
@@ -227,6 +244,7 @@ class TextLIMAExplainer:
                 "search_seconds": float(search_seconds),
                 "model_prefetch_seconds": float(model_prefetch_seconds),
             },
+            "chunk_diagnostics": chunk_diagnostics,
             "objective_cache_stats": objective_cache_stats,
             "chunk_count": len(chunks),
             "search": self.config.search,
