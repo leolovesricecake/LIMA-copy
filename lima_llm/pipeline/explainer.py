@@ -112,7 +112,9 @@ class TextLIMAExplainer:
         max_k = min(max(0, int(self.config.k)), len(candidate_ids))
         method = str(self.config.explain_method).strip().lower()
         t_search0 = time.perf_counter()
-        objective_cache_stats: Dict[str, float | int] = {}
+        objective_cache_stats: Dict[str, object] = {}
+        objective_compute_stats: Dict[str, object] = {}
+        component_profile: Dict[str, object] = {}
         model_prefetch_seconds = 0.0
 
         if method == "ours":
@@ -135,9 +137,17 @@ class TextLIMAExplainer:
             )
 
             singleton_gain: Dict[int, float] = {}
+            singleton_components: Dict[str, Dict[str, float]] = {}
             _, singleton_batch = objective.evaluate_gains([], candidate_ids)
-            for cid, gain, _ in singleton_batch:
+            for cid, gain, score in singleton_batch:
                 singleton_gain[int(cid)] = float(gain)
+                singleton_components[str(int(cid))] = {
+                    "confidence": float(score.components.confidence),
+                    "effectiveness": float(score.components.effectiveness),
+                    "consistency": float(score.components.consistency),
+                    "collaboration": float(score.components.collaboration),
+                    "total": float(score.total),
+                }
 
             if self.config.search == "greedy":
                 selected, trace = run_forward_greedy(objective, candidate_ids=candidate_ids, k=max_k)
@@ -170,6 +180,47 @@ class TextLIMAExplainer:
             }
             objective_cache_stats = objective.cache_stats()
             model_prefetch_seconds = float(objective_cache_stats.get("model_prefetch_seconds", 0.0))
+            component_enabled = objective.component_enabled()
+            component_profile = {
+                "component_enabled": component_enabled,
+                "singleton_components": singleton_components,
+            }
+            objective_compute_stats = {
+                "evaluate_gains_calls": int(objective_cache_stats.get("evaluate_gains_calls", 0)),
+                "subset_cache_hit_rate": float(objective_cache_stats.get("subset_cache_hit_rate", 0.0)),
+                "prob_cache_hit_rate": float(objective_cache_stats.get("prob_cache_hit_rate", 0.0)),
+                "embed_cache_hit_rate": float(objective_cache_stats.get("embed_cache_hit_rate", 0.0)),
+                "confidence_compute_calls": int(objective_cache_stats.get("confidence_compute_calls", 0)),
+                "effectiveness_compute_calls": int(objective_cache_stats.get("effectiveness_compute_calls", 0)),
+                "consistency_compute_calls": int(objective_cache_stats.get("consistency_compute_calls", 0)),
+                "collaboration_compute_calls": int(objective_cache_stats.get("collaboration_compute_calls", 0)),
+                "confidence_skipped_due_to_zero_lambda": int(
+                    objective_cache_stats.get("confidence_skipped_due_to_zero_lambda", 0)
+                ),
+                "effectiveness_skipped_due_to_zero_lambda": int(
+                    objective_cache_stats.get("effectiveness_skipped_due_to_zero_lambda", 0)
+                ),
+                "consistency_skipped_due_to_zero_lambda": int(
+                    objective_cache_stats.get("consistency_skipped_due_to_zero_lambda", 0)
+                ),
+                "collaboration_skipped_due_to_zero_lambda": int(
+                    objective_cache_stats.get("collaboration_skipped_due_to_zero_lambda", 0)
+                ),
+                "component_enabled": component_enabled,
+                "timing": {
+                    "text_build_seconds": float(objective_cache_stats.get("text_build_seconds", 0.0)),
+                    "prefetch_seconds": float(objective_cache_stats.get("model_prefetch_seconds", 0.0)),
+                    "component_compute_seconds": float(objective_cache_stats.get("component_compute_seconds", 0.0)),
+                    "confidence_compute_seconds": float(objective_cache_stats.get("confidence_compute_seconds", 0.0)),
+                    "effectiveness_compute_seconds": float(
+                        objective_cache_stats.get("effectiveness_compute_seconds", 0.0)
+                    ),
+                    "consistency_compute_seconds": float(objective_cache_stats.get("consistency_compute_seconds", 0.0)),
+                    "collaboration_compute_seconds": float(
+                        objective_cache_stats.get("collaboration_compute_seconds", 0.0)
+                    ),
+                },
+            }
         elif method == "random":
             seed = int(self.config.seed) + (_stable_hash_int(sample.sample_id) % 10_000)
             rng = random.Random(seed)
@@ -246,6 +297,8 @@ class TextLIMAExplainer:
             },
             "chunk_diagnostics": chunk_diagnostics,
             "objective_cache_stats": objective_cache_stats,
+            "objective_compute_stats": objective_compute_stats,
+            "component_profile": component_profile,
             "chunk_count": len(chunks),
             "search": self.config.search,
             "k": self.config.k,

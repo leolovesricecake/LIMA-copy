@@ -60,6 +60,12 @@ class TextSubmodularObjective:
         self._complement_text_cache: Dict[Tuple[int, ...], str] = {}
         self._all_chunk_ids: Tuple[int, ...] = tuple(sorted(int(chunk.chunk_id) for chunk in self.chunks))
         self._chunk_text_by_id: Dict[int, str] = {int(chunk.chunk_id): chunk.text for chunk in self.chunks}
+        self._component_enabled: Dict[str, bool] = {
+            "confidence": float(self.weights.lambda1) != 0.0,
+            "effectiveness": float(self.weights.lambda2) != 0.0,
+            "consistency": float(self.weights.lambda3) != 0.0,
+            "collaboration": float(self.weights.lambda4) != 0.0,
+        }
         backbone_name = type(self.backbone).__name__.strip().lower()
         if backbone_name == "mockbackbone":
             self._chunk_distance_matrix = None
@@ -87,12 +93,30 @@ class TextSubmodularObjective:
             "embed_prefetch_missing_texts": 0,
             "model_prefetch_calls": 0,
             "model_prefetch_seconds": 0.0,
+            "text_build_seconds": 0.0,
+            "component_compute_seconds": 0.0,
             "evaluate_subset_calls": 0,
             "evaluate_gain_calls": 0,
             "evaluate_gains_calls": 0,
+            "confidence_compute_calls": 0,
+            "effectiveness_compute_calls": 0,
+            "consistency_compute_calls": 0,
+            "collaboration_compute_calls": 0,
+            "confidence_compute_seconds": 0.0,
+            "effectiveness_compute_seconds": 0.0,
+            "consistency_compute_seconds": 0.0,
+            "collaboration_compute_seconds": 0.0,
+            "confidence_skipped_due_to_zero_lambda": 0,
+            "effectiveness_skipped_due_to_zero_lambda": 0,
+            "consistency_skipped_due_to_zero_lambda": 0,
+            "collaboration_skipped_due_to_zero_lambda": 0,
+            "prob_prefetch_skipped_due_to_zero_lambda": 0,
+            "embed_prefetch_skipped_due_to_zero_lambda": 0,
         }
 
-        self.anchor_embedding = self._embed_text_cached(self.text if self.text else self.empty_text_token)
+        self.anchor_embedding = None
+        if self._component_enabled["consistency"] or self._component_enabled["collaboration"]:
+            self.anchor_embedding = self._embed_text_cached(self.text if self.text else self.empty_text_token)
 
     @staticmethod
     def _augment_subset_key(base_key: Tuple[int, ...], candidate: int) -> Tuple[int, ...]:
@@ -234,37 +258,122 @@ class TextSubmodularObjective:
         if not pending:
             return
 
-        subset_texts: List[str] = []
-        complement_texts: List[str] = []
+        need_confidence = self._component_enabled["confidence"]
+        need_effectiveness = self._component_enabled["effectiveness"]
+        need_consistency = self._component_enabled["consistency"]
+        need_collaboration = self._component_enabled["collaboration"]
+        need_subset_text = need_confidence or need_consistency
+        need_complement_text = need_collaboration
+
+        t_text0 = time.perf_counter()
+        subset_prob_texts: List[str] = []
+        subset_embed_texts: List[str] = []
+        complement_embed_texts: List[str] = []
         text_by_key: Dict[Tuple[int, ...], Tuple[str, str]] = {}
         for key in pending:
-            subset_text = self._subset_text(key)
-            complement_text = self._complement_text(key)
-            subset_texts.append(subset_text)
-            complement_texts.append(complement_text)
+            subset_text = self._subset_text(key) if need_subset_text else self.empty_text_token
+            complement_text = self._complement_text(key) if need_complement_text else self.empty_text_token
+            if need_confidence:
+                subset_prob_texts.append(subset_text)
+            if need_consistency:
+                subset_embed_texts.append(subset_text)
+            if need_collaboration:
+                complement_embed_texts.append(complement_text)
             text_by_key[key] = (subset_text, complement_text)
+        self._stats["text_build_seconds"] = float(self._stats["text_build_seconds"]) + (time.perf_counter() - t_text0)
 
         t_prefetch0 = time.perf_counter()
-        self._prefetch_prob_texts(subset_texts)
-        self._prefetch_embed_texts([*subset_texts, *complement_texts])
-        self._stats["model_prefetch_calls"] = int(self._stats["model_prefetch_calls"]) + 1
-        self._stats["model_prefetch_seconds"] = float(self._stats["model_prefetch_seconds"]) + (
-            time.perf_counter() - t_prefetch0
-        )
+        prefetch_called = False
+        if need_confidence:
+            self._prefetch_prob_texts(subset_prob_texts)
+            prefetch_called = True
+        else:
+            self._stats["prob_prefetch_skipped_due_to_zero_lambda"] = int(
+                self._stats["prob_prefetch_skipped_due_to_zero_lambda"]
+            ) + len(pending)
 
+        embed_prefetch_texts = [*subset_embed_texts, *complement_embed_texts]
+        if (need_consistency or need_collaboration) and embed_prefetch_texts:
+            self._prefetch_embed_texts(embed_prefetch_texts)
+            prefetch_called = True
+        elif not (need_consistency or need_collaboration):
+            self._stats["embed_prefetch_skipped_due_to_zero_lambda"] = int(
+                self._stats["embed_prefetch_skipped_due_to_zero_lambda"]
+            ) + len(pending)
+
+        if prefetch_called:
+            self._stats["model_prefetch_calls"] = int(self._stats["model_prefetch_calls"]) + 1
+            self._stats["model_prefetch_seconds"] = float(self._stats["model_prefetch_seconds"]) + (
+                time.perf_counter() - t_prefetch0
+            )
+
+        t_component0 = time.perf_counter()
         for subset_key in pending:
             subset_text, complement_text = text_by_key[subset_key]
-            label_probs = self._predict_prob_cached(subset_text)
-            target_prob = float(label_probs[self.target_label])
+            label_probs = np.zeros((len(self.verbalizers),), dtype=np.float32)
+            target_prob = 0.0
 
-            conf = target_prob
-            eff = effectiveness_score(
-                self.chunk_embeddings,
-                subset_key,
-                distance_matrix=self._chunk_distance_matrix,
-            )
-            cons = consistency_score(self._embed_text_cached(subset_text), self.anchor_embedding)
-            col = collaboration_score(self._embed_text_cached(complement_text), self.anchor_embedding)
+            if need_confidence:
+                t0 = time.perf_counter()
+                label_probs = self._predict_prob_cached(subset_text)
+                target_prob = float(label_probs[self.target_label])
+                self._stats["confidence_compute_calls"] = int(self._stats["confidence_compute_calls"]) + 1
+                self._stats["confidence_compute_seconds"] = float(self._stats["confidence_compute_seconds"]) + (
+                    time.perf_counter() - t0
+                )
+                conf = target_prob
+            else:
+                self._stats["confidence_skipped_due_to_zero_lambda"] = int(
+                    self._stats["confidence_skipped_due_to_zero_lambda"]
+                ) + 1
+                conf = 0.0
+
+            if need_effectiveness:
+                t0 = time.perf_counter()
+                eff = effectiveness_score(
+                    self.chunk_embeddings,
+                    subset_key,
+                    distance_matrix=self._chunk_distance_matrix,
+                )
+                self._stats["effectiveness_compute_calls"] = int(self._stats["effectiveness_compute_calls"]) + 1
+                self._stats["effectiveness_compute_seconds"] = float(self._stats["effectiveness_compute_seconds"]) + (
+                    time.perf_counter() - t0
+                )
+            else:
+                self._stats["effectiveness_skipped_due_to_zero_lambda"] = int(
+                    self._stats["effectiveness_skipped_due_to_zero_lambda"]
+                ) + 1
+                eff = 0.0
+
+            if need_consistency:
+                t0 = time.perf_counter()
+                if self.anchor_embedding is None:
+                    raise RuntimeError("anchor_embedding is missing while consistency component is enabled")
+                cons = consistency_score(self._embed_text_cached(subset_text), self.anchor_embedding)
+                self._stats["consistency_compute_calls"] = int(self._stats["consistency_compute_calls"]) + 1
+                self._stats["consistency_compute_seconds"] = float(self._stats["consistency_compute_seconds"]) + (
+                    time.perf_counter() - t0
+                )
+            else:
+                self._stats["consistency_skipped_due_to_zero_lambda"] = int(
+                    self._stats["consistency_skipped_due_to_zero_lambda"]
+                ) + 1
+                cons = 0.0
+
+            if need_collaboration:
+                t0 = time.perf_counter()
+                if self.anchor_embedding is None:
+                    raise RuntimeError("anchor_embedding is missing while collaboration component is enabled")
+                col = collaboration_score(self._embed_text_cached(complement_text), self.anchor_embedding)
+                self._stats["collaboration_compute_calls"] = int(self._stats["collaboration_compute_calls"]) + 1
+                self._stats["collaboration_compute_seconds"] = float(
+                    self._stats["collaboration_compute_seconds"]
+                ) + (time.perf_counter() - t0)
+            else:
+                self._stats["collaboration_skipped_due_to_zero_lambda"] = int(
+                    self._stats["collaboration_skipped_due_to_zero_lambda"]
+                ) + 1
+                col = 0.0
 
             components = ScoreComponents(
                 confidence=conf,
@@ -288,6 +397,9 @@ class TextSubmodularObjective:
                 label_probabilities=tuple(float(x) for x in label_probs.tolist()),
             )
             self._stats["subset_materialized"] = int(self._stats["subset_materialized"]) + 1
+        self._stats["component_compute_seconds"] = float(self._stats["component_compute_seconds"]) + (
+            time.perf_counter() - t_component0
+        )
 
     def evaluate_subset(self, subset: Sequence[int]) -> SubsetScore:
         self._stats["evaluate_subset_calls"] = int(self._stats["evaluate_subset_calls"]) + 1
@@ -326,13 +438,14 @@ class TextSubmodularObjective:
             gains.append((candidate, float(augmented.total - base.total), augmented))
         return base, gains
 
-    def cache_stats(self) -> Dict[str, float | int]:
+    def cache_stats(self) -> Dict[str, object]:
         subset_requested = int(self._stats["subset_requested"])
         subset_hits = int(self._stats["subset_cache_hits"])
         prob_total = int(self._stats["prob_cache_hits"]) + int(self._stats["prob_cache_misses"])
         embed_total = int(self._stats["embed_cache_hits"]) + int(self._stats["embed_cache_misses"])
         return {
             **self._stats,
+            "component_enabled": dict(self._component_enabled),
             "subset_cache_entries": len(self.cache),
             "prob_cache_entries": len(self._prob_cache),
             "embed_cache_entries": len(self._embed_cache),
@@ -344,3 +457,6 @@ class TextSubmodularObjective:
                 float(self._stats["embed_cache_hits"]) / float(embed_total) if embed_total > 0 else 0.0
             ),
         }
+
+    def component_enabled(self) -> Dict[str, bool]:
+        return dict(self._component_enabled)
