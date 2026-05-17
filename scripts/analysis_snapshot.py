@@ -87,6 +87,8 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
     fallback_count = 0
     orphan_chunks_total = 0.0
     orphan_samples = 0
+    orphan_merge_total = 0.0
+    orphan_merge_samples = 0
     cross_newline_total = 0.0
     cross_newline_samples = 0
     forward_final = {
@@ -120,11 +122,15 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             if bool(chunk_diag.get("fallback_applied", False)):
                 fallback_count += 1
             orphan_val = _safe_float(chunk_diag.get("singleton_orphan_punctuation_chunks"), 0.0)
+            orphan_merge_val = _safe_float(chunk_diag.get("orphan_merge_count"), 0.0)
             cross_val = _safe_float(chunk_diag.get("cross_newline_boundary_chunks"), 0.0)
             orphan_chunks_total += orphan_val
+            orphan_merge_total += orphan_merge_val
             cross_newline_total += cross_val
             if orphan_val > 0.0:
                 orphan_samples += 1
+            if orphan_merge_val > 0.0:
+                orphan_merge_samples += 1
             if cross_val > 0.0:
                 cross_newline_samples += 1
 
@@ -158,6 +164,8 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
                 "fallback_rate": 0.0,
                 "orphan_chunks_mean": 0.0,
                 "orphan_samples_ratio": 0.0,
+                "orphan_merge_count_mean": 0.0,
+                "orphan_merge_samples_ratio": 0.0,
                 "cross_newline_chunks_mean": 0.0,
                 "cross_newline_samples_ratio": 0.0,
             },
@@ -217,6 +225,16 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             ),
             "orphan_samples_ratio": (
                 float(orphan_samples) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
+                else 0.0
+            ),
+            "orphan_merge_count_mean": (
+                float(orphan_merge_total) / float(chunk_diag_samples)
+                if chunk_diag_samples > 0
+                else 0.0
+            ),
+            "orphan_merge_samples_ratio": (
+                float(orphan_merge_samples) / float(chunk_diag_samples)
                 if chunk_diag_samples > 0
                 else 0.0
             ),
@@ -412,6 +430,12 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "chunk_diag_fallback_rate": run["explain"]["chunk_diagnostics"]["fallback_rate"],
                     "chunk_diag_orphan_chunks_mean": run["explain"]["chunk_diagnostics"]["orphan_chunks_mean"],
                     "chunk_diag_orphan_samples_ratio": run["explain"]["chunk_diagnostics"]["orphan_samples_ratio"],
+                    "chunk_diag_orphan_merge_count_mean": run["explain"]["chunk_diagnostics"][
+                        "orphan_merge_count_mean"
+                    ],
+                    "chunk_diag_orphan_merge_samples_ratio": run["explain"]["chunk_diagnostics"][
+                        "orphan_merge_samples_ratio"
+                    ],
                     "chunk_diag_cross_newline_chunks_mean": run["explain"]["chunk_diagnostics"][
                         "cross_newline_chunks_mean"
                     ],
@@ -481,6 +505,8 @@ def main() -> None:
         "chunk_diag_fallback_rate",
         "chunk_diag_orphan_chunks_mean",
         "chunk_diag_orphan_samples_ratio",
+        "chunk_diag_orphan_merge_count_mean",
+        "chunk_diag_orphan_merge_samples_ratio",
         "chunk_diag_cross_newline_chunks_mean",
         "chunk_diag_cross_newline_samples_ratio",
     ]

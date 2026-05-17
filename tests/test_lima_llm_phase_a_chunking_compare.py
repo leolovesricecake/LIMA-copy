@@ -21,6 +21,12 @@ def _write_run(
     runtime_seconds: float,
     selected_ids: list[int],
     orphan_chunks: int,
+    orphan_merge_count: int,
+    leading_close_chunks: int,
+    abbreviation_singleton_chunks: int,
+    leading_close_fix_count: int,
+    abbreviation_merge_count: int,
+    mid_boundary: int,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     report = {
@@ -44,6 +50,10 @@ def _write_run(
         "sample_id": "s1",
         "selected_chunk_ids": selected_ids,
         "chunk_ranking": [*selected_ids, 99],
+        "chunks": [
+            {"chunk_id": 0, "start_char": 0, "end_char": mid_boundary, "text": "x" * mid_boundary},
+            {"chunk_id": 1, "start_char": mid_boundary, "end_char": 10, "text": "y" * (10 - mid_boundary)},
+        ],
         "trace": [{"total_score": 0.1}, {"total_score": 0.2}],
         "metadata": {
             "elapsed_seconds": 1.0,
@@ -51,6 +61,11 @@ def _write_run(
                 "chunk_strategy": "sentence_v2",
                 "fallback_applied": False,
                 "singleton_orphan_punctuation_chunks": orphan_chunks,
+                "orphan_merge_count": orphan_merge_count,
+                "leading_close_punct_chunks": leading_close_chunks,
+                "abbreviation_singleton_chunks": abbreviation_singleton_chunks,
+                "leading_close_punct_fix_count": leading_close_fix_count,
+                "abbreviation_merge_count": abbreviation_merge_count,
                 "cross_newline_boundary_chunks": 0,
                 "chunk_count": 2,
                 "chunk_len_chars_mean": 20.0,
@@ -77,6 +92,12 @@ def test_phase_a_chunking_compare_builds_report(tmp_path: Path) -> None:
         runtime_seconds=10.0,
         selected_ids=[0, 1],
         orphan_chunks=1,
+        orphan_merge_count=0,
+        leading_close_chunks=1,
+        abbreviation_singleton_chunks=1,
+        leading_close_fix_count=0,
+        abbreviation_merge_count=0,
+        mid_boundary=5,
     )
     _write_run(
         candidate,
@@ -85,6 +106,12 @@ def test_phase_a_chunking_compare_builds_report(tmp_path: Path) -> None:
         runtime_seconds=9.0,
         selected_ids=[0, 1],
         orphan_chunks=0,
+        orphan_merge_count=1,
+        leading_close_chunks=0,
+        abbreviation_singleton_chunks=0,
+        leading_close_fix_count=1,
+        abbreviation_merge_count=1,
+        mid_boundary=6,
     )
 
     report = mod.build_report(baseline, candidate, trace_tolerance=1e-8)
@@ -92,3 +119,12 @@ def test_phase_a_chunking_compare_builds_report(tmp_path: Path) -> None:
     assert report["explanation_drift"]["selected_changed_ratio"] == 0.0
     assert report["chunk_diagnostics"]["baseline"]["orphan_chunks_mean"] == 1.0
     assert report["chunk_diagnostics"]["candidate"]["orphan_chunks_mean"] == 0.0
+    assert report["chunk_diagnostics"]["baseline"]["leading_close_punct_mean"] == 1.0
+    assert report["chunk_diagnostics"]["candidate"]["leading_close_punct_mean"] == 0.0
+    assert report["chunk_diagnostics"]["baseline"]["abbreviation_singleton_mean"] == 1.0
+    assert report["chunk_diagnostics"]["candidate"]["abbreviation_singleton_mean"] == 0.0
+    assert report["chunk_diagnostics"]["candidate"]["orphan_merge_count_mean"] == 1.0
+    assert report["chunk_diagnostics"]["candidate"]["leading_close_punct_fix_count_mean"] == 1.0
+    assert report["chunk_diagnostics"]["candidate"]["abbreviation_merge_count_mean"] == 1.0
+    assert report["boundary_drift"]["boundary_jaccard_mean"] == 0.0
+    assert report["boundary_drift"]["boundary_shift_chars_mean"] == 1.0

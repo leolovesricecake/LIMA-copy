@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import statistics
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -31,13 +32,49 @@ def _load_samples(run_dir: Path) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _percentile(values: List[float], q: float) -> float:
+    if not values:
+        return 0.0
+    xs = sorted(float(x) for x in values)
+    idx = int(round((len(xs) - 1) * q))
+    idx = max(0, min(len(xs) - 1, idx))
+    return float(xs[idx])
+
+
+def _extract_boundaries(payload: Dict[str, Any]) -> List[int]:
+    chunks = payload.get("chunks", [])
+    if not isinstance(chunks, list):
+        return []
+
+    boundaries: List[int] = []
+    for chunk in chunks[:-1]:
+        if not isinstance(chunk, dict):
+            continue
+        end_char = chunk.get("end_char")
+        try:
+            boundaries.append(int(end_char))
+        except Exception:
+            continue
+    return sorted(set(boundaries))
+
+
 def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     total = 0
     fallback = 0
     orphan_total = 0.0
     orphan_samples = 0
+    leading_close_total = 0.0
+    leading_close_samples = 0
+    abbreviation_total = 0.0
+    abbreviation_samples = 0
     cross_total = 0.0
     cross_samples = 0
+    orphan_merge_total = 0.0
+    orphan_merge_samples = 0
+    leading_close_fix_total = 0.0
+    leading_close_fix_samples = 0
+    abbreviation_merge_total = 0.0
+    abbreviation_merge_samples = 0
     strategy_counts: Dict[str, int] = {}
     chunk_count_values: List[float] = []
     chunk_len_mean_values: List[float] = []
@@ -52,11 +89,31 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         if bool(diag.get("fallback_applied", False)):
             fallback += 1
         orphan = _safe_float(diag.get("singleton_orphan_punctuation_chunks"), 0.0)
+        leading_close = _safe_float(diag.get("leading_close_punct_chunks"), 0.0)
+        abbreviation = _safe_float(diag.get("abbreviation_singleton_chunks"), 0.0)
         cross = _safe_float(diag.get("cross_newline_boundary_chunks"), 0.0)
+        orphan_merge = _safe_float(diag.get("orphan_merge_count"), 0.0)
+        leading_close_fix = _safe_float(diag.get("leading_close_punct_fix_count"), 0.0)
+        abbreviation_merge = _safe_float(diag.get("abbreviation_merge_count"), 0.0)
         orphan_total += orphan
+        leading_close_total += leading_close
+        abbreviation_total += abbreviation
         cross_total += cross
+        orphan_merge_total += orphan_merge
+        leading_close_fix_total += leading_close_fix
+        abbreviation_merge_total += abbreviation_merge
         if orphan > 0.0:
             orphan_samples += 1
+        if leading_close > 0.0:
+            leading_close_samples += 1
+        if abbreviation > 0.0:
+            abbreviation_samples += 1
+        if orphan_merge > 0.0:
+            orphan_merge_samples += 1
+        if leading_close_fix > 0.0:
+            leading_close_fix_samples += 1
+        if abbreviation_merge > 0.0:
+            abbreviation_merge_samples += 1
         if cross > 0.0:
             cross_samples += 1
         chunk_count_values.append(_safe_float(diag.get("chunk_count"), 0.0))
@@ -69,6 +126,16 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         "fallback_rate": float(fallback / denom),
         "orphan_chunks_mean": float(orphan_total / denom),
         "orphan_samples_ratio": float(orphan_samples / denom),
+        "leading_close_punct_mean": float(leading_close_total / denom),
+        "leading_close_punct_samples_ratio": float(leading_close_samples / denom),
+        "abbreviation_singleton_mean": float(abbreviation_total / denom),
+        "abbreviation_singleton_samples_ratio": float(abbreviation_samples / denom),
+        "orphan_merge_count_mean": float(orphan_merge_total / denom),
+        "orphan_merge_samples_ratio": float(orphan_merge_samples / denom),
+        "leading_close_punct_fix_count_mean": float(leading_close_fix_total / denom),
+        "leading_close_punct_fix_samples_ratio": float(leading_close_fix_samples / denom),
+        "abbreviation_merge_count_mean": float(abbreviation_merge_total / denom),
+        "abbreviation_merge_samples_ratio": float(abbreviation_merge_samples / denom),
         "cross_newline_chunks_mean": float(cross_total / denom),
         "cross_newline_samples_ratio": float(cross_samples / denom),
         "chunk_count_mean": (
@@ -127,6 +194,67 @@ def _drift_summary(
         "ranking_changed_ratio": float(ranking_changed / denom),
         "trace_changed_ratio": float(trace_changed / denom),
         "trace_total_score_max_abs_diff": float(max_trace_abs_diff),
+    }
+
+
+def _boundary_drift_summary(
+    baseline_samples: Dict[str, Dict[str, Any]],
+    candidate_samples: Dict[str, Dict[str, Any]],
+    large_shift_threshold: int = 8,
+) -> Dict[str, Any]:
+    common_ids = sorted(set(baseline_samples.keys()).intersection(candidate_samples.keys()))
+    if not common_ids:
+        return {
+            "sample_count_common": 0,
+            "sample_count_with_boundaries": 0,
+            "boundary_jaccard_mean": 0.0,
+            "boundary_jaccard_median": 0.0,
+            "boundary_shift_chars_mean": 0.0,
+            "boundary_shift_chars_p90": 0.0,
+            "boundary_shift_chars_max": 0.0,
+            "large_shift_threshold": int(large_shift_threshold),
+            "large_shift_boundary_count": 0,
+            "large_shift_boundary_ratio": 0.0,
+        }
+
+    jaccards: List[float] = []
+    shifts: List[float] = []
+    sample_with_boundaries = 0
+
+    for sample_id in common_ids:
+        baseline_bounds = _extract_boundaries(baseline_samples[sample_id])
+        candidate_bounds = _extract_boundaries(candidate_samples[sample_id])
+
+        baseline_set = set(baseline_bounds)
+        candidate_set = set(candidate_bounds)
+        union = baseline_set.union(candidate_set)
+        if len(union) == 0:
+            jaccards.append(1.0)
+        else:
+            jaccards.append(float(len(baseline_set.intersection(candidate_set)) / float(len(union))))
+
+        if baseline_bounds and candidate_bounds:
+            sample_with_boundaries += 1
+            for bound in baseline_bounds:
+                nearest = min(abs(bound - other) for other in candidate_bounds)
+                shifts.append(float(nearest))
+
+    large_shift_count = sum(1 for value in shifts if value > float(large_shift_threshold))
+    shift_total = len(shifts)
+
+    return {
+        "sample_count_common": int(len(common_ids)),
+        "sample_count_with_boundaries": int(sample_with_boundaries),
+        "boundary_jaccard_mean": float(statistics.mean(jaccards)) if jaccards else 0.0,
+        "boundary_jaccard_median": float(statistics.median(jaccards)) if jaccards else 0.0,
+        "boundary_shift_chars_mean": float(statistics.mean(shifts)) if shifts else 0.0,
+        "boundary_shift_chars_p90": _percentile(shifts, 0.90),
+        "boundary_shift_chars_max": float(max(shifts)) if shifts else 0.0,
+        "large_shift_threshold": int(large_shift_threshold),
+        "large_shift_boundary_count": int(large_shift_count),
+        "large_shift_boundary_ratio": (
+            float(large_shift_count) / float(shift_total) if shift_total > 0 else 0.0
+        ),
     }
 
 
@@ -201,6 +329,10 @@ def build_report(baseline_run_dir: Path, candidate_run_dir: Path, trace_toleranc
             candidate_samples=candidate_samples,
             trace_tolerance=trace_tolerance,
         ),
+        "boundary_drift": _boundary_drift_summary(
+            baseline_samples=baseline_samples,
+            candidate_samples=candidate_samples,
+        ),
     }
 
 
@@ -247,8 +379,34 @@ def main() -> None:
         "ranking_changed_ratio": report["explanation_drift"]["ranking_changed_ratio"],
         "baseline_orphan_chunks_mean": report["chunk_diagnostics"]["baseline"]["orphan_chunks_mean"],
         "candidate_orphan_chunks_mean": report["chunk_diagnostics"]["candidate"]["orphan_chunks_mean"],
+        "baseline_leading_close_punct_mean": report["chunk_diagnostics"]["baseline"]["leading_close_punct_mean"],
+        "candidate_leading_close_punct_mean": report["chunk_diagnostics"]["candidate"]["leading_close_punct_mean"],
+        "baseline_abbreviation_singleton_mean": report["chunk_diagnostics"]["baseline"]["abbreviation_singleton_mean"],
+        "candidate_abbreviation_singleton_mean": report["chunk_diagnostics"]["candidate"][
+            "abbreviation_singleton_mean"
+        ],
+        "baseline_orphan_merge_count_mean": report["chunk_diagnostics"]["baseline"]["orphan_merge_count_mean"],
+        "candidate_orphan_merge_count_mean": report["chunk_diagnostics"]["candidate"]["orphan_merge_count_mean"],
+        "baseline_leading_close_punct_fix_count_mean": report["chunk_diagnostics"]["baseline"][
+            "leading_close_punct_fix_count_mean"
+        ],
+        "candidate_leading_close_punct_fix_count_mean": report["chunk_diagnostics"]["candidate"][
+            "leading_close_punct_fix_count_mean"
+        ],
+        "baseline_abbreviation_merge_count_mean": report["chunk_diagnostics"]["baseline"][
+            "abbreviation_merge_count_mean"
+        ],
+        "candidate_abbreviation_merge_count_mean": report["chunk_diagnostics"]["candidate"][
+            "abbreviation_merge_count_mean"
+        ],
         "baseline_fallback_rate": report["chunk_diagnostics"]["baseline"]["fallback_rate"],
         "candidate_fallback_rate": report["chunk_diagnostics"]["candidate"]["fallback_rate"],
+        "boundary_jaccard_mean": report["boundary_drift"]["boundary_jaccard_mean"],
+        "boundary_jaccard_median": report["boundary_drift"]["boundary_jaccard_median"],
+        "boundary_shift_chars_mean": report["boundary_drift"]["boundary_shift_chars_mean"],
+        "boundary_shift_chars_p90": report["boundary_drift"]["boundary_shift_chars_p90"],
+        "boundary_shift_chars_max": report["boundary_drift"]["boundary_shift_chars_max"],
+        "large_shift_boundary_count": report["boundary_drift"]["large_shift_boundary_count"],
     }
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)

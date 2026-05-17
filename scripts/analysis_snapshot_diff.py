@@ -57,6 +57,8 @@ def build_diff(baseline: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, A
         "explain.chunk_diagnostics.fallback_rate",
         "explain.chunk_diagnostics.orphan_chunks_mean",
         "explain.chunk_diagnostics.orphan_samples_ratio",
+        "explain.chunk_diagnostics.orphan_merge_count_mean",
+        "explain.chunk_diagnostics.orphan_merge_samples_ratio",
         "explain.chunk_diagnostics.cross_newline_chunks_mean",
         "explain.chunk_diagnostics.cross_newline_samples_ratio",
         "metrics.gold.comprehensiveness",

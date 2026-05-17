@@ -31,7 +31,7 @@ bash scripts/run_lima_llm_v1.sh \
 ```
 
 `--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
-`--chunker` 当前支持 `sentence/sentence_v2/fixed_token`，其中 `sentence_v2` 为规则增强句切（Phase A 候选策略）。
+`--chunker` 当前支持 `sentence/sentence_v2/fixed_token`，其中 `sentence_v2` 当前为“安全修复版”：保持 `sentence` 边界语义，仅额外合并孤立标点块。
 
 `--deterministic` 可开启更强确定性设置（用于回归对账/复现实验）。运行产物 `run_config.json`、`eval_config.json`、`eval_report.json` 会包含 `provenance` 字段（git/命令/环境/时间信息）。
 
@@ -42,6 +42,8 @@ bash scripts/run_lima_llm_v1.sh \
 可用 `python scripts/trace_component_profile.py --run-dir <run_dir>` 聚合每步 `confidence/effectiveness/consistency/collaboration` 分量轨迹，辅助定位 `comp/suff` 的主要牵引项。
 
 可用 `python scripts/phase_a_chunking_compare.py --baseline-run-dir <sentence_run_dir> --candidate-run-dir <sentence_v2_run_dir>` 生成 Phase A 的切分质量/解释漂移/性能对比报告。
+
+可用 `python scripts/chunk_error_audit.py --run-dir <run_dir>` 对单个 run 的 `samples/*.json` 做 chunk 错误全量审计，输出 `chunk_error_audit.json` 与 `chunk_error_manifest.csv`。
 
 
 ## 20 - deterministic

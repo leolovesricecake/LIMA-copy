@@ -6,7 +6,7 @@ from ..types import TextChunk
 from .diagnostics import build_chunk_diagnostics
 from .fixed_token import fixed_token_chunk
 from .sentence import sentence_chunk
-from .sentence_v2 import sentence_chunk_v2
+from .sentence_v2 import sentence_chunk_v2_with_stats
 from .utils import validate_chunk_coverage
 
 
@@ -73,6 +73,42 @@ def _sentence_like_run_impl(
     return chunks, diag
 
 
+def _sentence_v2_run_impl(
+    *,
+    text: str,
+    tokenizer,
+    fixed_token_size: int,
+) -> Tuple[List[TextChunk], Dict[str, object]]:
+    chunks, v2_stats = sentence_chunk_v2_with_stats(text)
+    ok, _ = validate_chunk_coverage(text, chunks)
+    fallback_applied = False
+    fallback_reason = None
+    effective_strategy = "sentence_v2"
+    pre_fallback_chunk_count = len(chunks)
+
+    if not ok:
+        fallback_applied = True
+        fallback_reason = "invalid_coverage_fallback"
+    elif len(chunks) <= 1:
+        fallback_applied = True
+        fallback_reason = "single_chunk_fallback"
+
+    if fallback_applied:
+        chunks = fixed_token_chunk(text=text, token_size=fixed_token_size, tokenizer=tokenizer)
+        effective_strategy = "fixed_token"
+
+    diag = build_chunk_diagnostics(
+        chunks=chunks,
+        requested_strategy="sentence_v2",
+        effective_strategy=effective_strategy,
+        fallback_applied=fallback_applied,
+        fallback_reason=fallback_reason,
+        pre_fallback_chunk_count=pre_fallback_chunk_count,
+        extra_stats=v2_stats,
+    )
+    return chunks, diag
+
+
 def build_chunker(
     method: str,
     tokenizer=None,
@@ -98,10 +134,8 @@ def build_chunker(
 
     if method == "sentence_v2":
         return _ChunkerWithDiagnostics(
-            lambda text: _sentence_like_run_impl(
+            lambda text: _sentence_v2_run_impl(
                 text=text,
-                requested_strategy="sentence_v2",
-                sentence_impl=sentence_chunk_v2,
                 tokenizer=tokenizer,
                 fixed_token_size=fixed_token_size,
             )

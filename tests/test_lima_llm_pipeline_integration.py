@@ -62,6 +62,8 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "chunk_strategy" in chunk_diag
     assert "chunk_count" in chunk_diag
     assert "singleton_orphan_punctuation_chunks" in chunk_diag
+    assert "leading_close_punct_chunks" in chunk_diag
+    assert "abbreviation_singleton_chunks" in chunk_diag
     assert "cross_newline_boundary_chunks" in chunk_diag
     assert "fallback_applied" in chunk_diag
     assert "fallback_reason" in chunk_diag
