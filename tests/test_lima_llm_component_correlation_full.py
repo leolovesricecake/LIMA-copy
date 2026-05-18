@@ -23,7 +23,28 @@ def _write_sample(path: Path, *, sample_id: str, conf: float, eff: float, cons: 
             "effectiveness": eff,
             "consistency": cons,
             "collaboration": col,
+            "total": conf + eff + cons + col,
         },
+        "trace": [
+            {
+                "step": 0,
+                "components": {
+                    "confidence": conf,
+                    "effectiveness": eff,
+                    "consistency": cons,
+                    "collaboration": col,
+                },
+            },
+            {
+                "step": 1,
+                "components": {
+                    "confidence": conf + 0.2,
+                    "effectiveness": eff + 0.05,
+                    "consistency": cons + 0.1,
+                    "collaboration": col + 0.04,
+                },
+            },
+        ],
         "metadata": {
             "component_profile": {
                 "component_enabled": {
@@ -70,13 +91,16 @@ def test_component_correlation_full_builds_rows(tmp_path: Path) -> None:
     assert report["sample_count"] == 2
     assert report["chunk_row_count"] == 4
     assert report["sample_row_count"] == 2
-    assert len(report["rows"]) == 12  # 6 pairs * 2 views
+    assert report["trace_marginal_row_count"] == 2
+    assert len(report["rows"]) == 18  # 6 pairs * 3 views
 
     chunk_pairs = report["views"]["chunk_singleton"]["pairs"]
     sample_pairs = report["views"]["sample_selected_set"]["pairs"]
+    trace_pairs = report["views"]["trace_marginal_step"]["pairs"]
     assert len(chunk_pairs) == 6
     assert len(sample_pairs) == 6
-    for row in chunk_pairs + sample_pairs:
+    assert len(trace_pairs) == 6
+    for row in chunk_pairs + sample_pairs + trace_pairs:
         assert "pearson" in row
         assert "spearman" in row
         assert int(row["n"]) >= 2

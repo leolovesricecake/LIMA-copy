@@ -56,3 +56,31 @@ def test_ablation_plan_helper_generates_grid_and_commands(tmp_path: Path) -> Non
 
     for row in payload["entries"]:
         assert "chunk-sentence_search-greedy_k-8" in row["run_dir"]
+
+
+def test_ablation_plan_helper_phase_b2_grid(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "ablation_plan_helper.py"
+    mod = _load_module(script, "ablation_plan_helper_phase_b2")
+
+    cfg = {
+        "dataset": "eraser_movie_reviews",
+        "split": "validation",
+        "model_path": "Qwen/Qwen2.5-7B-Instruct",
+        "device": "cuda:0",
+        "k": 8,
+        "chunker": "sentence",
+        "search": "greedy",
+        "seed": 42,
+        "output_dir": str(tmp_path / "runs"),
+        "explain_method": "ours",
+    }
+    cfg_path = tmp_path / "run_config.json"
+    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+
+    payload = mod.build_plan(cfg_path, python_bin="python", do_check=False, plan_set="phase_b2")
+    assert payload["plan_set"] == "phase_b2"
+    tags = [row["tag"] for row in payload["entries"]]
+    assert tags == ["full", "cand_a_drop_col_half", "cand_b_drop_col_zero", "cand_c_drop_cons_half"]
+    commands = [row["command"] for row in payload["entries"]]
+    assert any("--lambdas 1,1,1,0.5" in cmd for cmd in commands)
+    assert any("--lambdas 1,1,1,0" in cmd for cmd in commands)

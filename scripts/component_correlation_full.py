@@ -117,14 +117,17 @@ def _component_stats(data: Dict[str, List[float]]) -> Dict[str, Dict[str, float]
     return out
 
 
-def _load_component_rows(run_dir: Path) -> Tuple[int, Dict[str, List[float]], Dict[str, List[float]]]:
+def _load_component_rows(
+    run_dir: Path,
+) -> Tuple[int, Dict[str, List[float]], Dict[str, List[float]], Dict[str, List[float]]]:
     sample_dir = run_dir / "samples"
     chunk_level: Dict[str, List[float]] = {name: [] for name in COMPONENTS}
     sample_level: Dict[str, List[float]] = {name: [] for name in COMPONENTS}
+    trace_marginal_level: Dict[str, List[float]] = {name: [] for name in COMPONENTS}
     sample_count = 0
 
     if not sample_dir.exists():
-        return 0, chunk_level, sample_level
+        return 0, chunk_level, sample_level, trace_marginal_level
 
     for path in sorted(sample_dir.glob("*.json")):
         payload = _read_json(path)
@@ -144,12 +147,31 @@ def _load_component_rows(run_dir: Path) -> Tuple[int, Dict[str, List[float]], Di
             for name in COMPONENTS:
                 sample_level[name].append(_safe_float(scores.get(name), 0.0))
 
-    return sample_count, chunk_level, sample_level
+        trace_rows = payload.get("trace", [])
+        prev_components = None
+        if isinstance(trace_rows, list):
+            for row in trace_rows:
+                components = row.get("components", {}) if isinstance(row, dict) else {}
+                if not isinstance(components, dict):
+                    continue
+                current = {name: _safe_float(components.get(name), 0.0) for name in COMPONENTS}
+                # We define step-wise marginal components as delta from previous selected-set score.
+                # Step-0 lacks its true empty-set base in persisted trace, so we skip it.
+                if prev_components is not None:
+                    for name in COMPONENTS:
+                        trace_marginal_level[name].append(float(current[name] - prev_components[name]))
+                prev_components = current
+
+    return sample_count, chunk_level, sample_level, trace_marginal_level
 
 
 def build_report(run_dir: Path) -> Dict[str, Any]:
-    sample_count, chunk_level, sample_level = _load_component_rows(run_dir)
-    rows = _pair_rows("chunk_singleton", chunk_level) + _pair_rows("sample_selected_set", sample_level)
+    sample_count, chunk_level, sample_level, trace_marginal_level = _load_component_rows(run_dir)
+    rows = (
+        _pair_rows("chunk_singleton", chunk_level)
+        + _pair_rows("sample_selected_set", sample_level)
+        + _pair_rows("trace_marginal_step", trace_marginal_level)
+    )
 
     return {
         "run_dir": str(run_dir),
@@ -157,6 +179,7 @@ def build_report(run_dir: Path) -> Dict[str, Any]:
         "components": list(COMPONENTS),
         "chunk_row_count": int(len(chunk_level["confidence"])),
         "sample_row_count": int(len(sample_level["confidence"])),
+        "trace_marginal_row_count": int(len(trace_marginal_level["confidence"])),
         "views": {
             "chunk_singleton": {
                 "component_stats": _component_stats(chunk_level),
@@ -166,8 +189,16 @@ def build_report(run_dir: Path) -> Dict[str, Any]:
                 "component_stats": _component_stats(sample_level),
                 "pairs": [row for row in rows if row["view"] == "sample_selected_set"],
             },
+            "trace_marginal_step": {
+                "component_stats": _component_stats(trace_marginal_level),
+                "pairs": [row for row in rows if row["view"] == "trace_marginal_step"],
+            },
         },
         "rows": rows,
+        "analysis_notes": [
+            "chunk_singleton/effectiveness can be exactly zero by definition when singleton subset size <= 1",
+            "trace_marginal_step is computed as component deltas between consecutive selected-set steps and skips step-0",
+        ],
     }
 
 
@@ -209,6 +240,7 @@ def main() -> None:
     print(f"[component-correlation] samples={report.get('sample_count', 0)}")
     print(f"[component-correlation] chunk_rows={report.get('chunk_row_count', 0)}")
     print(f"[component-correlation] sample_rows={report.get('sample_row_count', 0)}")
+    print(f"[component-correlation] trace_marginal_rows={report.get('trace_marginal_row_count', 0)}")
     print(f"[component-correlation] json={out_json}")
     print(f"[component-correlation] csv={out_csv}")
 

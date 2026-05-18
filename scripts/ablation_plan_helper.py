@@ -14,6 +14,13 @@ ABLATION_GRID: List[Tuple[str, str]] = [
     ("drop_col", "1,1,1,0"),
 ]
 
+PHASE_B2_GRID: List[Tuple[str, str]] = [
+    ("full", "1,1,1,1"),
+    ("cand_a_drop_col_half", "1,1,1,0.5"),
+    ("cand_b_drop_col_zero", "1,1,1,0"),
+    ("cand_c_drop_cons_half", "1,1,0.5,1"),
+]
+
 
 def _read_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -115,13 +122,21 @@ def _check_runs(run_dirs: List[Path]) -> Dict[str, Any]:
     return {"missing_count": int(missing), "rows": rows}
 
 
-def build_plan(template_run_config: Path, python_bin: str, do_check: bool) -> Dict[str, Any]:
+def _grid_for_plan_set(plan_set: str) -> List[Tuple[str, str]]:
+    key = str(plan_set).strip().lower()
+    if key == "phase_b2":
+        return list(PHASE_B2_GRID)
+    return list(ABLATION_GRID)
+
+
+def build_plan(template_run_config: Path, python_bin: str, do_check: bool, plan_set: str = "loo") -> Dict[str, Any]:
     cfg = _read_json(template_run_config)
     base_cmd = _build_base_cmd(cfg, python_bin=python_bin)
+    grid = _grid_for_plan_set(plan_set)
 
     entries: List[Dict[str, Any]] = []
     run_dirs: List[Path] = []
-    for tag, lambdas in ABLATION_GRID:
+    for tag, lambdas in grid:
         cmd = list(base_cmd)
         cmd.extend(["--lambdas", lambdas])
         run_dir = _build_run_dir(cfg, lambdas=lambdas)
@@ -137,7 +152,8 @@ def build_plan(template_run_config: Path, python_bin: str, do_check: bool) -> Di
 
     payload: Dict[str, Any] = {
         "template_run_config": str(template_run_config),
-        "grid": [{"tag": tag, "lambdas": lambdas} for tag, lambdas in ABLATION_GRID],
+        "plan_set": str(plan_set),
+        "grid": [{"tag": tag, "lambdas": lambdas} for tag, lambdas in grid],
         "entries": entries,
     }
 
@@ -152,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--template-run-config", type=str, required=True)
     parser.add_argument("--python-bin", type=str, default="python")
+    parser.add_argument("--plan-set", type=str, default="loo", choices=["loo", "phase_b2"])
     parser.add_argument("--check", action="store_true", help="check whether generated run dirs already contain results")
     parser.add_argument("--output-json", type=str, default=None)
     return parser
@@ -164,6 +181,7 @@ def main() -> None:
         template_run_config=template_run_config,
         python_bin=str(args.python_bin),
         do_check=bool(args.check),
+        plan_set=str(args.plan_set),
     )
 
     out_json = Path(args.output_json) if args.output_json else (template_run_config.parent / "ablation_plan_helper.json")

@@ -41,8 +41,32 @@ def _write_run(run_dir: Path, *, lambdas: str, log_odds: float, runtime_seconds:
         "sample_id": "s1",
         "selected_chunk_ids": [0, 1],
         "chunk_ranking": [0, 1, 2],
+        "scores": {
+            "confidence": 0.8 if conf_calls > 0 else 0.0,
+            "effectiveness": 0.1,
+            "consistency": 0.2,
+            "collaboration": 0.05,
+            "total": (0.8 if conf_calls > 0 else 0.0) + 0.1 + 0.2 + 0.05,
+        },
         "metadata": {
             "elapsed_seconds": 2.0,
+            "component_profile": {
+                "component_enabled": {
+                    "confidence": conf_calls > 0,
+                    "effectiveness": True,
+                    "consistency": True,
+                    "collaboration": True,
+                },
+                "singleton_components": {
+                    "0": {
+                        "confidence": 0.8 if conf_calls > 0 else 0.0,
+                        "effectiveness": 0.0,
+                        "consistency": 0.4,
+                        "collaboration": 0.2,
+                        "total": (0.8 if conf_calls > 0 else 0.0) + 0.0 + 0.4 + 0.2,
+                    }
+                },
+            },
             "objective_compute_stats": {
                 "evaluate_gains_calls": 1,
                 "subset_cache_hit_rate": 0.3,
@@ -101,6 +125,12 @@ def test_ablation_summary_reports_zero_lambda_skip_check(tmp_path: Path) -> None
     assert checks["confidence"]["disabled"] is True
     assert checks["confidence"]["pass"] is True
     assert checks["all_disabled_components_pass"] is True
+    assert ablation_row["quality_first_pass"] is False
+    assert ablation_row["speed_first_pass"] is False
+    assert "singleton effectiveness=0 is expected by definition when subset size<=1" in ablation_row["analysis_notes"]
+    scale = ablation_row["score_scale_summary"]
+    assert float(scale["means"]["total_mean"]) > 0.0
+    assert float(scale["share_by_mean"]["confidence_share_by_mean"]) == 0.0
 
     gain = ablation_row["directional_gain_vs_full"]
     assert gain["log_odds"] < 0.0
