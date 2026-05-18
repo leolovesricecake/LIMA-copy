@@ -64,4 +64,10 @@ def test_explainer_records_component_profile_and_skip_stats() -> None:
     assert int(compute.get("confidence_compute_calls", 0)) == 0
     assert int(compute.get("confidence_skipped_due_to_zero_lambda", 0)) > 0
 
+    search_profile = result.metadata.get("search_profile", {})
+    assert search_profile
+    assert int(search_profile.get("steps_completed", 0)) >= 1
+    assert float(search_profile.get("gains_eval_seconds", 0.0)) >= 0.0
+    assert float(search_profile.get("argmax_seconds", 0.0)) >= 0.0
+
     assert float(result.scores["confidence"]) == 0.0

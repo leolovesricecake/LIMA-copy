@@ -363,6 +363,13 @@ def _normalize_prefetch_fallback_policy(raw: str | None) -> str:
     return policy
 
 
+def _safe_number(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
 def _prefetch_prob_cache(
     *,
     backbone,
@@ -504,6 +511,23 @@ def evaluate_saved_explanations(
         "missing_text_count": 0,
         "fallback_error_examples": [],
     }
+    search_profile_runtime = {
+        "samples_with_profile": 0,
+        "missing_profile_samples": 0,
+        "steps_completed": 0.0,
+        "candidates_evaluated_total": 0.0,
+        "remaining_build_calls": 0.0,
+        "remaining_build_seconds": 0.0,
+        "gains_eval_calls": 0.0,
+        "gains_eval_seconds": 0.0,
+        "argmax_calls": 0.0,
+        "argmax_seconds": 0.0,
+        "trace_write_calls": 0.0,
+        "trace_write_seconds": 0.0,
+        "evaluate_gains_path_calls": 0.0,
+        "evaluate_gain_path_calls": 0.0,
+        "search_name_counts": {},
+    }
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -526,6 +550,31 @@ def evaluate_saved_explanations(
         if sample_id not in sample_map:
             skipped_missing_sample_id += 1
             continue
+
+        search_meta = payload.get("metadata", {}).get("search_profile", {})
+        if isinstance(search_meta, dict) and search_meta:
+            search_profile_runtime["samples_with_profile"] += 1
+            for key in (
+                "steps_completed",
+                "candidates_evaluated_total",
+                "remaining_build_calls",
+                "remaining_build_seconds",
+                "gains_eval_calls",
+                "gains_eval_seconds",
+                "argmax_calls",
+                "argmax_seconds",
+                "trace_write_calls",
+                "trace_write_seconds",
+                "evaluate_gains_path_calls",
+                "evaluate_gain_path_calls",
+            ):
+                search_profile_runtime[key] = float(search_profile_runtime[key]) + _safe_number(search_meta.get(key), 0.0)
+            search_name = str(search_meta.get("search_name", "")).strip().lower()
+            if search_name:
+                name_counts = search_profile_runtime["search_name_counts"]
+                name_counts[search_name] = int(name_counts.get(search_name, 0)) + 1
+        else:
+            search_profile_runtime["missing_profile_samples"] += 1
 
         sample = sample_map[sample_id]
         t_unit = time.time()
@@ -702,6 +751,48 @@ def evaluate_saved_explanations(
         "missing_text_count": int(prefetch_runtime["missing_text_count"]),
         "fallback_error_examples": list(prefetch_runtime["fallback_error_examples"]),
     }
+    profiled_samples = int(search_profile_runtime["samples_with_profile"])
+    search_profile_stats = {
+        "samples_with_profile": profiled_samples,
+        "missing_profile_samples": int(search_profile_runtime["missing_profile_samples"]),
+        "search_name_counts": dict(search_profile_runtime["search_name_counts"]),
+        "steps_completed_total": int(search_profile_runtime["steps_completed"]),
+        "candidates_evaluated_total": int(search_profile_runtime["candidates_evaluated_total"]),
+        "remaining_build_calls_total": int(search_profile_runtime["remaining_build_calls"]),
+        "remaining_build_seconds_total": float(search_profile_runtime["remaining_build_seconds"]),
+        "gains_eval_calls_total": int(search_profile_runtime["gains_eval_calls"]),
+        "gains_eval_seconds_total": float(search_profile_runtime["gains_eval_seconds"]),
+        "argmax_calls_total": int(search_profile_runtime["argmax_calls"]),
+        "argmax_seconds_total": float(search_profile_runtime["argmax_seconds"]),
+        "trace_write_calls_total": int(search_profile_runtime["trace_write_calls"]),
+        "trace_write_seconds_total": float(search_profile_runtime["trace_write_seconds"]),
+        "evaluate_gains_path_calls_total": int(search_profile_runtime["evaluate_gains_path_calls"]),
+        "evaluate_gain_path_calls_total": int(search_profile_runtime["evaluate_gain_path_calls"]),
+        "steps_completed_mean": (
+            float(search_profile_runtime["steps_completed"]) / float(profiled_samples) if profiled_samples > 0 else 0.0
+        ),
+        "candidates_evaluated_mean": (
+            float(search_profile_runtime["candidates_evaluated_total"]) / float(profiled_samples)
+            if profiled_samples > 0
+            else 0.0
+        ),
+        "remaining_build_seconds_mean": (
+            float(search_profile_runtime["remaining_build_seconds"]) / float(profiled_samples)
+            if profiled_samples > 0
+            else 0.0
+        ),
+        "gains_eval_seconds_mean": (
+            float(search_profile_runtime["gains_eval_seconds"]) / float(profiled_samples) if profiled_samples > 0 else 0.0
+        ),
+        "argmax_seconds_mean": (
+            float(search_profile_runtime["argmax_seconds"]) / float(profiled_samples) if profiled_samples > 0 else 0.0
+        ),
+        "trace_write_seconds_mean": (
+            float(search_profile_runtime["trace_write_seconds"]) / float(profiled_samples)
+            if profiled_samples > 0
+            else 0.0
+        ),
+    }
     timing_breakdown_payload = {k: float(v) for k, v in timing_breakdown.items()}
     backbone_batch_stats = {
         "batch_calls": int(counter_delta.get("batch_calls", 0)),
@@ -759,6 +850,7 @@ def evaluate_saved_explanations(
             "cache_stats": cache_stats,
             "prefetch_stats": prefetch_stats,
             "backbone_batch_stats": backbone_batch_stats,
+            "search_profile": search_profile_stats,
         },
         "metrics_by_target": mode_reports,
         "dataset_diagnostics": {
@@ -784,5 +876,6 @@ def evaluate_saved_explanations(
         "cache_stats": cache_stats,
         "prefetch_stats": prefetch_stats,
         "backbone_batch_stats": backbone_batch_stats,
+        "search_profile": search_profile_stats,
     }
     return report

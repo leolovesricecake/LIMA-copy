@@ -115,6 +115,7 @@ class TextLIMAExplainer:
         objective_cache_stats: Dict[str, object] = {}
         objective_compute_stats: Dict[str, object] = {}
         component_profile: Dict[str, object] = {}
+        search_profile: Dict[str, object] = {}
         model_prefetch_seconds = 0.0
 
         if method == "ours":
@@ -150,19 +151,30 @@ class TextLIMAExplainer:
                 }
 
             if self.config.search == "greedy":
-                selected, trace = run_forward_greedy(objective, candidate_ids=candidate_ids, k=max_k)
+                selected, trace = run_forward_greedy(
+                    objective,
+                    candidate_ids=candidate_ids,
+                    k=max_k,
+                    profile=search_profile,
+                )
             elif self.config.search == "bidirectional":
-                selected, trace = run_bidirectional_search(objective, candidate_ids=candidate_ids, k=max_k)
+                selected, trace = run_bidirectional_search(
+                    objective,
+                    candidate_ids=candidate_ids,
+                    k=max_k,
+                    profile=search_profile,
+                )
             else:
                 raise ValueError(f"Unsupported search method: {self.config.search}")
 
-            selected_set = set(selected)
-            for cid in candidate_ids:
-                if int(cid) in singleton_gain:
-                    continue
-                gain, _, _ = objective.evaluate_gain([], int(cid))
-                singleton_gain[int(cid)] = float(gain)
+            if len(singleton_gain) != len(set(int(cid) for cid in candidate_ids)):
+                for cid in candidate_ids:
+                    if int(cid) in singleton_gain:
+                        continue
+                    gain, _, _ = objective.evaluate_gain([], int(cid))
+                    singleton_gain[int(cid)] = float(gain)
 
+            selected_set = set(selected)
             remaining = [cid for cid in candidate_ids if cid not in selected_set]
             remaining_sorted = sorted(remaining, key=lambda cid: (-singleton_gain[cid], cid))
             chunk_ranking = list(selected) + remaining_sorted
@@ -187,6 +199,7 @@ class TextLIMAExplainer:
             }
             objective_compute_stats = {
                 "evaluate_gains_calls": int(objective_cache_stats.get("evaluate_gains_calls", 0)),
+                "evaluate_gain_calls": int(objective_cache_stats.get("evaluate_gain_calls", 0)),
                 "subset_cache_hit_rate": float(objective_cache_stats.get("subset_cache_hit_rate", 0.0)),
                 "prob_cache_hit_rate": float(objective_cache_stats.get("prob_cache_hit_rate", 0.0)),
                 "embed_cache_hit_rate": float(objective_cache_stats.get("embed_cache_hit_rate", 0.0)),
@@ -299,6 +312,7 @@ class TextLIMAExplainer:
             "objective_cache_stats": objective_cache_stats,
             "objective_compute_stats": objective_compute_stats,
             "component_profile": component_profile,
+            "search_profile": search_profile,
             "chunk_count": len(chunks),
             "search": self.config.search,
             "k": self.config.k,

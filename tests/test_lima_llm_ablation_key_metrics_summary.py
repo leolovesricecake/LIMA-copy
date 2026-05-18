@@ -118,6 +118,7 @@ def test_ablation_summary_reports_zero_lambda_skip_check(tmp_path: Path) -> None
 
     report = mod.build_report(full_run, [drop_conf_run])
     assert len(report["rows"]) == 2
+    assert report["metric_directions"]["log_odds"] == "lower_is_better"
 
     ablation_row = report["rows"][1]
     assert ablation_row["disabled_components"] == ["confidence"]
@@ -133,4 +134,5 @@ def test_ablation_summary_reports_zero_lambda_skip_check(tmp_path: Path) -> None
     assert float(scale["share_by_mean"]["confidence_share_by_mean"]) == 0.0
 
     gain = ablation_row["directional_gain_vs_full"]
-    assert gain["log_odds"] < 0.0
+    assert gain["log_odds"] > 0.0
+    assert ablation_row["raw_delta_vs_full"]["log_odds"] < 0.0

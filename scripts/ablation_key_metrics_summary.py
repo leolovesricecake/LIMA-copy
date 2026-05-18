@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 COMPONENTS = ("confidence", "effectiveness", "consistency", "collaboration")
+METRIC_DIRECTIONS = {
+    "log_odds": "lower_is_better",
+    "comp": "higher_is_better",
+    "suff": "lower_is_better",
+    "a_c": "higher_is_better",
+    "a_s": "lower_is_better",
+}
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -59,8 +66,13 @@ def _gold_metrics(report: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _directional_gain(metric: str, baseline: float, current: float) -> float:
-    if metric in {"suff", "a_s"}:
+    direction = METRIC_DIRECTIONS.get(metric, "higher_is_better")
+    if direction == "lower_is_better":
         return baseline - current
+    return current - baseline
+
+
+def _raw_delta(baseline: float, current: float) -> float:
     return current - baseline
 
 
@@ -299,6 +311,9 @@ def _build_row(
     directional_gain = {
         key: _directional_gain(key, full_metrics[key], run_metrics[key]) for key in full_metrics
     }
+    raw_delta = {
+        key: _raw_delta(full_metrics[key], run_metrics[key]) for key in full_metrics
+    }
     improved = {key: (val > float(metric_tol)) for key, val in directional_gain.items()}
     regressed = {key: (val < -float(metric_tol)) for key, val in directional_gain.items()}
     improved_count = sum(1 for v in improved.values() if v)
@@ -335,6 +350,7 @@ def _build_row(
         "lambdas": list(run_lambdas),
         "disabled_components": disabled,
         "metrics": run_metrics,
+        "raw_delta_vs_full": raw_delta,
         "directional_gain_vs_full": directional_gain,
         "improved_flags": improved,
         "regressed_flags": regressed,
@@ -387,6 +403,8 @@ def build_report(
 
     return {
         "full_run_dir": str(full_run_dir),
+        "metric_directions": dict(METRIC_DIRECTIONS),
+        "directional_gain_definition": "positive means better under metric_directions",
         "metric_tolerance": float(metric_tol),
         "speed_min_ratio": float(speed_min_ratio),
         "full_metrics": full_row["metrics"],
@@ -398,6 +416,8 @@ def build_report(
 def _flatten_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for row in rows:
+        metrics = row.get("metrics", {})
+        raw_delta = row.get("raw_delta_vs_full", {})
         gain = row.get("directional_gain_vs_full", {})
         timing = row.get("timing", {})
         stability = row.get("stability_vs_full", {})
@@ -407,6 +427,16 @@ def _flatten_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "run_dir": row.get("run_dir"),
                 "lambdas": ",".join(str(x) for x in row.get("lambdas", [])),
                 "disabled_components": ",".join(row.get("disabled_components", [])),
+                "metric_log_odds": _safe_float(metrics.get("log_odds"), 0.0),
+                "metric_comp": _safe_float(metrics.get("comp"), 0.0),
+                "metric_suff": _safe_float(metrics.get("suff"), 0.0),
+                "metric_a_c": _safe_float(metrics.get("a_c"), 0.0),
+                "metric_a_s": _safe_float(metrics.get("a_s"), 0.0),
+                "delta_log_odds_raw": _safe_float(raw_delta.get("log_odds"), 0.0),
+                "delta_comp_raw": _safe_float(raw_delta.get("comp"), 0.0),
+                "delta_suff_raw": _safe_float(raw_delta.get("suff"), 0.0),
+                "delta_a_c_raw": _safe_float(raw_delta.get("a_c"), 0.0),
+                "delta_a_s_raw": _safe_float(raw_delta.get("a_s"), 0.0),
                 "gain_log_odds": _safe_float(gain.get("log_odds"), 0.0),
                 "gain_comp": _safe_float(gain.get("comp"), 0.0),
                 "gain_suff": _safe_float(gain.get("suff"), 0.0),
@@ -443,6 +473,16 @@ def _write_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
         "run_dir",
         "lambdas",
         "disabled_components",
+        "metric_log_odds",
+        "metric_comp",
+        "metric_suff",
+        "metric_a_c",
+        "metric_a_s",
+        "delta_log_odds_raw",
+        "delta_comp_raw",
+        "delta_suff_raw",
+        "delta_a_c_raw",
+        "delta_a_s_raw",
         "gain_log_odds",
         "gain_comp",
         "gain_suff",
