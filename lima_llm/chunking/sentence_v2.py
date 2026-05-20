@@ -1,149 +1,178 @@
 from __future__ import annotations
 
-import re
-from typing import Dict, List, Sequence, Tuple
+import importlib
+from typing import Any, Dict, List, Sequence, Tuple
 
 from ..types import TextChunk
-from .diagnostics import is_orphan_punctuation_chunk_text
-from .sentence import sentence_chunk
 
-_LEADING_CLOSE_PUNCT_RE = re.compile(r"^(\s*[\)\]\}]+\s*)(.*)$", flags=re.DOTALL)
-_ABBREVIATION_SINGLETON_RE = re.compile(r"^(mr|mrs|ms|dr|prof|st|jr|sr)\s*\.\s*$", flags=re.IGNORECASE)
+_PYSBD_INSTALL_HINT = "pip install pysbd==0.3.4"
 
 
-def _merge_orphan_punctuation_spans(
+def _load_pysbd_module() -> Any:
+    try:
+        return importlib.import_module("pysbd")
+    except Exception as exc:
+        raise RuntimeError(
+            "chunker=sentence_v2 requires optional dependency `pysbd` (MIT). "
+            f"Install with `{_PYSBD_INSTALL_HINT}`."
+        ) from exc
+
+
+def _build_segmenter(pysbd_module: Any, *, char_span: bool) -> Any:
+    kwargs: Dict[str, Any] = {"language": "en", "clean": False}
+    if char_span:
+        kwargs["char_span"] = True
+    try:
+        return pysbd_module.Segmenter(**kwargs)
+    except TypeError:
+        if char_span:
+            return None
+        raise
+
+
+def _repair_spans_to_full_coverage(
     text: str,
     spans: Sequence[Tuple[int, int]],
-) -> Tuple[List[Tuple[int, int]], int, int]:
+) -> List[Tuple[int, int]]:
+    text_len = len(text)
+    if text_len == 0:
+        return [(0, 0)]
     if not spans:
-        return [], 0, 0
-    merged: List[Tuple[int, int]] = []
-    orphan_merge_count = 0
-    orphan_before_count = 0
+        return [(0, text_len)]
+
+    normalized: List[Tuple[int, int]] = []
     for start, end in spans:
-        if end <= start:
+        s = max(0, min(int(start), text_len))
+        e = max(0, min(int(end), text_len))
+        if e <= s:
             continue
-        seg = text[start:end]
-        if is_orphan_punctuation_chunk_text(seg):
-            orphan_before_count += 1
-        if merged and is_orphan_punctuation_chunk_text(seg):
-            prev_start, _ = merged[-1]
-            merged[-1] = (prev_start, end)
-            orphan_merge_count += 1
-            continue
-        merged.append((start, end))
-    return merged, orphan_merge_count, orphan_before_count
+        normalized.append((s, e))
+    if not normalized:
+        return [(0, text_len)]
+
+    normalized.sort(key=lambda x: (x[0], x[1]))
+
+    starts: List[int] = []
+    prev = 0
+    for idx, (start, _end) in enumerate(normalized):
+        cur = start
+        if idx == 0:
+            cur = 0
+        elif cur < prev:
+            cur = prev
+        starts.append(cur)
+        prev = cur
+
+    repaired: List[Tuple[int, int]] = []
+    for idx in range(len(normalized)):
+        start = starts[idx]
+        end = starts[idx + 1] if idx < len(normalized) - 1 else text_len
+        if end > start:
+            repaired.append((start, end))
+    if not repaired:
+        repaired = [(0, text_len)]
+    return repaired
 
 
-def _spans_to_chunks(text: str, spans: Sequence[Tuple[int, int]]) -> List[TextChunk]:
+def _validate_char_spans(text: str, span_rows: Sequence[Any]) -> List[Tuple[int, int]] | None:
+    text_len = len(text)
+    spans: List[Tuple[int, int]] = []
+    prev_end = 0
+    for row in span_rows:
+        start = getattr(row, "start", None)
+        end = getattr(row, "end", None)
+        sent = getattr(row, "sent", None)
+        if start is None or end is None:
+            return None
+        try:
+            s = int(start)
+            e = int(end)
+        except Exception:
+            return None
+        if s < 0 or e < s or e > text_len:
+            return None
+        if s < prev_end:
+            return None
+        if sent is not None:
+            seg = text[s:e]
+            if str(sent) != seg:
+                return None
+        if e > s:
+            spans.append((s, e))
+            prev_end = e
+    return spans
+
+
+def _spans_from_segments_by_cursor(
+    text: str,
+    segments: Sequence[str],
+) -> List[Tuple[int, int]]:
+    spans: List[Tuple[int, int]] = []
+    cursor = 0
+    for seg in segments:
+        sent = str(seg)
+        if sent == "":
+            continue
+        pos = text.find(sent, cursor)
+        if pos < 0:
+            return [(0, len(text))]
+        end = pos + len(sent)
+        spans.append((pos, end))
+        cursor = end
+    return spans
+
+
+def sentence_chunk_v2_with_stats(text: str) -> Tuple[List[TextChunk], Dict[str, object]]:
+    pysbd_module = _load_pysbd_module()
+    segment_count = 0
+    used_char_span = False
+    used_span_rebuild = False
+
+    spans: List[Tuple[int, int]] = []
+
+    char_span_segmenter = _build_segmenter(pysbd_module, char_span=True)
+    if char_span_segmenter is not None:
+        try:
+            char_rows = list(char_span_segmenter.segment(text))
+        except Exception:
+            char_rows = []
+        segment_count = len(char_rows)
+        validated = _validate_char_spans(text, char_rows)
+        if validated:
+            spans = validated
+            used_char_span = True
+
+    if not spans:
+        segmenter = _build_segmenter(pysbd_module, char_span=False)
+        raw_segments = list(segmenter.segment(text))
+        segment_count = len(raw_segments)
+        spans = _spans_from_segments_by_cursor(text, raw_segments)
+        used_span_rebuild = True
+
+    spans = _repair_spans_to_full_coverage(text, spans)
+
     chunks: List[TextChunk] = []
-    for idx, (chunk_start, chunk_end) in enumerate(spans):
+    for idx, (start, end) in enumerate(spans):
         chunks.append(
             TextChunk(
                 chunk_id=idx,
-                start_char=chunk_start,
-                end_char=chunk_end,
-                text=text[chunk_start:chunk_end],
+                start_char=int(start),
+                end_char=int(end),
+                text=text[int(start) : int(end)],
             )
         )
-    return chunks
 
-
-def _fix_leading_close_punct_spans(
-    text: str,
-    spans: Sequence[Tuple[int, int]],
-) -> Tuple[List[Tuple[int, int]], int]:
-    if len(spans) <= 1:
-        return list(spans), 0
-
-    fixed: List[Tuple[int, int]] = []
-    fix_count = 0
-    for start, end in spans:
-        if not fixed:
-            fixed.append((start, end))
-            continue
-
-        seg = text[start:end]
-        match = _LEADING_CLOSE_PUNCT_RE.match(seg)
-        if not match:
-            fixed.append((start, end))
-            continue
-
-        prefix = match.group(1)
-        rest = match.group(2)
-        if prefix.strip() == "" or rest.strip() == "":
-            fixed.append((start, end))
-            continue
-
-        prefix_len = len(prefix)
-        prev_start, prev_end = fixed[-1]
-        fixed[-1] = (prev_start, prev_end + prefix_len)
-
-        new_start = start + prefix_len
-        if new_start < end:
-            fixed.append((new_start, end))
-        fix_count += 1
-
-    return fixed, fix_count
-
-
-def _is_abbreviation_singleton_text(text: str) -> bool:
-    normalized = text.replace("\n", " ").strip()
-    if normalized == "":
-        return False
-    return _ABBREVIATION_SINGLETON_RE.fullmatch(normalized) is not None
-
-
-def _merge_abbreviation_singleton_spans(
-    text: str,
-    spans: Sequence[Tuple[int, int]],
-) -> Tuple[List[Tuple[int, int]], int]:
-    if len(spans) <= 1:
-        return list(spans), 0
-
-    merged: List[Tuple[int, int]] = []
-    merge_count = 0
-    i = 0
-    while i < len(spans):
-        start, end = spans[i]
-        seg = text[start:end]
-        if i + 1 < len(spans) and _is_abbreviation_singleton_text(seg):
-            _, next_end = spans[i + 1]
-            merged.append((start, next_end))
-            merge_count += 1
-            i += 2
-            continue
-        merged.append((start, end))
-        i += 1
-
-    return merged, merge_count
-
-
-def sentence_chunk_v2_with_stats(text: str) -> Tuple[List[TextChunk], Dict[str, int]]:
-    """
-    Safe v2: keep sentence boundary behavior aligned with sentence_chunk,
-    and only merge orphan punctuation-only chunks into previous chunk.
-    """
-    base_chunks = sentence_chunk(text)
-    spans = [(int(chunk.start_char), int(chunk.end_char)) for chunk in base_chunks]
-
-    merged_spans, orphan_merge_count, orphan_before_count = _merge_orphan_punctuation_spans(text, spans)
-    leading_close_fixed_spans, leading_close_fix_count = _fix_leading_close_punct_spans(text, merged_spans)
-    abbreviation_merged_spans, abbreviation_merge_count = _merge_abbreviation_singleton_spans(
-        text,
-        leading_close_fixed_spans,
-    )
-    if not abbreviation_merged_spans:
-        abbreviation_merged_spans = [(0, len(text))]
-
-    chunks = _spans_to_chunks(text, abbreviation_merged_spans)
-    orphan_after_count = sum(1 for chunk in chunks if is_orphan_punctuation_chunk_text(chunk.text))
+    # Keep legacy keys for compatibility even though v2 no longer uses merge-based post-fixes.
     stats = {
-        "orphan_merge_count": int(orphan_merge_count),
-        "orphan_chunks_before_merge": int(orphan_before_count),
-        "orphan_chunks_after_merge": int(orphan_after_count),
-        "leading_close_punct_fix_count": int(leading_close_fix_count),
-        "abbreviation_merge_count": int(abbreviation_merge_count),
+        "orphan_merge_count": 0,
+        "orphan_chunks_before_merge": 0,
+        "orphan_chunks_after_merge": 0,
+        "leading_close_punct_fix_count": 0,
+        "abbreviation_merge_count": 0,
+        "sentence_backend": "pysbd",
+        "sentence_backend_char_span_used": bool(used_char_span),
+        "sentence_backend_span_rebuild_used": bool(used_span_rebuild),
+        "sentence_backend_segment_count": int(segment_count),
     }
     return chunks, stats
 
