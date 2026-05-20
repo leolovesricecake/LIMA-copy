@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mock-backbone", action="store_true")
 
     parser.add_argument("--k", type=int, default=8)
-    parser.add_argument("--lambdas", type=str, default="1,1,0,1")
+    parser.add_argument("--lambdas", type=str, default="1,1,1,1")
     parser.add_argument("--chunker", type=str, default="sentence", choices=["sentence", "sentence_v2", "fixed_token"])
     parser.add_argument("--fixed-token-size", type=int, default=64)
     parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])

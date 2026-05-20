@@ -60,12 +60,6 @@ class TextSubmodularObjective:
         self._complement_text_cache: Dict[Tuple[int, ...], str] = {}
         self._all_chunk_ids: Tuple[int, ...] = tuple(sorted(int(chunk.chunk_id) for chunk in self.chunks))
         self._chunk_text_by_id: Dict[int, str] = {int(chunk.chunk_id): chunk.text for chunk in self.chunks}
-        self._all_chunk_texts_in_order: Tuple[str, ...] = tuple(
-            self._chunk_text_by_id[idx] for idx in self._all_chunk_ids if idx in self._chunk_text_by_id
-        )
-        self._full_chunk_text: str = "".join(self._all_chunk_texts_in_order) if self._all_chunk_texts_in_order else ""
-        if self._full_chunk_text == "":
-            self._full_chunk_text = self.empty_text_token
         self._component_enabled: Dict[str, bool] = {
             "confidence": float(self.weights.lambda1) != 0.0,
             "effectiveness": float(self.weights.lambda2) != 0.0,
@@ -140,8 +134,6 @@ class TextSubmodularObjective:
         self._stats["subset_text_cache_misses"] = int(self._stats["subset_text_cache_misses"]) + 1
         if len(subset_key) == 0:
             text = self.empty_text_token
-        elif len(subset_key) >= len(self._all_chunk_ids):
-            text = self._full_chunk_text
         else:
             text = "".join(self._chunk_text_by_id[idx] for idx in subset_key if idx in self._chunk_text_by_id)
             if text == "":
@@ -156,28 +148,18 @@ class TextSubmodularObjective:
             return cached
         self._stats["complement_text_cache_misses"] = int(self._stats["complement_text_cache_misses"]) + 1
 
-        if len(subset_key) == 0:
-            text = self._full_chunk_text
-            self._complement_text_cache[subset_key] = text
-            return text
-        if len(subset_key) >= len(self._all_chunk_ids):
-            text = self.empty_text_token
-            self._complement_text_cache[subset_key] = text
-            return text
-
-        parts: List[str] = []
+        complement_ids: List[int] = []
         cursor = 0
         subset_len = len(subset_key)
-        for idx, cid in enumerate(self._all_chunk_ids):
+        for cid in self._all_chunk_ids:
             while cursor < subset_len and subset_key[cursor] < cid:
                 cursor += 1
             if cursor < subset_len and subset_key[cursor] == cid:
                 cursor += 1
                 continue
-            if idx < len(self._all_chunk_texts_in_order):
-                parts.append(self._all_chunk_texts_in_order[idx])
+            complement_ids.append(cid)
 
-        text = "".join(parts)
+        text = "".join(self._chunk_text_by_id[idx] for idx in complement_ids)
         if text == "":
             text = self.empty_text_token
         self._complement_text_cache[subset_key] = text

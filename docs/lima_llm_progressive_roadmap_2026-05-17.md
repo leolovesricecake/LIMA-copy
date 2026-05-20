@@ -64,7 +64,7 @@
   - 完整法：`[1,1,1,1]`。
   - 逐项移除：`[0,1,1,1]`、`[1,0,1,1]`、`[1,1,0,1]`、`[1,1,1,0]`。
   - 结合 `lambda_sweep_report.py` 与 `trace_component_profile.py` 输出：
-    - 五指标方向变化（`log_odds↓ / comp↑ / suff↓ / a-c↑ / a-s↓`）。
+    - 五指标方向变化（`log_odds↑ / comp↑ / suff↓ / a-c↑ / a-s↓`）。
     - 与 `selected_chunk_ids/chunk_ranking` 稳定性关系。
 - 形成一版“推荐权重区间”而非单点结论。
 
@@ -133,3 +133,4 @@
 - 原则2：先小样本验证语义，再大样本验证速度。  
 - 原则3：环境变化（GPU/deterministic/commit）必须显式披露，不能与算法结论混写。  
 - 原则4：当前主线不为分钟级提速牺牲解释正确性与指标稳定性。  
+

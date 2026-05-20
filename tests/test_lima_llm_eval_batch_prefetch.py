@@ -77,7 +77,7 @@ def test_eval_batch_prefetch_keeps_metrics_identical(monkeypatch, tmp_path: Path
         ]
     )
 
-    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-0-1_seed-42_method-ours"))
+    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-1-1_seed-42_method-ours"))
     bundle = load_dataset_bundle(
         dataset_name="eraser_movie_reviews",
         split="validation",
@@ -160,7 +160,7 @@ def test_eval_prefetch_length_sort_env_is_deprecated_noop(monkeypatch, tmp_path:
         ]
     )
 
-    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-0-1_seed-42_method-ours"))
+    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-1-1_seed-42_method-ours"))
     bundle = load_dataset_bundle(
         dataset_name="eraser_movie_reviews",
         split="validation",
@@ -248,7 +248,7 @@ def test_eval_prefetch_warn_policy_records_fallback(monkeypatch, tmp_path: Path)
         ]
     )
 
-    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-0-1_seed-42_method-ours"))
+    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-1-1_seed-42_method-ours"))
     bundle = load_dataset_bundle(
         dataset_name="eraser_movie_reviews",
         split="validation",
@@ -299,7 +299,7 @@ def test_eval_prefetch_fail_policy_raises(monkeypatch, tmp_path: Path) -> None:
         ]
     )
 
-    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-0-1_seed-42_method-ours"))
+    run_dir = next(results_root.glob("**/chunk-sentence_search-greedy_k-2_lam-1-1-1-1_seed-42_method-ours"))
     bundle = load_dataset_bundle(
         dataset_name="eraser_movie_reviews",
         split="validation",

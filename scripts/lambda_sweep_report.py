@@ -8,14 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-METRIC_DIRECTIONS = {
-    "log_odds": "lower_is_better",
-    "comp": "higher_is_better",
-    "suff": "lower_is_better",
-    "a_c": "higher_is_better",
-    "a_s": "lower_is_better",
-}
-
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
     try:
@@ -62,9 +54,9 @@ def _gold_metrics(report: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _directional_gain(metric: str, baseline: float, current: float) -> float:
-    # Positive means better under METRIC_DIRECTIONS.
-    direction = METRIC_DIRECTIONS.get(metric, "higher_is_better")
-    if direction == "lower_is_better":
+    # Positive means better under the chosen policy:
+    # log_odds↑, comp↑, suff↓, a-c↑, a-s↓
+    if metric in {"suff", "a_s"}:
         return baseline - current
     return current - baseline
 
@@ -268,8 +260,6 @@ def main() -> None:
 
     payload = {
         "baseline_run_dir": str(baseline_run_dir),
-        "metric_directions": dict(METRIC_DIRECTIONS),
-        "directional_gain_definition": "positive means better under metric_directions",
         "metric_tolerance": float(args.metric_tol),
         "trace_tolerance": float(args.trace_tol),
         "candidate_count": len(rows),
