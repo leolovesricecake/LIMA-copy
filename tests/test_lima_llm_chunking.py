@@ -4,6 +4,8 @@ import types
 
 import pytest
 
+from lima_llm.chunking import adaptive as adaptive_mod
+from lima_llm.chunking.diagnostics import is_orphan_punctuation_chunk_text
 from lima_llm.chunking.factory import build_chunker
 from lima_llm.chunking.sentence_v2 import sentence_chunk_v2_with_stats
 from lima_llm.chunking.utils import validate_chunk_coverage
@@ -166,3 +168,68 @@ def test_sentence_v2_fail_fast_when_pysbd_missing(monkeypatch: pytest.MonkeyPatc
     )
     with pytest.raises(RuntimeError, match="pip install pysbd==0.3.4"):
         _ = sentence_chunk_v2_with_stats("A. B.")
+
+
+def _make_word_text(word_count: int) -> str:
+    return " ".join(f"w{i}" for i in range(word_count)) + "."
+
+
+def test_adaptive_bucket_routing_balanced_profile() -> None:
+    for word_count, expected_bucket in [
+        (80, "short"),
+        (200, "medium"),
+        (500, "long"),
+        (1200, "very_long"),
+    ]:
+        text = _make_word_text(word_count)
+        _, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+        assert stats["adaptive_bucket"] == expected_bucket
+        assert stats["adaptive_features"]["word_count"] == word_count
+
+
+def test_adaptive_invalid_orphan_chunk_is_merged(monkeypatch: pytest.MonkeyPatch) -> None:
+    text = "Alpha beta.\n.\nGamma delta epsilon zeta eta theta iota kappa lambda mu."
+    dot_start = text.index("\n.\n") + 1
+    dot_end = dot_start + 2
+
+    def _fake_initial(_text: str, bucket: str):
+        return (
+            [(0, dot_start), (dot_start, dot_end), (dot_end, len(_text))],
+            {
+                "adaptive_sentence_backend": "none",
+                "adaptive_sentence_backend_fallback_used": False,
+                "adaptive_sentence_backend_calls": 0,
+            },
+        )
+
+    monkeypatch.setattr(adaptive_mod, "_initial_spans_for_bucket", _fake_initial)
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert int(stats["adaptive_postprocess"]["invalid_merge_count"]) >= 1
+    assert not any(is_orphan_punctuation_chunk_text(chunk.text) for chunk in chunks)
+
+
+def test_adaptive_long_chunk_is_split_with_word_window() -> None:
+    text = _make_word_text(220)
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert int(stats["adaptive_postprocess"]["long_split_count"]) >= 1
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) > 1
+    assert all(len(chunk.text.split()) <= 80 for chunk in chunks)
+
+
+def test_adaptive_sentence_backend_falls_back_to_regex_when_pysbd_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        adaptive_mod.importlib,
+        "import_module",
+        lambda _name: (_ for _ in ()).throw(ModuleNotFoundError("No module named 'pysbd'")),
+    )
+    text = _make_word_text(120)
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "medium"
+    assert str(stats["adaptive_sentence_backend"]) == "regex_sentence"
+    assert bool(stats["adaptive_sentence_backend_fallback_used"]) is True

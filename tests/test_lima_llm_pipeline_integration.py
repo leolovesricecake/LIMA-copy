@@ -104,6 +104,45 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
         assert "timing" in prov
 
 
+def test_pipeline_adaptive_chunker_emits_adaptive_diagnostics(tmp_path: Path) -> None:
+    eraser_root = tmp_path / "eraser"
+    _build_tiny_eraser(eraser_root)
+
+    out = tmp_path / "results_adaptive"
+    argv = [
+        "--dataset",
+        "eraser_movie_reviews",
+        "--split",
+        "validation",
+        "--eraser-root",
+        str(eraser_root),
+        "--mock-backbone",
+        "--chunker",
+        "adaptive",
+        "--adaptive-profile",
+        "balanced",
+        "--search",
+        "greedy",
+        "--k",
+        "2",
+        "--output-dir",
+        str(out),
+    ]
+    main(argv)
+
+    sample_jsons = list(out.glob("**/samples/*.json"))
+    assert len(sample_jsons) == 2
+    sample_payload = json.loads(sample_jsons[0].read_text(encoding="utf-8"))
+    chunk_diag = sample_payload.get("metadata", {}).get("chunk_diagnostics", {})
+    assert chunk_diag.get("chunk_strategy_requested") == "adaptive"
+    assert chunk_diag.get("adaptive_enabled") is True
+    assert chunk_diag.get("adaptive_profile") == "balanced"
+    assert chunk_diag.get("adaptive_bucket") in {"short", "medium", "long", "very_long"}
+    assert "adaptive_features" in chunk_diag
+    assert "adaptive_postprocess" in chunk_diag
+    assert "adaptive_stage_chunk_counts" in chunk_diag
+
+
 def test_pipeline_eval_granularity_word_override(tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser"
     _build_tiny_eraser(eraser_root)

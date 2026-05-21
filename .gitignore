@@ -13,6 +13,7 @@ lima_llm_results*
 **cache**
 __pycache__/
 .pytest_cache/
+.venv/
 
 *.png
 *.JPEG

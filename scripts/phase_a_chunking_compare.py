@@ -147,6 +147,91 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _aggregate_adaptive_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    diags: List[Dict[str, Any]] = []
+    for payload in samples.values():
+        diag = payload.get("metadata", {}).get("chunk_diagnostics")
+        if isinstance(diag, dict):
+            diags.append(diag)
+
+    if not diags:
+        return {
+            "samples_with_chunk_diagnostics": 0,
+            "adaptive_enabled_samples": 0,
+            "adaptive_enabled_ratio": 0.0,
+            "adaptive_bucket_counts": {},
+            "adaptive_bucket_ratios": {},
+            "postprocess_invalid_merge_mean": 0.0,
+            "postprocess_short_merge_mean": 0.0,
+            "postprocess_long_split_mean": 0.0,
+            "postprocess_invalid_merge_trigger_ratio": 0.0,
+            "postprocess_short_merge_trigger_ratio": 0.0,
+            "postprocess_long_split_trigger_ratio": 0.0,
+            "stage_raw_mean": 0.0,
+            "stage_after_invalid_mean": 0.0,
+            "stage_after_short_mean": 0.0,
+            "stage_after_long_mean": 0.0,
+            "stage_final_mean": 0.0,
+            "stage_raw_to_final_delta_mean": 0.0,
+        }
+
+    bucket_counts: Dict[str, int] = {}
+    adaptive_enabled = 0
+    invalid_values: List[float] = []
+    short_values: List[float] = []
+    long_values: List[float] = []
+    stage_raw_values: List[float] = []
+    stage_after_invalid_values: List[float] = []
+    stage_after_short_values: List[float] = []
+    stage_after_long_values: List[float] = []
+    stage_final_values: List[float] = []
+
+    for diag in diags:
+        enabled = bool(diag.get("adaptive_enabled", False))
+        if enabled:
+            adaptive_enabled += 1
+        bucket = str(diag.get("adaptive_bucket", "unknown"))
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+
+        post = diag.get("adaptive_postprocess", {})
+        if not isinstance(post, dict):
+            post = {}
+        invalid_values.append(_safe_float(post.get("invalid_merge_count"), 0.0))
+        short_values.append(_safe_float(post.get("short_merge_count"), 0.0))
+        long_values.append(_safe_float(post.get("long_split_count"), 0.0))
+
+        stage = diag.get("adaptive_stage_chunk_counts", {})
+        if not isinstance(stage, dict):
+            stage = {}
+        stage_raw_values.append(_safe_float(stage.get("raw"), 0.0))
+        stage_after_invalid_values.append(_safe_float(stage.get("after_invalid"), 0.0))
+        stage_after_short_values.append(_safe_float(stage.get("after_short"), 0.0))
+        stage_after_long_values.append(_safe_float(stage.get("after_long"), 0.0))
+        stage_final_values.append(_safe_float(stage.get("final"), _safe_float(diag.get("chunk_count"), 0.0)))
+
+    denom = float(len(diags))
+    bucket_ratios = {k: float(v / denom) for k, v in sorted(bucket_counts.items())}
+    return {
+        "samples_with_chunk_diagnostics": int(len(diags)),
+        "adaptive_enabled_samples": int(adaptive_enabled),
+        "adaptive_enabled_ratio": float(adaptive_enabled / denom),
+        "adaptive_bucket_counts": dict(sorted(bucket_counts.items())),
+        "adaptive_bucket_ratios": bucket_ratios,
+        "postprocess_invalid_merge_mean": float(sum(invalid_values) / denom),
+        "postprocess_short_merge_mean": float(sum(short_values) / denom),
+        "postprocess_long_split_mean": float(sum(long_values) / denom),
+        "postprocess_invalid_merge_trigger_ratio": float(sum(1 for x in invalid_values if x > 0.0) / denom),
+        "postprocess_short_merge_trigger_ratio": float(sum(1 for x in short_values if x > 0.0) / denom),
+        "postprocess_long_split_trigger_ratio": float(sum(1 for x in long_values if x > 0.0) / denom),
+        "stage_raw_mean": float(sum(stage_raw_values) / denom),
+        "stage_after_invalid_mean": float(sum(stage_after_invalid_values) / denom),
+        "stage_after_short_mean": float(sum(stage_after_short_values) / denom),
+        "stage_after_long_mean": float(sum(stage_after_long_values) / denom),
+        "stage_final_mean": float(sum(stage_final_values) / denom),
+        "stage_raw_to_final_delta_mean": float((sum(stage_final_values) - sum(stage_raw_values)) / denom),
+    }
+
+
 def _explain_seconds_total(samples: Dict[str, Dict[str, Any]]) -> float:
     return float(
         sum(_safe_float(payload.get("metadata", {}).get("elapsed_seconds"), 0.0) for payload in samples.values())
@@ -324,6 +409,10 @@ def build_report(baseline_run_dir: Path, candidate_run_dir: Path, trace_toleranc
             "baseline": _aggregate_chunk_diag(baseline_samples),
             "candidate": _aggregate_chunk_diag(candidate_samples),
         },
+        "adaptive_diagnostics": {
+            "baseline": _aggregate_adaptive_diag(baseline_samples),
+            "candidate": _aggregate_adaptive_diag(candidate_samples),
+        },
         "explanation_drift": _drift_summary(
             baseline_samples=baseline_samples,
             candidate_samples=candidate_samples,
@@ -401,6 +490,18 @@ def main() -> None:
         ],
         "baseline_fallback_rate": report["chunk_diagnostics"]["baseline"]["fallback_rate"],
         "candidate_fallback_rate": report["chunk_diagnostics"]["candidate"]["fallback_rate"],
+        "baseline_adaptive_enabled_ratio": report["adaptive_diagnostics"]["baseline"]["adaptive_enabled_ratio"],
+        "candidate_adaptive_enabled_ratio": report["adaptive_diagnostics"]["candidate"]["adaptive_enabled_ratio"],
+        "baseline_adaptive_stage_raw_mean": report["adaptive_diagnostics"]["baseline"]["stage_raw_mean"],
+        "candidate_adaptive_stage_raw_mean": report["adaptive_diagnostics"]["candidate"]["stage_raw_mean"],
+        "baseline_adaptive_stage_final_mean": report["adaptive_diagnostics"]["baseline"]["stage_final_mean"],
+        "candidate_adaptive_stage_final_mean": report["adaptive_diagnostics"]["candidate"]["stage_final_mean"],
+        "baseline_adaptive_long_split_trigger_ratio": report["adaptive_diagnostics"]["baseline"][
+            "postprocess_long_split_trigger_ratio"
+        ],
+        "candidate_adaptive_long_split_trigger_ratio": report["adaptive_diagnostics"]["candidate"][
+            "postprocess_long_split_trigger_ratio"
+        ],
         "boundary_jaccard_mean": report["boundary_drift"]["boundary_jaccard_mean"],
         "boundary_jaccard_median": report["boundary_drift"]["boundary_jaccard_median"],
         "boundary_shift_chars_mean": report["boundary_drift"]["boundary_shift_chars_mean"],

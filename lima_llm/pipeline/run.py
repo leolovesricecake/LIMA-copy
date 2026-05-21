@@ -44,8 +44,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--k", type=int, default=8)
     parser.add_argument("--lambdas", type=str, default="1,1,1,1")
-    parser.add_argument("--chunker", type=str, default="sentence", choices=["sentence", "sentence_v2", "fixed_token"])
+    parser.add_argument(
+        "--chunker",
+        type=str,
+        default="sentence",
+        choices=["sentence", "sentence_v2", "fixed_token", "adaptive"],
+    )
     parser.add_argument("--fixed-token-size", type=int, default=64)
+    parser.add_argument(
+        "--adaptive-profile",
+        type=str,
+        default="balanced",
+        choices=["conservative", "balanced", "aggressive"],
+    )
     parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])
 
     parser.add_argument("--seed", type=int, default=42)
@@ -154,6 +165,7 @@ def main(argv: List[str] | None = None) -> None:
         method=args.chunker,
         tokenizer=getattr(backbone, "tokenizer", None),
         fixed_token_size=args.fixed_token_size,
+        adaptive_profile=args.adaptive_profile,
     )
 
     config = ExplainerConfig(

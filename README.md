@@ -31,7 +31,9 @@ bash scripts/run_lima_llm_v1.sh \
 ```
 
 `--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
-`--chunker` 当前支持 `sentence/sentence_v2/fixed_token`，其中 `sentence_v2` 使用 `PySBD`（`pysbd==0.3.4`）作为分句后端。若未安装 `pysbd`，`sentence_v2` 会 fail-fast 并提示安装命令。
+`--chunker` 当前支持 `sentence/sentence_v2/fixed_token/adaptive`。
+- `sentence_v2` 使用 `PySBD`（`pysbd==0.3.4`）作为分句后端。若未安装 `pysbd`，`sentence_v2` 会 fail-fast 并提示安装命令。
+- `adaptive` 为低成本自适应切分策略，可用 `--adaptive-profile conservative|balanced|aggressive` 控制分层阈值（默认 `balanced`）。
 安装示例：`pip install pysbd==0.3.4`
 
 `--deterministic` 可开启更强确定性设置（用于回归对账/复现实验）。运行产物 `run_config.json`、`eval_config.json`、`eval_report.json` 会包含 `provenance` 字段（git/命令/环境/时间信息）。
