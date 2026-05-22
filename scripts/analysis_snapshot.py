@@ -91,6 +91,18 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
     orphan_merge_samples = 0
     cross_newline_total = 0.0
     cross_newline_samples = 0
+    chunk_feature_samples = 0
+    chunk_feature_chunk_total = 0
+    chunk_feature_char_lens: List[float] = []
+    chunk_feature_word_counts: List[float] = []
+    chunk_feature_punct_counts: List[float] = []
+    chunk_feature_newline_counts: List[float] = []
+    chunk_feature_orphan_count = 0
+    chunk_feature_leading_close_count = 0
+    chunk_feature_alignment_modes: Counter[str] = Counter()
+    chunk_feature_alignment_fallback_samples = 0
+    chunk_feature_token_coverage_ratios: List[float] = []
+    chunk_feature_aligned_chunk_ratios: List[float] = []
     forward_final = {
         "predict_calls": 0,
         "embed_calls": 0,
@@ -134,6 +146,33 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             if cross_val > 0.0:
                 cross_newline_samples += 1
 
+        chunk_features_by_id = meta.get("chunk_features_by_id")
+        chunk_feature_coverage = meta.get("chunk_feature_coverage")
+        if isinstance(chunk_features_by_id, dict):
+            chunk_feature_samples += 1
+            for feat in chunk_features_by_id.values():
+                if not isinstance(feat, dict):
+                    continue
+                chunk_feature_chunk_total += 1
+                chunk_feature_char_lens.append(_safe_float(feat.get("char_len"), 0.0))
+                chunk_feature_word_counts.append(_safe_float(feat.get("word_count"), 0.0))
+                chunk_feature_punct_counts.append(_safe_float(feat.get("punct_count"), 0.0))
+                chunk_feature_newline_counts.append(_safe_float(feat.get("newline_count"), 0.0))
+                if bool(feat.get("orphan_punctuation", False)):
+                    chunk_feature_orphan_count += 1
+                if bool(feat.get("leading_close_punct", False)):
+                    chunk_feature_leading_close_count += 1
+        if isinstance(chunk_feature_coverage, dict):
+            chunk_feature_alignment_modes[str(chunk_feature_coverage.get("token_alignment_mode", "unknown"))] += 1
+            if bool(chunk_feature_coverage.get("token_alignment_fallback_used", False)):
+                chunk_feature_alignment_fallback_samples += 1
+            chunk_feature_token_coverage_ratios.append(
+                _safe_float(chunk_feature_coverage.get("token_coverage_ratio"), 0.0)
+            )
+            chunk_feature_aligned_chunk_ratios.append(
+                _safe_float(chunk_feature_coverage.get("aligned_chunk_ratio"), 0.0)
+            )
+
         fc = meta.get("forward_counters", {})
         for key in forward_final:
             forward_final[key] = max(forward_final[key], int(_safe_float(fc.get(key), 0.0)))
@@ -169,6 +208,22 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
                 "cross_newline_chunks_mean": 0.0,
                 "cross_newline_samples_ratio": 0.0,
             },
+            "chunk_feature_stats": {
+                "samples_with_chunk_features": 0,
+                "chunk_total": 0,
+                "char_len_mean": 0.0,
+                "char_len_p90": 0.0,
+                "word_count_mean": 0.0,
+                "word_count_p90": 0.0,
+                "punct_count_mean": 0.0,
+                "newline_count_mean": 0.0,
+                "orphan_punctuation_ratio": 0.0,
+                "leading_close_punct_ratio": 0.0,
+                "token_alignment_mode_counts": {},
+                "token_alignment_fallback_rate": 0.0,
+                "token_coverage_ratio_mean": 0.0,
+                "aligned_chunk_ratio_mean": 0.0,
+            },
         }
 
     elapsed_sorted = sorted(elapsed)
@@ -183,6 +238,8 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
     subset_requested = int(cache_totals["subset_requested"])
     prob_total = int(cache_totals["prob_cache_hits"] + cache_totals["prob_cache_misses"])
     embed_total = int(cache_totals["embed_cache_hits"] + cache_totals["embed_cache_misses"])
+    chunk_feature_chunk_denom = float(max(1, chunk_feature_chunk_total))
+    chunk_feature_sample_denom = float(max(1, chunk_feature_samples))
 
     return {
         "sample_count": n,
@@ -246,6 +303,48 @@ def _collect_explain_stats(sample_dir: Path) -> Dict[str, Any]:
             "cross_newline_samples_ratio": (
                 float(cross_newline_samples) / float(chunk_diag_samples)
                 if chunk_diag_samples > 0
+                else 0.0
+            ),
+        },
+        "chunk_feature_stats": {
+            "samples_with_chunk_features": int(chunk_feature_samples),
+            "chunk_total": int(chunk_feature_chunk_total),
+            "char_len_mean": (
+                float(sum(chunk_feature_char_lens) / float(len(chunk_feature_char_lens)))
+                if chunk_feature_char_lens
+                else 0.0
+            ),
+            "char_len_p90": _percentile(sorted(chunk_feature_char_lens), 0.90),
+            "word_count_mean": (
+                float(sum(chunk_feature_word_counts) / float(len(chunk_feature_word_counts)))
+                if chunk_feature_word_counts
+                else 0.0
+            ),
+            "word_count_p90": _percentile(sorted(chunk_feature_word_counts), 0.90),
+            "punct_count_mean": (
+                float(sum(chunk_feature_punct_counts) / float(len(chunk_feature_punct_counts)))
+                if chunk_feature_punct_counts
+                else 0.0
+            ),
+            "newline_count_mean": (
+                float(sum(chunk_feature_newline_counts) / float(len(chunk_feature_newline_counts)))
+                if chunk_feature_newline_counts
+                else 0.0
+            ),
+            "orphan_punctuation_ratio": float(chunk_feature_orphan_count / chunk_feature_chunk_denom),
+            "leading_close_punct_ratio": float(chunk_feature_leading_close_count / chunk_feature_chunk_denom),
+            "token_alignment_mode_counts": dict(chunk_feature_alignment_modes),
+            "token_alignment_fallback_rate": float(
+                chunk_feature_alignment_fallback_samples / chunk_feature_sample_denom
+            ),
+            "token_coverage_ratio_mean": (
+                float(sum(chunk_feature_token_coverage_ratios) / float(len(chunk_feature_token_coverage_ratios)))
+                if chunk_feature_token_coverage_ratios
+                else 0.0
+            ),
+            "aligned_chunk_ratio_mean": (
+                float(sum(chunk_feature_aligned_chunk_ratios) / float(len(chunk_feature_aligned_chunk_ratios)))
+                if chunk_feature_aligned_chunk_ratios
                 else 0.0
             ),
         },
@@ -347,6 +446,7 @@ def build_snapshot(results_root: Path, primary_method: str, reference_method: st
                 "timing_breakdown_totals": explain_stats["explain_timing_breakdown_totals"],
                 "objective_cache_stats": explain_stats["objective_cache_stats"],
                 "chunk_diagnostics": explain_stats["chunk_diagnostics"],
+                "chunk_feature_stats": explain_stats["chunk_feature_stats"],
             },
         }
         runs.append(run)
@@ -442,6 +542,29 @@ def _flatten_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "chunk_diag_cross_newline_samples_ratio": run["explain"]["chunk_diagnostics"][
                         "cross_newline_samples_ratio"
                     ],
+                    "chunk_feat_samples": run["explain"]["chunk_feature_stats"]["samples_with_chunk_features"],
+                    "chunk_feat_chunk_total": run["explain"]["chunk_feature_stats"]["chunk_total"],
+                    "chunk_feat_char_len_mean": run["explain"]["chunk_feature_stats"]["char_len_mean"],
+                    "chunk_feat_char_len_p90": run["explain"]["chunk_feature_stats"]["char_len_p90"],
+                    "chunk_feat_word_count_mean": run["explain"]["chunk_feature_stats"]["word_count_mean"],
+                    "chunk_feat_word_count_p90": run["explain"]["chunk_feature_stats"]["word_count_p90"],
+                    "chunk_feat_punct_count_mean": run["explain"]["chunk_feature_stats"]["punct_count_mean"],
+                    "chunk_feat_newline_count_mean": run["explain"]["chunk_feature_stats"]["newline_count_mean"],
+                    "chunk_feat_orphan_punctuation_ratio": run["explain"]["chunk_feature_stats"][
+                        "orphan_punctuation_ratio"
+                    ],
+                    "chunk_feat_leading_close_punct_ratio": run["explain"]["chunk_feature_stats"][
+                        "leading_close_punct_ratio"
+                    ],
+                    "chunk_feat_alignment_fallback_rate": run["explain"]["chunk_feature_stats"][
+                        "token_alignment_fallback_rate"
+                    ],
+                    "chunk_feat_token_coverage_ratio_mean": run["explain"]["chunk_feature_stats"][
+                        "token_coverage_ratio_mean"
+                    ],
+                    "chunk_feat_aligned_chunk_ratio_mean": run["explain"]["chunk_feature_stats"][
+                        "aligned_chunk_ratio_mean"
+                    ],
                 }
             )
     return rows
@@ -509,6 +632,19 @@ def main() -> None:
         "chunk_diag_orphan_merge_samples_ratio",
         "chunk_diag_cross_newline_chunks_mean",
         "chunk_diag_cross_newline_samples_ratio",
+        "chunk_feat_samples",
+        "chunk_feat_chunk_total",
+        "chunk_feat_char_len_mean",
+        "chunk_feat_char_len_p90",
+        "chunk_feat_word_count_mean",
+        "chunk_feat_word_count_p90",
+        "chunk_feat_punct_count_mean",
+        "chunk_feat_newline_count_mean",
+        "chunk_feat_orphan_punctuation_ratio",
+        "chunk_feat_leading_close_punct_ratio",
+        "chunk_feat_alignment_fallback_rate",
+        "chunk_feat_token_coverage_ratio_mean",
+        "chunk_feat_aligned_chunk_ratio_mean",
     ]
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", encoding="utf-8", newline="") as f:

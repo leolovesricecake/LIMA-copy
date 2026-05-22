@@ -88,6 +88,21 @@
 - 解释级一致（同配置）：`selected_chunk_ids/chunk_ranking` 全一致，`trace.total_score` 在容差内。
 - 在 200 样本上解释阶段时长有可复现实质改善（目标由阶段计划单列）。
 
+### Phase C-Next 失败记录（2026-05-22-R）
+
+失败现象：
+- `adaptive` 机制修正后，20样本与后续复核均出现主指标整体退化，未满足“质量优先”目标。
+- 同时未拿到可接受的稳定收益，属于“质量与效率双不达标”。
+
+处置：
+- 已执行非破坏式止损：`git revert aeff7a8`，恢复到上一步稳定语义基线（等价 `1f7f98b` 语义）。
+- 当前主线继续使用 `sentence + greedy + lambdas=1,1,0,1`；`adaptive` 保留研发支线，不参与主结论。
+
+经验与禁区：
+- 任何 chunking 规则改动，必须先过 20 样本 deterministic 机制检查，再进入 200 样本验证；20 未过则禁止推进。
+- 禁止在跨 commit、跨口径、跨配置结果上做因果归因结论；环境变化必须单列披露，不与算法结论混写。
+- 若出现“整体退化 + 收益不显著”，优先回退，不做叠加修补。
+
 ## Phase D：拓展到其他数据集
 
 目标：验证方法泛化，避免只在 `eraser_movie_reviews` 有效。
@@ -97,6 +112,10 @@
 - 数据适配统一：
   - 标签/口径映射、输入清洗、rationale 可用性检查。
   - 保持同一评估报告结构，方便跨数据集比较。
+- 已落地（2026-05-22）：
+  - `--dataset` 新增 `imdb / rotten_tomatoes / emotion`，并统一走 HF 加载。
+  - `imdb` 在请求 `validation` 时自动映射到 `test`，其余数据集使用原生 split。
+  - 样本 `metadata` 新增 `chunk_features_by_id` 与 `chunk_feature_coverage`，用于后续 chunking 机理分析。
 
 验收标准：
 - 每个新增数据集至少完成一次稳定复现实验与基线对比。

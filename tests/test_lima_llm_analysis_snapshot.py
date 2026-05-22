@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.util
 import json
 from pathlib import Path
@@ -112,6 +114,33 @@ def _write_run(
                 "fallback_reason": None,
                 "pre_fallback_chunk_count": 1,
             },
+            "chunk_features_by_id": {
+                "0": {
+                    "char_len": 2,
+                    "word_count": 1,
+                    "punct_count": 0,
+                    "newline_count": 0,
+                    "leading_ws_chars": 0,
+                    "trailing_ws_chars": 0,
+                    "token_start": 0,
+                    "token_end": 1,
+                    "token_count": 1,
+                    "orphan_punctuation": False,
+                    "leading_close_punct": False,
+                }
+            },
+            "chunk_feature_coverage": {
+                "token_alignment_mode": "whitespace_fallback",
+                "token_alignment_fallback_used": True,
+                "total_chunks": 1,
+                "aligned_chunks": 1,
+                "aligned_chunk_ratio": 1.0,
+                "total_tokens": 1,
+                "covered_tokens": 1,
+                "uncovered_tokens": 0,
+                "token_coverage_ratio": 1.0,
+                "native_token_span_chunks": 0,
+            },
             "forward_counters": {
                 "predict_calls": 3,
                 "embed_calls": 4,
@@ -171,6 +200,9 @@ def test_analysis_snapshot_and_pairwise(tmp_path: Path) -> None:
     assert abs(ours["explain"]["objective_cache_stats"]["subset_cache_hit_rate"] - 0.4) <= 1e-12
     assert ours["explain"]["chunk_diagnostics"]["chunk_strategy_counts"]["sentence_v2"] == 1
     assert ours["explain"]["chunk_diagnostics"]["fallback_rate"] == 0.0
+    assert ours["explain"]["chunk_feature_stats"]["samples_with_chunk_features"] == 1
+    assert ours["explain"]["chunk_feature_stats"]["chunk_total"] == 1
+    assert ours["explain"]["chunk_feature_stats"]["token_alignment_fallback_rate"] == 1.0
 
 
 def test_analysis_snapshot_diff(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Sequence
 
 from ..backbone.base import BaseBackbone
+from ..chunking.features import build_chunk_feature_payload
 from ..chunking.utils import compose_text_from_chunk_ids, validate_chunk_coverage
 from ..objective.submodular import ObjectiveWeights, TextSubmodularObjective
 from ..search import run_bidirectional_search, run_forward_greedy
@@ -282,6 +283,11 @@ class TextLIMAExplainer:
 
         search_seconds = time.perf_counter() - t_search0
         selected_text = compose_text_from_chunk_ids(chunks, selected)
+        chunk_features_by_id, chunk_feature_coverage = build_chunk_feature_payload(
+            text=sample.text,
+            chunks=chunks,
+            tokenizer=getattr(self.backbone, "tokenizer", None),
+        )
 
         elapsed = time.time() - t0
         counters_after = self.backbone.snapshot_counters()
@@ -299,6 +305,8 @@ class TextLIMAExplainer:
             "objective_cache_stats": objective_cache_stats,
             "objective_compute_stats": objective_compute_stats,
             "component_profile": component_profile,
+            "chunk_features_by_id": chunk_features_by_id,
+            "chunk_feature_coverage": chunk_feature_coverage,
             "chunk_count": len(chunks),
             "search": self.config.search,
             "k": self.config.k,

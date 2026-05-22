@@ -29,7 +29,12 @@ from .resume import is_sample_completed, sample_output_paths
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LIMA LLM v1 pipeline")
-    parser.add_argument("--dataset", type=str, required=True, choices=["sst2", "eraser_movie_reviews"])
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        choices=["sst2", "eraser_movie_reviews", "imdb", "rotten_tomatoes", "emotion"],
+    )
     parser.add_argument("--split", type=str, default="validation")
     parser.add_argument("--eraser-root", type=str, default=None)
     parser.add_argument("--sst2-source", type=str, default=None)

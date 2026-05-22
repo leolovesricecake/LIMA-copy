@@ -28,6 +28,9 @@ class DatasetBundle:
 
 _SST2_LABELS = ["negative", "positive"]
 _DEFAULT_ERASER_HF_DATASET = "eraser-benchmark/movie_rationales"
+_DEFAULT_IMDB_HF_DATASET = "imdb"
+_DEFAULT_ROTTEN_TOMATOES_HF_DATASET = "rotten_tomatoes"
+_DEFAULT_EMOTION_HF_DATASET = "dair-ai/emotion"
 
 
 def _canonical_split(split: str) -> str:
@@ -158,6 +161,142 @@ def _parse_label(raw) -> Optional[int]:
     if text in {"1", "pos", "positive", "true"}:
         return 1
     return None
+
+
+def _parse_non_negative_int(raw) -> Optional[int]:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    text = str(raw).strip()
+    if text == "":
+        return None
+    if text.startswith("-"):
+        return None
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def _hf_label_names(ds) -> List[str]:
+    features = getattr(ds, "features", None)
+    if features is None:
+        return []
+    try:
+        label_feature = features.get("label")
+    except Exception:
+        label_feature = None
+    if label_feature is None:
+        return []
+    names = getattr(label_feature, "names", None)
+    if not isinstance(names, (list, tuple)) or len(names) == 0:
+        return []
+    return [str(name) for name in names]
+
+
+def _canonical_hf_split_for_dataset(dataset_name: str, split: str) -> str:
+    canon = _canonical_split(split)
+    if dataset_name == "imdb" and canon == "validation":
+        return "test"
+    return canon
+
+
+def _load_hf_text_classification_dataset(
+    *,
+    dataset_name: str,
+    split: str,
+    max_samples: Optional[int],
+    dataset_ref: str,
+) -> DatasetBundle:
+    try:
+        from datasets import load_dataset
+    except Exception as exc:
+        raise RuntimeError(
+            f"datasets package is required for {dataset_name}. Please install `datasets`."
+        ) from exc
+
+    dataset_id = _normalize_hf_dataset_ref(dataset_ref)
+    hf_split = _canonical_hf_split_for_dataset(dataset_name, split)
+    ds = load_dataset(dataset_id, split=hf_split)
+    label_names = _hf_label_names(ds)
+    label_name_to_id = {name.strip().lower(): idx for idx, name in enumerate(label_names)}
+    dynamic_label_id_by_raw: Dict[str, int] = {}
+    dynamic_label_text_by_id: Dict[int, str] = {}
+
+    samples: List[TextSample] = []
+    for idx, row in enumerate(ds):
+        text = _extract_text_from_row(row)
+        if text == "":
+            continue
+
+        raw_label = row.get("label")
+        label: Optional[int] = None
+        label_text: Optional[str] = None
+
+        numeric_label = _parse_non_negative_int(raw_label)
+        if label_names:
+            if numeric_label is not None:
+                if 0 <= numeric_label < len(label_names):
+                    label = numeric_label
+                    label_text = label_names[label]
+            else:
+                key = str(raw_label).strip().lower()
+                if key in label_name_to_id:
+                    label = int(label_name_to_id[key])
+                    label_text = label_names[label]
+        elif numeric_label is not None:
+            raw_key = f"num::{numeric_label}"
+            if raw_key not in dynamic_label_id_by_raw:
+                dynamic_label_id_by_raw[raw_key] = len(dynamic_label_id_by_raw)
+            label = dynamic_label_id_by_raw[raw_key]
+            label_text = f"label_{numeric_label}"
+        elif raw_label is not None:
+            key = str(raw_label).strip()
+            if key != "":
+                raw_key = f"str::{key}"
+                if raw_key not in dynamic_label_id_by_raw:
+                    dynamic_label_id_by_raw[raw_key] = len(dynamic_label_id_by_raw)
+                label = dynamic_label_id_by_raw[raw_key]
+                label_text = key
+
+        if label is None:
+            continue
+        if label_text is None:
+            label_text = f"label_{label}"
+        dynamic_label_text_by_id.setdefault(label, str(label_text))
+
+        samples.append(
+            TextSample(
+                sample_id=f"{dataset_name}-hf-{hf_split}-{idx}",
+                text=text,
+                label=int(label),
+                label_text=str(label_text),
+                rationale_char_spans=(),
+                metadata={
+                    "source": f"hf://{dataset_id}",
+                    "requested_split": str(split),
+                    "hf_split": str(hf_split),
+                },
+            )
+        )
+        if max_samples is not None and len(samples) >= max_samples:
+            break
+
+    if not label_names:
+        label_names = [dynamic_label_text_by_id[i] for i in range(len(dynamic_label_text_by_id))]
+    verbalizers = list(label_names)
+    if not verbalizers:
+        raise ValueError(f"No valid labels found for dataset={dataset_name} split={split}")
+
+    return DatasetBundle(
+        dataset_name=dataset_name,
+        split=split,
+        samples=samples,
+        label_names=label_names,
+        verbalizers=verbalizers,
+    )
 
 
 def _extract_text_from_row(row: Dict) -> str:
@@ -628,6 +767,30 @@ def load_dataset_bundle(
             split=split,
             max_samples=max_samples,
             dataset_ref=_DEFAULT_ERASER_HF_DATASET,
+        )
+
+    if name == "imdb":
+        return _load_hf_text_classification_dataset(
+            dataset_name="imdb",
+            split=split,
+            max_samples=max_samples,
+            dataset_ref=_DEFAULT_IMDB_HF_DATASET,
+        )
+
+    if name in {"rotten_tomatoes", "rotten-tomatoes"}:
+        return _load_hf_text_classification_dataset(
+            dataset_name="rotten_tomatoes",
+            split=split,
+            max_samples=max_samples,
+            dataset_ref=_DEFAULT_ROTTEN_TOMATOES_HF_DATASET,
+        )
+
+    if name == "emotion":
+        return _load_hf_text_classification_dataset(
+            dataset_name="emotion",
+            split=split,
+            max_samples=max_samples,
+            dataset_ref=_DEFAULT_EMOTION_HF_DATASET,
         )
 
     raise ValueError(f"Unsupported dataset: {dataset_name}")

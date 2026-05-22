@@ -58,7 +58,11 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "explain_timing_breakdown" in sample_payload.get("metadata", {})
     assert "objective_cache_stats" in sample_payload.get("metadata", {})
     assert "chunk_diagnostics" in sample_payload.get("metadata", {})
+    assert "chunk_features_by_id" in sample_payload.get("metadata", {})
+    assert "chunk_feature_coverage" in sample_payload.get("metadata", {})
     chunk_diag = sample_payload["metadata"]["chunk_diagnostics"]
+    chunk_features = sample_payload["metadata"]["chunk_features_by_id"]
+    chunk_cov = sample_payload["metadata"]["chunk_feature_coverage"]
     assert "chunk_strategy" in chunk_diag
     assert "chunk_count" in chunk_diag
     assert "singleton_orphan_punctuation_chunks" in chunk_diag
@@ -67,6 +71,14 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "cross_newline_boundary_chunks" in chunk_diag
     assert "fallback_applied" in chunk_diag
     assert "fallback_reason" in chunk_diag
+    assert isinstance(chunk_features, dict)
+    assert len(chunk_features) == len(sample_payload.get("chunks", []))
+    first_feat = next(iter(chunk_features.values()))
+    assert "char_len" in first_feat
+    assert "word_count" in first_feat
+    assert "orphan_punctuation" in first_feat
+    assert "token_alignment_mode" in chunk_cov
+    assert "token_coverage_ratio" in chunk_cov
 
     summary = list(out.glob("**/summary.csv"))
     report = list(out.glob("**/eval_report.json"))
