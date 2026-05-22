@@ -88,6 +88,20 @@
 - 解释级一致（同配置）：`selected_chunk_ids/chunk_ranking` 全一致，`trace.total_score` 在容差内。
 - 在 200 样本上解释阶段时长有可复现实质改善（目标由阶段计划单列）。
 
+### Phase C-Next（2026-05-22）`adaptive` 子线状态
+
+- 状态：进行中（实验线，不替换 `sentence` 主线）。
+- 当前结论：
+  - `adaptive` 在结构性切分错误上显著优于 `sentence`；
+  - 指标呈现 `LO/comp` 优势但 `suff` 退化；
+  - 根因集中在 `very_long` 桶的单段超长文本碎片化（`raw` 到 `final` 膨胀）。
+- 已落地动作：
+  - 增加 adaptive 机制分析脚本与对比字段（含 `top20_count` 漂移、`very_long` 膨胀指数）；
+  - `adaptive` 进行定向修复：`very_long` 单段回退到“句子种子+词预算打包”，并在 `long_split` 后执行二次碎片清理。
+- 下一步：
+  - 先过 20 样本 deterministic 机制验收，再跑 200 样本质量/稳定性复核；
+  - 目标是保留 `LO/comp` 优势并修复 `suff/a-s` 退化。
+
 ## Phase D：拓展到其他数据集
 
 目标：验证方法泛化，避免只在 `eraser_movie_reviews` 有效。

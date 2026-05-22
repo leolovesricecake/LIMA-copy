@@ -141,6 +141,12 @@ def test_pipeline_adaptive_chunker_emits_adaptive_diagnostics(tmp_path: Path) ->
     assert "adaptive_features" in chunk_diag
     assert "adaptive_postprocess" in chunk_diag
     assert "adaptive_stage_chunk_counts" in chunk_diag
+    assert "adaptive_very_long_single_paragraph_fallback_used" in chunk_diag
+    adaptive_post = chunk_diag["adaptive_postprocess"]
+    assert "post_long_invalid_merge_count" in adaptive_post
+    assert "post_long_short_merge_count" in adaptive_post
+    assert "adjacent_pack_merge_count" in adaptive_post
+    assert "after_post_long_merge" in chunk_diag["adaptive_stage_chunk_counts"]
 
 
 def test_pipeline_eval_granularity_word_override(tmp_path: Path) -> None:
