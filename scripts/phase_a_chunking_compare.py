@@ -58,12 +58,6 @@ def _extract_boundaries(payload: Dict[str, Any]) -> List[int]:
     return sorted(set(boundaries))
 
 
-def _top20_count(payload: Dict[str, Any]) -> int:
-    chunks = payload.get("chunks", [])
-    total = len(chunks) if isinstance(chunks, list) else 0
-    return int((float(total) * 20.0) // 100.0)
-
-
 def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     total = 0
     fallback = 0
@@ -84,7 +78,6 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     strategy_counts: Dict[str, int] = {}
     chunk_count_values: List[float] = []
     chunk_len_mean_values: List[float] = []
-    top20_count_values: List[float] = []
 
     for payload in samples.values():
         diag = payload.get("metadata", {}).get("chunk_diagnostics")
@@ -125,7 +118,6 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
             cross_samples += 1
         chunk_count_values.append(_safe_float(diag.get("chunk_count"), 0.0))
         chunk_len_mean_values.append(_safe_float(diag.get("chunk_len_chars_mean"), 0.0))
-        top20_count_values.append(float(_top20_count(payload)))
 
     denom = float(total) if total > 0 else 1.0
     return {
@@ -149,10 +141,6 @@ def _aggregate_chunk_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         "chunk_count_mean": (
             float(sum(chunk_count_values) / len(chunk_count_values)) if chunk_count_values else 0.0
         ),
-        "top20_count_mean": (
-            float(sum(top20_count_values) / len(top20_count_values)) if top20_count_values else 0.0
-        ),
-        "top20_count_p90": _percentile(top20_count_values, 0.90),
         "chunk_len_chars_mean_of_mean": (
             float(sum(chunk_len_mean_values) / len(chunk_len_mean_values)) if chunk_len_mean_values else 0.0
         ),
@@ -173,27 +161,16 @@ def _aggregate_adaptive_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, An
             "adaptive_enabled_ratio": 0.0,
             "adaptive_bucket_counts": {},
             "adaptive_bucket_ratios": {},
-            "very_long_samples": 0,
-            "very_long_raw_eq_one_ratio": 0.0,
-            "very_long_fragmentation_ratio_mean": 0.0,
-            "very_long_fragmentation_delta_mean": 0.0,
             "postprocess_invalid_merge_mean": 0.0,
             "postprocess_short_merge_mean": 0.0,
             "postprocess_long_split_mean": 0.0,
-            "postprocess_post_long_invalid_merge_mean": 0.0,
-            "postprocess_post_long_short_merge_mean": 0.0,
-            "postprocess_adjacent_pack_merge_mean": 0.0,
             "postprocess_invalid_merge_trigger_ratio": 0.0,
             "postprocess_short_merge_trigger_ratio": 0.0,
             "postprocess_long_split_trigger_ratio": 0.0,
-            "postprocess_post_long_invalid_merge_trigger_ratio": 0.0,
-            "postprocess_post_long_short_merge_trigger_ratio": 0.0,
-            "postprocess_adjacent_pack_merge_trigger_ratio": 0.0,
             "stage_raw_mean": 0.0,
             "stage_after_invalid_mean": 0.0,
             "stage_after_short_mean": 0.0,
             "stage_after_long_mean": 0.0,
-            "stage_after_post_long_merge_mean": 0.0,
             "stage_final_mean": 0.0,
             "stage_raw_to_final_delta_mean": 0.0,
         }
@@ -203,19 +180,11 @@ def _aggregate_adaptive_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, An
     invalid_values: List[float] = []
     short_values: List[float] = []
     long_values: List[float] = []
-    post_long_invalid_values: List[float] = []
-    post_long_short_values: List[float] = []
-    adjacent_pack_values: List[float] = []
     stage_raw_values: List[float] = []
     stage_after_invalid_values: List[float] = []
     stage_after_short_values: List[float] = []
     stage_after_long_values: List[float] = []
-    stage_after_post_long_values: List[float] = []
     stage_final_values: List[float] = []
-    very_long_ratios: List[float] = []
-    very_long_deltas: List[float] = []
-    very_long_samples = 0
-    very_long_raw_eq_one = 0
 
     for diag in diags:
         enabled = bool(diag.get("adaptive_enabled", False))
@@ -230,32 +199,17 @@ def _aggregate_adaptive_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, An
         invalid_values.append(_safe_float(post.get("invalid_merge_count"), 0.0))
         short_values.append(_safe_float(post.get("short_merge_count"), 0.0))
         long_values.append(_safe_float(post.get("long_split_count"), 0.0))
-        post_long_invalid_values.append(_safe_float(post.get("post_long_invalid_merge_count"), 0.0))
-        post_long_short_values.append(_safe_float(post.get("post_long_short_merge_count"), 0.0))
-        adjacent_pack_values.append(_safe_float(post.get("adjacent_pack_merge_count"), 0.0))
 
         stage = diag.get("adaptive_stage_chunk_counts", {})
         if not isinstance(stage, dict):
             stage = {}
-        stage_raw = _safe_float(stage.get("raw"), 0.0)
-        stage_final = _safe_float(stage.get("final"), _safe_float(diag.get("chunk_count"), 0.0))
-        stage_raw_values.append(stage_raw)
+        stage_raw_values.append(_safe_float(stage.get("raw"), 0.0))
         stage_after_invalid_values.append(_safe_float(stage.get("after_invalid"), 0.0))
         stage_after_short_values.append(_safe_float(stage.get("after_short"), 0.0))
         stage_after_long_values.append(_safe_float(stage.get("after_long"), 0.0))
-        stage_after_post_long_values.append(_safe_float(stage.get("after_post_long_merge"), stage_final))
-        stage_final_values.append(stage_final)
-
-        if bucket == "very_long":
-            very_long_samples += 1
-            if int(stage_raw) == 1:
-                very_long_raw_eq_one += 1
-            if stage_raw > 0.0:
-                very_long_ratios.append(float(stage_final / stage_raw))
-                very_long_deltas.append(float(stage_final - stage_raw))
+        stage_final_values.append(_safe_float(stage.get("final"), _safe_float(diag.get("chunk_count"), 0.0)))
 
     denom = float(len(diags))
-    very_long_denom = float(very_long_samples) if very_long_samples > 0 else 1.0
     bucket_ratios = {k: float(v / denom) for k, v in sorted(bucket_counts.items())}
     return {
         "samples_with_chunk_diagnostics": int(len(diags)),
@@ -263,37 +217,16 @@ def _aggregate_adaptive_diag(samples: Dict[str, Dict[str, Any]]) -> Dict[str, An
         "adaptive_enabled_ratio": float(adaptive_enabled / denom),
         "adaptive_bucket_counts": dict(sorted(bucket_counts.items())),
         "adaptive_bucket_ratios": bucket_ratios,
-        "very_long_samples": int(very_long_samples),
-        "very_long_raw_eq_one_ratio": float(very_long_raw_eq_one / very_long_denom),
-        "very_long_fragmentation_ratio_mean": (
-            float(sum(very_long_ratios) / len(very_long_ratios)) if very_long_ratios else 0.0
-        ),
-        "very_long_fragmentation_delta_mean": (
-            float(sum(very_long_deltas) / len(very_long_deltas)) if very_long_deltas else 0.0
-        ),
         "postprocess_invalid_merge_mean": float(sum(invalid_values) / denom),
         "postprocess_short_merge_mean": float(sum(short_values) / denom),
         "postprocess_long_split_mean": float(sum(long_values) / denom),
-        "postprocess_post_long_invalid_merge_mean": float(sum(post_long_invalid_values) / denom),
-        "postprocess_post_long_short_merge_mean": float(sum(post_long_short_values) / denom),
-        "postprocess_adjacent_pack_merge_mean": float(sum(adjacent_pack_values) / denom),
         "postprocess_invalid_merge_trigger_ratio": float(sum(1 for x in invalid_values if x > 0.0) / denom),
         "postprocess_short_merge_trigger_ratio": float(sum(1 for x in short_values if x > 0.0) / denom),
         "postprocess_long_split_trigger_ratio": float(sum(1 for x in long_values if x > 0.0) / denom),
-        "postprocess_post_long_invalid_merge_trigger_ratio": float(
-            sum(1 for x in post_long_invalid_values if x > 0.0) / denom
-        ),
-        "postprocess_post_long_short_merge_trigger_ratio": float(
-            sum(1 for x in post_long_short_values if x > 0.0) / denom
-        ),
-        "postprocess_adjacent_pack_merge_trigger_ratio": float(
-            sum(1 for x in adjacent_pack_values if x > 0.0) / denom
-        ),
         "stage_raw_mean": float(sum(stage_raw_values) / denom),
         "stage_after_invalid_mean": float(sum(stage_after_invalid_values) / denom),
         "stage_after_short_mean": float(sum(stage_after_short_values) / denom),
         "stage_after_long_mean": float(sum(stage_after_long_values) / denom),
-        "stage_after_post_long_merge_mean": float(sum(stage_after_post_long_values) / denom),
         "stage_final_mean": float(sum(stage_final_values) / denom),
         "stage_raw_to_final_delta_mean": float((sum(stage_final_values) - sum(stage_raw_values)) / denom),
     }
@@ -346,37 +279,6 @@ def _drift_summary(
         "ranking_changed_ratio": float(ranking_changed / denom),
         "trace_changed_ratio": float(trace_changed / denom),
         "trace_total_score_max_abs_diff": float(max_trace_abs_diff),
-    }
-
-
-def _top20_count_drift(
-    baseline_samples: Dict[str, Dict[str, Any]],
-    candidate_samples: Dict[str, Dict[str, Any]],
-) -> Dict[str, Any]:
-    common_ids = sorted(set(baseline_samples.keys()).intersection(candidate_samples.keys()))
-    if not common_ids:
-        return {
-            "sample_count_common": 0,
-            "baseline_top20_count_mean": 0.0,
-            "baseline_top20_count_p90": 0.0,
-            "candidate_top20_count_mean": 0.0,
-            "candidate_top20_count_p90": 0.0,
-            "top20_count_delta_mean": 0.0,
-            "top20_count_delta_p90": 0.0,
-        }
-
-    baseline_top20 = [_top20_count(baseline_samples[sid]) for sid in common_ids]
-    candidate_top20 = [_top20_count(candidate_samples[sid]) for sid in common_ids]
-    deltas = [float(c - b) for b, c in zip(baseline_top20, candidate_top20)]
-
-    return {
-        "sample_count_common": int(len(common_ids)),
-        "baseline_top20_count_mean": float(sum(baseline_top20) / len(baseline_top20)),
-        "baseline_top20_count_p90": _percentile([float(x) for x in baseline_top20], 0.90),
-        "candidate_top20_count_mean": float(sum(candidate_top20) / len(candidate_top20)),
-        "candidate_top20_count_p90": _percentile([float(x) for x in candidate_top20], 0.90),
-        "top20_count_delta_mean": float(sum(deltas) / len(deltas)),
-        "top20_count_delta_p90": _percentile(deltas, 0.90),
     }
 
 
@@ -511,10 +413,6 @@ def build_report(baseline_run_dir: Path, candidate_run_dir: Path, trace_toleranc
             "baseline": _aggregate_adaptive_diag(baseline_samples),
             "candidate": _aggregate_adaptive_diag(candidate_samples),
         },
-        "top20_count_drift": _top20_count_drift(
-            baseline_samples=baseline_samples,
-            candidate_samples=candidate_samples,
-        ),
         "explanation_drift": _drift_summary(
             baseline_samples=baseline_samples,
             candidate_samples=candidate_samples,
@@ -598,24 +496,12 @@ def main() -> None:
         "candidate_adaptive_stage_raw_mean": report["adaptive_diagnostics"]["candidate"]["stage_raw_mean"],
         "baseline_adaptive_stage_final_mean": report["adaptive_diagnostics"]["baseline"]["stage_final_mean"],
         "candidate_adaptive_stage_final_mean": report["adaptive_diagnostics"]["candidate"]["stage_final_mean"],
-        "baseline_adaptive_very_long_fragmentation_ratio_mean": report["adaptive_diagnostics"]["baseline"][
-            "very_long_fragmentation_ratio_mean"
-        ],
-        "candidate_adaptive_very_long_fragmentation_ratio_mean": report["adaptive_diagnostics"]["candidate"][
-            "very_long_fragmentation_ratio_mean"
-        ],
         "baseline_adaptive_long_split_trigger_ratio": report["adaptive_diagnostics"]["baseline"][
             "postprocess_long_split_trigger_ratio"
         ],
         "candidate_adaptive_long_split_trigger_ratio": report["adaptive_diagnostics"]["candidate"][
             "postprocess_long_split_trigger_ratio"
         ],
-        "baseline_top20_count_mean": report["top20_count_drift"]["baseline_top20_count_mean"],
-        "candidate_top20_count_mean": report["top20_count_drift"]["candidate_top20_count_mean"],
-        "baseline_top20_count_p90": report["top20_count_drift"]["baseline_top20_count_p90"],
-        "candidate_top20_count_p90": report["top20_count_drift"]["candidate_top20_count_p90"],
-        "top20_count_delta_mean": report["top20_count_drift"]["top20_count_delta_mean"],
-        "top20_count_delta_p90": report["top20_count_drift"]["top20_count_delta_p90"],
         "boundary_jaccard_mean": report["boundary_drift"]["boundary_jaccard_mean"],
         "boundary_jaccard_median": report["boundary_drift"]["boundary_jaccard_median"],
         "boundary_shift_chars_mean": report["boundary_drift"]["boundary_shift_chars_mean"],

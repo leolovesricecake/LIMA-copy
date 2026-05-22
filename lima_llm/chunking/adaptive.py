@@ -27,9 +27,6 @@ _LONG_SPLIT_MAX_WORDS_BY_BUCKET = {
     "very_long": 200,
 }
 
-_VERY_LONG_SEED_PACK_MAX_WORDS = 180
-_VERY_LONG_ADJACENT_PACK_MAX_WORDS = 200
-
 
 def _resolve_profile(profile: str) -> Tuple[str, Dict[str, int]]:
     key = str(profile).strip().lower()
@@ -288,38 +285,6 @@ def _split_overlong_span_clause_first(
     return _word_window_spans(text, start, end, max_words)
 
 
-def _pack_adjacent_spans_by_word_budget(
-    text: str,
-    spans: Sequence[Tuple[int, int]],
-    *,
-    max_words: int,
-) -> Tuple[List[Tuple[int, int]], int]:
-    cleaned = _cleanup_spans(text, spans)
-    if len(cleaned) <= 1:
-        return list(cleaned), 0
-
-    out: List[Tuple[int, int]] = []
-    merge_count = 0
-
-    cur_start, cur_end = cleaned[0]
-    cur_words = _count_words(text[cur_start:cur_end])
-
-    for start, end in cleaned[1:]:
-        next_words = _count_words(text[start:end])
-        if cur_words + next_words <= int(max_words):
-            cur_end = end
-            cur_words += next_words
-            merge_count += 1
-            continue
-
-        out.append((cur_start, cur_end))
-        cur_start, cur_end = start, end
-        cur_words = next_words
-
-    out.append((cur_start, cur_end))
-    return _cleanup_spans(text, out), int(merge_count)
-
-
 def _merge_invalid_spans(text: str, spans: Sequence[Tuple[int, int]]) -> Tuple[List[Tuple[int, int]], int]:
     if len(spans) <= 1:
         return list(spans), 0
@@ -440,8 +405,6 @@ def _initial_spans_for_bucket(text: str, bucket: str) -> Tuple[List[Tuple[int, i
             "adaptive_sentence_backend": "none",
             "adaptive_sentence_backend_fallback_used": False,
             "adaptive_sentence_backend_calls": 0,
-            "adaptive_very_long_single_paragraph_fallback_used": False,
-            "adaptive_very_long_seed_pack_merge_count": 0,
         }
 
     if bucket == "medium":
@@ -450,8 +413,6 @@ def _initial_spans_for_bucket(text: str, bucket: str) -> Tuple[List[Tuple[int, i
             "adaptive_sentence_backend": backend,
             "adaptive_sentence_backend_fallback_used": bool(fallback),
             "adaptive_sentence_backend_calls": 1,
-            "adaptive_very_long_single_paragraph_fallback_used": False,
-            "adaptive_very_long_seed_pack_merge_count": 0,
         }
 
     if bucket == "long":
@@ -472,32 +433,13 @@ def _initial_spans_for_bucket(text: str, bucket: str) -> Tuple[List[Tuple[int, i
             "adaptive_sentence_backend": backend_used,
             "adaptive_sentence_backend_fallback_used": bool(fallback_used),
             "adaptive_sentence_backend_calls": int(backend_calls),
-            "adaptive_very_long_single_paragraph_fallback_used": False,
-            "adaptive_very_long_seed_pack_merge_count": 0,
         }
 
-    para_spans = _paragraph_spans(text)
-    if len(para_spans) <= 1:
-        sentence_seed, backend, fallback = _sentence_spans_with_backend(text)
-        packed, pack_merge_count = _pack_adjacent_spans_by_word_budget(
-            text,
-            sentence_seed,
-            max_words=_VERY_LONG_SEED_PACK_MAX_WORDS,
-        )
-        return packed, {
-            "adaptive_sentence_backend": backend,
-            "adaptive_sentence_backend_fallback_used": bool(fallback),
-            "adaptive_sentence_backend_calls": 1,
-            "adaptive_very_long_single_paragraph_fallback_used": True,
-            "adaptive_very_long_seed_pack_merge_count": int(pack_merge_count),
-        }
-
-    return para_spans, {
+    spans = _paragraph_spans(text)
+    return spans, {
         "adaptive_sentence_backend": "none",
         "adaptive_sentence_backend_fallback_used": False,
         "adaptive_sentence_backend_calls": 0,
-        "adaptive_very_long_single_paragraph_fallback_used": False,
-        "adaptive_very_long_seed_pack_merge_count": 0,
     }
 
 
@@ -527,24 +469,7 @@ def adaptive_chunk_with_stats(
         after_short,
         max_words=int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
     )
-    after_post_long_invalid, post_long_invalid_merge_count = _merge_invalid_spans(text, after_long)
-    after_post_long_short, post_long_short_merge_count = _merge_short_spans(
-        text,
-        after_post_long_invalid,
-        min_words=6,
-        min_chars=24,
-    )
-
-    adjacent_pack_merge_count = 0
-    packed_spans = list(after_post_long_short)
-    if bucket == "very_long":
-        packed_spans, adjacent_pack_merge_count = _pack_adjacent_spans_by_word_budget(
-            text,
-            after_post_long_short,
-            max_words=_VERY_LONG_ADJACENT_PACK_MAX_WORDS,
-        )
-
-    final_spans = _cleanup_spans(text, packed_spans)
+    final_spans = _cleanup_spans(text, after_long)
     chunks = _spans_to_chunks(text, final_spans)
 
     stats: Dict[str, object] = {
@@ -561,16 +486,12 @@ def adaptive_chunk_with_stats(
             "invalid_merge_count": int(invalid_merge_count),
             "short_merge_count": int(short_merge_count),
             "long_split_count": int(long_split_count),
-            "post_long_invalid_merge_count": int(post_long_invalid_merge_count),
-            "post_long_short_merge_count": int(post_long_short_merge_count),
-            "adjacent_pack_merge_count": int(adjacent_pack_merge_count),
         },
         "adaptive_stage_chunk_counts": {
             "raw": int(len(raw_spans)),
             "after_invalid": int(len(after_invalid)),
             "after_short": int(len(after_short)),
             "after_long": int(len(after_long)),
-            "after_post_long_merge": int(len(after_post_long_short)),
             "final": int(len(final_spans)),
         },
         "adaptive_long_split_max_words": int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),

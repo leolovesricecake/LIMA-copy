@@ -233,31 +233,3 @@ def test_adaptive_sentence_backend_falls_back_to_regex_when_pysbd_missing(monkey
     assert stats["adaptive_bucket"] == "medium"
     assert str(stats["adaptive_sentence_backend"]) == "regex_sentence"
     assert bool(stats["adaptive_sentence_backend_fallback_used"]) is True
-
-
-def test_adaptive_very_long_single_paragraph_uses_sentence_seed_fallback() -> None:
-    text = _make_word_text(1100)
-    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
-    ok, msg = validate_chunk_coverage(text, chunks)
-    assert ok, msg
-    assert stats["adaptive_bucket"] == "very_long"
-    assert bool(stats["adaptive_very_long_single_paragraph_fallback_used"]) is True
-    assert int(stats["adaptive_stage_chunk_counts"]["raw"]) == 1
-    assert int(stats["adaptive_stage_chunk_counts"]["final"]) <= 12
-
-
-def test_adaptive_post_long_cleanup_removes_orphan_after_split(monkeypatch: pytest.MonkeyPatch) -> None:
-    text = "alpha beta gamma . delta epsilon zeta eta theta iota kappa lambda mu"
-    dot_start = text.index(".")
-    dot_end = dot_start + 1
-
-    def _fake_split_long(_text: str, _spans, *, max_words: int):
-        _ = max_words
-        return [(0, dot_start), (dot_start, dot_end), (dot_end, len(_text))], 1
-
-    monkeypatch.setattr(adaptive_mod, "_split_long_spans", _fake_split_long)
-    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
-    ok, msg = validate_chunk_coverage(text, chunks)
-    assert ok, msg
-    assert int(stats["adaptive_postprocess"]["post_long_invalid_merge_count"]) >= 1
-    assert not any(is_orphan_punctuation_chunk_text(chunk.text) for chunk in chunks)

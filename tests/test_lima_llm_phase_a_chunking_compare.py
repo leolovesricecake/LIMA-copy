@@ -126,13 +126,8 @@ def test_phase_a_chunking_compare_builds_report(tmp_path: Path) -> None:
     assert report["chunk_diagnostics"]["candidate"]["orphan_merge_count_mean"] == 1.0
     assert report["chunk_diagnostics"]["candidate"]["leading_close_punct_fix_count_mean"] == 1.0
     assert report["chunk_diagnostics"]["candidate"]["abbreviation_merge_count_mean"] == 1.0
-    assert report["chunk_diagnostics"]["baseline"]["top20_count_mean"] == 0.0
-    assert report["chunk_diagnostics"]["candidate"]["top20_count_p90"] == 0.0
     assert "adaptive_diagnostics" in report
     assert report["adaptive_diagnostics"]["baseline"]["samples_with_chunk_diagnostics"] == 1
     assert report["adaptive_diagnostics"]["candidate"]["samples_with_chunk_diagnostics"] == 1
-    assert "very_long_fragmentation_ratio_mean" in report["adaptive_diagnostics"]["candidate"]
-    assert report["top20_count_drift"]["sample_count_common"] == 1
-    assert report["top20_count_drift"]["top20_count_delta_mean"] == 0.0
     assert report["boundary_drift"]["boundary_jaccard_mean"] == 0.0
     assert report["boundary_drift"]["boundary_shift_chars_mean"] == 1.0
