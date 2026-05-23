@@ -233,3 +233,51 @@ def test_adaptive_sentence_backend_falls_back_to_regex_when_pysbd_missing(monkey
     assert stats["adaptive_bucket"] == "medium"
     assert str(stats["adaptive_sentence_backend"]) == "regex_sentence"
     assert bool(stats["adaptive_sentence_backend_fallback_used"]) is True
+
+
+def test_adaptive_short_bucket_effective_floor_applies() -> None:
+    text = " ".join(f"tok{i}" for i in range(24)) + "."
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "short"
+    assert int(stats["adaptive_features"]["word_count"]) >= 15
+    assert bool(stats["adaptive_effective_floor_applied"]) is True
+    assert int(stats["adaptive_stage_chunk_counts"]["after_effective_floor"]) >= 5
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) >= 5
+    assert int(stats["adaptive_effective_floor_split_count"]) >= 1
+
+
+def test_adaptive_very_long_fragmentation_guard_applies(monkeypatch: pytest.MonkeyPatch) -> None:
+    text = _make_word_text(1300)
+
+    def _fake_split_long_spans(_text: str, spans, *, max_words: int):
+        start, end = spans[0]
+        width = max(1, (end - start) // 96)
+        out = []
+        cur = start
+        for _ in range(95):
+            nxt = min(end, cur + width)
+            out.append((cur, nxt))
+            cur = nxt
+        out.append((cur, end))
+        return out, 1
+
+    monkeypatch.setattr(adaptive_mod, "_split_long_spans", _fake_split_long_spans)
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "very_long"
+    assert bool(stats["adaptive_fragmentation_guard_applied"]) is True
+    assert int(stats["adaptive_fragmentation_before_chunks"]) > int(stats["adaptive_fragmentation_after_chunks"])
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) <= 48
+
+
+def test_adaptive_chunker_no_single_chunk_fixed_token_fallback() -> None:
+    text = "short text"
+    chunker = build_chunker(method="adaptive", tokenizer=None, fixed_token_size=1)
+    chunks = chunker(text)
+    diag = chunker.last_diagnostics
+    assert len(chunks) == 1
+    assert bool(diag.get("fallback_applied", False)) is False
+    assert str(diag.get("chunk_strategy")) == "adaptive"

@@ -127,9 +127,6 @@ def _adaptive_run_impl(
     if not ok:
         fallback_applied = True
         fallback_reason = "invalid_coverage_fallback"
-    elif len(chunks) <= 1:
-        fallback_applied = True
-        fallback_reason = "single_chunk_fallback"
 
     if fallback_applied:
         chunks = fixed_token_chunk(text=text, token_size=fixed_token_size, tokenizer=tokenizer)

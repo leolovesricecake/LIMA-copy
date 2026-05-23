@@ -27,6 +27,12 @@ _LONG_SPLIT_MAX_WORDS_BY_BUCKET = {
     "very_long": 200,
 }
 
+_MIN_EFFECTIVE_CHUNKS = 5
+_SHORT_FLOOR_MIN_WORDS = 15
+_VERY_LONG_FRAGMENTATION_MAX_CHUNKS = 48
+_VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD = 24.0
+_FRAGMENTATION_TARGET_WORDS = 32
+
 
 def _resolve_profile(profile: str) -> Tuple[str, Dict[str, int]]:
     key = str(profile).strip().lower()
@@ -388,6 +394,170 @@ def _split_long_spans(
     return _cleanup_spans(text, out), int(split_count)
 
 
+def _split_point_from_words_or_chars(text: str, start: int, end: int) -> int | None:
+    span_text = text[start:end]
+    words = list(_WORD_RE.finditer(span_text))
+    if len(words) >= 2:
+        mid = len(words) // 2
+        left_end = int(words[max(0, mid - 1)].end())
+        split = start + left_end
+        if start < split < end:
+            return split
+        right_start = int(words[mid].start())
+        split = start + right_start
+        if start < split < end:
+            return split
+
+    width = end - start
+    if width <= 1:
+        return None
+    split = start + (width // 2)
+    if start < split < end:
+        return split
+    return None
+
+
+def _pick_preferred_boundary(start: int, end: int, boundaries: Sequence[int]) -> int | None:
+    candidates = [int(b) for b in boundaries if start < int(b) < end]
+    if not candidates:
+        return None
+    mid = (start + end) / 2.0
+    return int(min(candidates, key=lambda b: (abs(float(b) - mid), abs((end - start) / 2.0 - b), b)))
+
+
+def _collect_short_bucket_boundaries(text: str) -> List[int]:
+    text_len = len(text)
+    boundaries = set()
+    clause_spans = _clause_spans(text)
+    for _start, end in clause_spans[:-1]:
+        if 0 < end < text_len:
+            boundaries.add(int(end))
+    sent_spans, _, _ = _sentence_spans_with_backend(text)
+    for _start, end in sent_spans[:-1]:
+        if 0 < end < text_len:
+            boundaries.add(int(end))
+    return sorted(boundaries)
+
+
+def _apply_effective_chunk_floor(
+    text: str,
+    spans: Sequence[Tuple[int, int]],
+    *,
+    target_chunks: int,
+) -> Tuple[List[Tuple[int, int]], bool, int]:
+    work = [tuple((int(s), int(e))) for s, e in spans if int(e) > int(s)]
+    if len(work) >= int(target_chunks):
+        return _cleanup_spans(text, work), False, 0
+
+    preferred_boundaries = _collect_short_bucket_boundaries(text)
+    split_count = 0
+    while len(work) < int(target_chunks):
+        idx = max(range(len(work)), key=lambda i: (work[i][1] - work[i][0], -i))
+        start, end = work[idx]
+        if end - start <= 1:
+            break
+
+        split_point = _pick_preferred_boundary(start, end, preferred_boundaries)
+        if split_point is None:
+            split_point = _split_point_from_words_or_chars(text, start, end)
+        if split_point is None or split_point <= start or split_point >= end:
+            break
+
+        left = (start, int(split_point))
+        right = (int(split_point), end)
+        work[idx : idx + 1] = [left, right]
+        split_count += 1
+
+    final_spans = _cleanup_spans(text, work)
+    return final_spans, bool(split_count > 0), int(split_count)
+
+
+def _pack_adjacent_spans_by_word_budget(
+    text: str,
+    spans: Sequence[Tuple[int, int]],
+    *,
+    max_chunks: int,
+    target_words: int,
+) -> List[Tuple[int, int]]:
+    work = [tuple((int(s), int(e))) for s, e in spans if int(e) > int(s)]
+    if len(work) <= int(max_chunks):
+        return _cleanup_spans(text, work)
+
+    packed: List[Tuple[int, int]] = []
+    cur_start, cur_end = work[0]
+    cur_words = _count_words(text[cur_start:cur_end])
+    for s, e in work[1:]:
+        seg_words = _count_words(text[s:e])
+        if cur_words + seg_words <= int(target_words):
+            cur_end = e
+            cur_words += seg_words
+            continue
+        packed.append((cur_start, cur_end))
+        cur_start, cur_end = s, e
+        cur_words = seg_words
+    packed.append((cur_start, cur_end))
+
+    packed = _cleanup_spans(text, packed)
+    if len(packed) <= int(max_chunks):
+        return packed
+
+    # If still too many chunks, keep greedily merging smallest adjacent pairs.
+    merged = list(packed)
+    while len(merged) > int(max_chunks):
+        best_idx = None
+        best_cost = None
+        for i in range(len(merged) - 1):
+            s0, e0 = merged[i]
+            s1, e1 = merged[i + 1]
+            merged_words = _count_words(text[s0:e1])
+            overflow = max(0, merged_words - int(target_words))
+            seg_len = e1 - s0
+            cost = (overflow, seg_len, i)
+            if best_cost is None or cost < best_cost:
+                best_cost = cost
+                best_idx = i
+        if best_idx is None:
+            break
+        s0, _e0 = merged[best_idx]
+        _s1, e1 = merged[best_idx + 1]
+        merged[best_idx : best_idx + 2] = [(s0, e1)]
+
+    return _cleanup_spans(text, merged)
+
+
+def _apply_fragmentation_guard(
+    text: str,
+    spans: Sequence[Tuple[int, int]],
+    *,
+    bucket: str,
+    raw_count: int,
+    word_count: int,
+) -> Tuple[List[Tuple[int, int]], bool, int, int]:
+    before = int(len(spans))
+    if bucket != "very_long":
+        return _cleanup_spans(text, spans), False, before, before
+
+    should_apply = False
+    if raw_count <= 1 and before > _VERY_LONG_FRAGMENTATION_MAX_CHUNKS:
+        should_apply = True
+    elif raw_count > 0 and (float(before) / float(raw_count)) > _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD:
+        should_apply = True
+
+    if not should_apply:
+        return _cleanup_spans(text, spans), False, before, before
+
+    target_by_words = max(1, int((int(word_count) + _FRAGMENTATION_TARGET_WORDS - 1) // _FRAGMENTATION_TARGET_WORDS))
+    target_chunks = min(_VERY_LONG_FRAGMENTATION_MAX_CHUNKS, target_by_words)
+    guarded = _pack_adjacent_spans_by_word_budget(
+        text,
+        spans,
+        max_chunks=target_chunks,
+        target_words=_FRAGMENTATION_TARGET_WORDS,
+    )
+    after = int(len(guarded))
+    return guarded, True, before, after
+
+
 def _bucket_for_word_count(word_count: int, thresholds: Dict[str, int]) -> str:
     if word_count <= int(thresholds["short_max_words"]):
         return "short"
@@ -469,7 +639,24 @@ def adaptive_chunk_with_stats(
         after_short,
         max_words=int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
     )
-    final_spans = _cleanup_spans(text, after_long)
+    after_effective_floor = _cleanup_spans(text, after_long)
+    effective_floor_applied = False
+    effective_floor_split_count = 0
+    if bucket == "short" and int(word_count) >= _SHORT_FLOOR_MIN_WORDS and len(after_effective_floor) < _MIN_EFFECTIVE_CHUNKS:
+        after_effective_floor, effective_floor_applied, effective_floor_split_count = _apply_effective_chunk_floor(
+            text,
+            after_effective_floor,
+            target_chunks=_MIN_EFFECTIVE_CHUNKS,
+        )
+
+    after_fragmentation_guard, frag_guard_applied, frag_before_count, frag_after_count = _apply_fragmentation_guard(
+        text,
+        after_effective_floor,
+        bucket=bucket,
+        raw_count=len(raw_spans),
+        word_count=int(word_count),
+    )
+    final_spans = _cleanup_spans(text, after_fragmentation_guard)
     chunks = _spans_to_chunks(text, final_spans)
 
     stats: Dict[str, object] = {
@@ -486,15 +673,26 @@ def adaptive_chunk_with_stats(
             "invalid_merge_count": int(invalid_merge_count),
             "short_merge_count": int(short_merge_count),
             "long_split_count": int(long_split_count),
+            "adaptive_effective_floor_split_count": int(effective_floor_split_count),
+            "adaptive_fragmentation_before_chunks": int(frag_before_count),
+            "adaptive_fragmentation_after_chunks": int(frag_after_count),
         },
         "adaptive_stage_chunk_counts": {
             "raw": int(len(raw_spans)),
             "after_invalid": int(len(after_invalid)),
             "after_short": int(len(after_short)),
             "after_long": int(len(after_long)),
+            "after_effective_floor": int(len(after_effective_floor)),
+            "after_fragmentation_guard": int(len(after_fragmentation_guard)),
             "final": int(len(final_spans)),
         },
         "adaptive_long_split_max_words": int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
+        "adaptive_effective_floor_applied": bool(effective_floor_applied),
+        "adaptive_effective_floor_target_chunks": int(_MIN_EFFECTIVE_CHUNKS),
+        "adaptive_effective_floor_split_count": int(effective_floor_split_count),
+        "adaptive_fragmentation_guard_applied": bool(frag_guard_applied),
+        "adaptive_fragmentation_before_chunks": int(frag_before_count),
+        "adaptive_fragmentation_after_chunks": int(frag_after_count),
     }
     stats.update(backend_stats)
     return chunks, stats
