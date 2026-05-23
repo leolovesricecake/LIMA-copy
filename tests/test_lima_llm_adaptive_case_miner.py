@@ -26,6 +26,8 @@ def _write_sample(
     raw_count: int | None = None,
     final_count: int | None = None,
     fallback_reason: str | None = None,
+    floor_applied: bool = False,
+    guard_applied: bool = False,
 ) -> None:
     sample_dir = run_dir / "samples"
     sample_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +64,8 @@ def _write_sample(
             "raw": raw_count if raw_count is not None else chunk_count,
             "final": final_count if final_count is not None else chunk_count,
         }
+    diag["adaptive_effective_floor_applied"] = bool(floor_applied)
+    diag["adaptive_fragmentation_guard_applied"] = bool(guard_applied)
 
     payload = {
         "sample_id": sample_id,
@@ -101,6 +105,7 @@ def test_adaptive_case_miner_detects_fragmentation_and_short_singleton(tmp_path:
         word_count=1400,
         raw_count=1,
         final_count=60,
+        guard_applied=True,
     )
 
     _write_sample(
@@ -134,6 +139,10 @@ def test_adaptive_case_miner_detects_fragmentation_and_short_singleton(tmp_path:
     assert report["sample_count_common"] == 2
     assert report["summary"]["very_long_fragmentation_risk_count"] == 1
     assert report["summary"]["short_singleton_risk_count"] == 1
+    assert report["summary"]["trigger_counts"]["guard_only"] == 1
+    assert report["summary"]["trigger_counts"]["none"] == 1
     assert len(report["top_cases"]) == 2
     top_ids = {row["sample_id"] for row in report["top_cases"]}
     assert {"s1", "s2"} == top_ids
+    assert "trigger_ranked_cases" in report
+    assert report["top_cases"][0]["trigger_kind"] in {"guard_only", "none"}

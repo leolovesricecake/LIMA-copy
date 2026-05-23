@@ -176,6 +176,7 @@ def _load_run(run_dir: Path) -> Dict[str, Any]:
             "deterministic": bool(run_cfg.get("deterministic", False)),
             "split": run_cfg.get("split"),
             "max_samples": run_cfg.get("max_samples"),
+            "adaptive_profile": run_cfg.get("adaptive_profile"),
         },
     }
 
@@ -192,7 +193,6 @@ def _metric_delta_rows(candidate: Dict[str, float], baseline: Dict[str, float]) 
             "delta": delta,
             "directional_gain": float(_DIRECTION_SIGNS[metric_name] * delta),
         }
-    # runtime is reported separately with lower-better gain.
     cand_rt = float(candidate.get("runtime_seconds", 0.0))
     base_rt = float(baseline.get("runtime_seconds", 0.0))
     rows["runtime_seconds"] = {
@@ -211,6 +211,8 @@ def _pairwise(candidate: Dict[str, Any], baseline: Dict[str, Any]) -> Dict[str, 
     return {
         "candidate_chunker": candidate["chunker"],
         "baseline_chunker": baseline["chunker"],
+        "candidate_run_dir": candidate["run_dir"],
+        "baseline_run_dir": baseline["run_dir"],
         "metric_deltas": metric_deltas,
         "sample_stats_delta": {
             "top20_count_zero_ratio_delta": float(ss_c["top20_count_zero_ratio"] - ss_b["top20_count_zero_ratio"]),
@@ -225,7 +227,20 @@ def _pairwise(candidate: Dict[str, Any], baseline: Dict[str, Any]) -> Dict[str, 
                 ss_c["very_long_fragmentation_index_mean"] - ss_b["very_long_fragmentation_index_mean"]
             ),
         },
+        "candidate_provenance": candidate.get("provenance", {}),
+        "baseline_provenance": baseline.get("provenance", {}),
     }
+
+
+def _find_run_dir_by_chunker(model_dir: Path, chunker: str) -> Path | None:
+    matched = [
+        path
+        for path in sorted(model_dir.glob("chunk-*_method-ours"))
+        if path.is_dir() and _detect_chunker(path.name) == chunker
+    ]
+    if not matched:
+        return None
+    return matched[0]
 
 
 def build_report(results_root: Path) -> Dict[str, Any]:
@@ -234,7 +249,6 @@ def build_report(results_root: Path) -> Dict[str, Any]:
         model_dirs = sorted(path for path in dataset_dir.glob("model-*") if path.is_dir())
         if not model_dirs:
             continue
-        # Phase D currently runs one model; keep first deterministic ordering.
         model_dir = model_dirs[0]
         runs: Dict[str, Dict[str, Any]] = {}
         for run_dir in sorted(path for path in model_dir.glob("chunk-*_method-ours") if path.is_dir()):
@@ -257,7 +271,65 @@ def build_report(results_root: Path) -> Dict[str, Any]:
         )
 
     return {
+        "report_mode": "single_root",
         "results_root": str(results_root),
+        "direction_signs": dict(_DIRECTION_SIGNS),
+        "datasets": dataset_rows,
+    }
+
+
+def build_cross_root_report(
+    *,
+    baseline_root: Path,
+    candidate_root: Path,
+    baseline_chunker: str = "adaptive",
+    candidate_chunker: str = "adaptive",
+) -> Dict[str, Any]:
+    dataset_rows: List[Dict[str, Any]] = []
+    baseline_dataset_dirs = {
+        path.name: path for path in baseline_root.iterdir() if path.is_dir()
+    }
+    candidate_dataset_dirs = {
+        path.name: path for path in candidate_root.iterdir() if path.is_dir()
+    }
+    common_datasets = sorted(set(baseline_dataset_dirs).intersection(candidate_dataset_dirs))
+
+    for dataset in common_datasets:
+        baseline_model_dirs = sorted(
+            path for path in baseline_dataset_dirs[dataset].glob("model-*") if path.is_dir()
+        )
+        candidate_model_dirs = sorted(
+            path for path in candidate_dataset_dirs[dataset].glob("model-*") if path.is_dir()
+        )
+        if not baseline_model_dirs or not candidate_model_dirs:
+            continue
+        baseline_model = baseline_model_dirs[0]
+        candidate_model = candidate_model_dirs[0]
+        baseline_run_dir = _find_run_dir_by_chunker(baseline_model, baseline_chunker)
+        candidate_run_dir = _find_run_dir_by_chunker(candidate_model, candidate_chunker)
+        if baseline_run_dir is None or candidate_run_dir is None:
+            continue
+
+        baseline_run = _load_run(baseline_run_dir)
+        candidate_run = _load_run(candidate_run_dir)
+        detail = _pairwise(candidate_run, baseline_run)
+        dataset_rows.append(
+            {
+                "dataset": dataset,
+                "baseline_model_dir": str(baseline_model),
+                "candidate_model_dir": str(candidate_model),
+                "pairwise": {
+                    f"{candidate_chunker}_candidate_vs_{baseline_chunker}_baseline": detail
+                },
+            }
+        )
+
+    return {
+        "report_mode": "cross_root",
+        "baseline_root": str(baseline_root),
+        "candidate_root": str(candidate_root),
+        "baseline_chunker": baseline_chunker,
+        "candidate_chunker": candidate_chunker,
         "direction_signs": dict(_DIRECTION_SIGNS),
         "datasets": dataset_rows,
     }
@@ -271,12 +343,20 @@ def _flatten_pairwise_rows(report: Dict[str, Any]) -> List[Dict[str, Any]]:
         for pair_name, detail in sorted(pairwise.items()):
             md = detail.get("metric_deltas", {})
             sd = detail.get("sample_stats_delta", {})
+            cp = detail.get("candidate_provenance", {})
+            bp = detail.get("baseline_provenance", {})
             rows.append(
                 {
                     "dataset": dataset,
                     "pair": pair_name,
                     "candidate_chunker": detail.get("candidate_chunker"),
                     "baseline_chunker": detail.get("baseline_chunker"),
+                    "candidate_run_dir": detail.get("candidate_run_dir"),
+                    "baseline_run_dir": detail.get("baseline_run_dir"),
+                    "candidate_commit": cp.get("git_commit"),
+                    "baseline_commit": bp.get("git_commit"),
+                    "candidate_adaptive_profile": cp.get("adaptive_profile"),
+                    "baseline_adaptive_profile": bp.get("adaptive_profile"),
                     "delta_log_odds": _safe_float(md.get("log_odds", {}).get("delta")),
                     "gain_log_odds": _safe_float(md.get("log_odds", {}).get("directional_gain")),
                     "delta_comp": _safe_float(md.get("comprehensiveness", {}).get("delta")),
@@ -305,7 +385,11 @@ def _flatten_pairwise_rows(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cross-dataset adaptive diagnostics report")
-    parser.add_argument("--results-root", type=str, default="lima_llm_results-phase-d")
+    parser.add_argument("--results-root", type=str, default=None)
+    parser.add_argument("--baseline-root", type=str, default=None)
+    parser.add_argument("--candidate-root", type=str, default=None)
+    parser.add_argument("--baseline-chunker", type=str, default="adaptive")
+    parser.add_argument("--candidate-chunker", type=str, default="adaptive")
     parser.add_argument("--output-json", type=str, default=None)
     parser.add_argument("--output-csv", type=str, default=None)
     return parser
@@ -313,11 +397,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    root = Path(args.results_root)
-    report = build_report(root)
+    use_cross = bool(args.baseline_root) and bool(args.candidate_root)
 
-    out_json = Path(args.output_json) if args.output_json else (root / "adaptive_cross_dataset_report.json")
-    out_csv = Path(args.output_csv) if args.output_csv else (root / "adaptive_cross_dataset_report.csv")
+    if use_cross:
+        baseline_root = Path(str(args.baseline_root))
+        candidate_root = Path(str(args.candidate_root))
+        report = build_cross_root_report(
+            baseline_root=baseline_root,
+            candidate_root=candidate_root,
+            baseline_chunker=str(args.baseline_chunker),
+            candidate_chunker=str(args.candidate_chunker),
+        )
+        out_root = candidate_root
+    else:
+        root = Path(str(args.results_root or "lima_llm_results-phase-d"))
+        report = build_report(root)
+        out_root = root
+
+    out_json = Path(args.output_json) if args.output_json else (out_root / "adaptive_cross_dataset_report.json")
+    out_csv = Path(args.output_csv) if args.output_csv else (out_root / "adaptive_cross_dataset_report.csv")
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -328,6 +426,12 @@ def main() -> None:
         "pair",
         "candidate_chunker",
         "baseline_chunker",
+        "candidate_run_dir",
+        "baseline_run_dir",
+        "candidate_commit",
+        "baseline_commit",
+        "candidate_adaptive_profile",
+        "baseline_adaptive_profile",
         "delta_log_odds",
         "gain_log_odds",
         "delta_comp",

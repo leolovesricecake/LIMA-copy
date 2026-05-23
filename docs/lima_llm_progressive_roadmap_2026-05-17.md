@@ -152,3 +152,24 @@
 - 原则2：先小样本验证语义，再大样本验证速度。  
 - 原则3：环境变化（GPU/deterministic/commit）必须显式披露，不能与算法结论混写。  
 - 原则4：当前主线不为分钟级提速牺牲解释正确性与指标稳定性。  
+
+## 6. Adaptive 0523 结论与 V2.1 分支（2026-05-24）
+
+最新跨数据集观测（`lima_llm_results-0523`）：
+- `emotion / rotten_tomatoes / sst2`：`adaptive` 相比旧划分方法整体更优。
+- `eraser_movie_reviews`：`adaptive` 指标整体退化。
+- `imdb`：`adaptive` 大部分指标偏弱，方向不稳定。
+
+机理结论（已固化为本轮研发假设）：
+- 短文本收益主要来自 `effective_floor` 缓解 `top20_count=0`。
+- 长文本退化主要与 `very_long` 的 guard 压缩策略相关，存在边界粗化风险。
+
+V2.1 分支策略（`balanced_v2`，不替换主线）：
+- `short`：floor 增加结构信号门控，降低误触发。
+- `very_long`：guard 由 `hard_cap` 改为 `soft_band`，并加入边界保真约束。
+- 新增机制字段：`adaptive_profile_version / adaptive_guard_mode / adaptive_fragmentation_target_min/max / adaptive_fragmentation_merge_ops`。
+
+当前禁区（继续生效）：
+- 禁止在未同口径（同配置、同 commit）结果上做强因果归因。
+- 禁止以轻微耗时收益换取系统性 faithfulness 退化。
+- `adaptive` 仍为实验支线；`sentence` 仍为稳定主线，待 V2.1 通过后再讨论替换策略。

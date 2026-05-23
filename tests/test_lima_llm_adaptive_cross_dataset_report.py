@@ -130,3 +130,51 @@ def test_adaptive_cross_dataset_report_builds_pairwise_rows(tmp_path: Path) -> N
     rows = mod._flatten_pairwise_rows(report)
     assert len(rows) == 1
     assert rows[0]["pair"] == "adaptive_vs_sentence"
+
+
+def test_adaptive_cross_dataset_report_cross_root_mode(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "adaptive_cross_dataset_report.py"
+    mod = _load_module(script, "adaptive_cross_dataset_report_cross")
+
+    baseline_model = tmp_path / "baseline" / "demo_ds" / "model-Qwen2_5-7B-Instruct"
+    candidate_model = tmp_path / "candidate" / "demo_ds" / "model-Qwen2_5-7B-Instruct"
+    _write_run(
+        baseline_model / "chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours",
+        runtime_seconds=10.0,
+        log_odds=-0.10,
+        comp=0.10,
+        suff=0.20,
+        aopc_c=0.30,
+        aopc_s=0.40,
+        chunk_count=5,
+        fallback_applied=False,
+        bucket="short",
+        raw_count=2,
+        final_count=5,
+    )
+    _write_run(
+        candidate_model / "chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours",
+        runtime_seconds=8.0,
+        log_odds=-0.20,
+        comp=0.20,
+        suff=0.10,
+        aopc_c=0.40,
+        aopc_s=0.30,
+        chunk_count=6,
+        fallback_applied=False,
+        bucket="short",
+        raw_count=2,
+        final_count=6,
+    )
+
+    report = mod.build_cross_root_report(
+        baseline_root=tmp_path / "baseline",
+        candidate_root=tmp_path / "candidate",
+    )
+    assert report["report_mode"] == "cross_root"
+    assert len(report["datasets"]) == 1
+    pair = report["datasets"][0]["pairwise"]["adaptive_candidate_vs_adaptive_baseline"]
+    assert pair["metric_deltas"]["runtime_seconds"]["directional_gain"] == 2.0
+    rows = mod._flatten_pairwise_rows(report)
+    assert len(rows) == 1
+    assert rows[0]["pair"] == "adaptive_candidate_vs_adaptive_baseline"

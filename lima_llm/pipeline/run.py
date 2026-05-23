@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--adaptive-profile",
         type=str,
         default="balanced",
-        choices=["conservative", "balanced", "aggressive"],
+        choices=["conservative", "balanced", "balanced_v2", "aggressive"],
     )
     parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])
 

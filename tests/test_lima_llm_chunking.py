@@ -248,6 +248,28 @@ def test_adaptive_short_bucket_effective_floor_applies() -> None:
     assert int(stats["adaptive_effective_floor_split_count"]) >= 1
 
 
+def test_adaptive_balanced_v2_short_floor_requires_structure_signal() -> None:
+    text = " ".join(f"tok{i}" for i in range(24))
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "short"
+    assert bool(stats["adaptive_effective_floor_condition_met"]) is False
+    assert bool(stats["adaptive_effective_floor_applied"]) is False
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) < 5
+
+
+def test_adaptive_balanced_v2_short_floor_applies_with_structure_signal() -> None:
+    text = " ".join(f"tok{i}" for i in range(24)) + "."
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "short"
+    assert bool(stats["adaptive_effective_floor_condition_met"]) is True
+    assert bool(stats["adaptive_effective_floor_applied"]) is True
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) >= 5
+
+
 def test_adaptive_very_long_fragmentation_guard_applies(monkeypatch: pytest.MonkeyPatch) -> None:
     text = _make_word_text(1300)
 
@@ -269,8 +291,37 @@ def test_adaptive_very_long_fragmentation_guard_applies(monkeypatch: pytest.Monk
     assert ok, msg
     assert stats["adaptive_bucket"] == "very_long"
     assert bool(stats["adaptive_fragmentation_guard_applied"]) is True
+    assert str(stats["adaptive_guard_mode"]) == "hard_cap"
     assert int(stats["adaptive_fragmentation_before_chunks"]) > int(stats["adaptive_fragmentation_after_chunks"])
     assert int(stats["adaptive_stage_chunk_counts"]["final"]) <= 48
+
+
+def test_adaptive_balanced_v2_very_long_guard_uses_soft_band(monkeypatch: pytest.MonkeyPatch) -> None:
+    text = _make_word_text(1300)
+
+    def _fake_split_long_spans(_text: str, spans, *, max_words: int):
+        start, end = spans[0]
+        width = max(1, (end - start) // 96)
+        out = []
+        cur = start
+        for _ in range(95):
+            nxt = min(end, cur + width)
+            out.append((cur, nxt))
+            cur = nxt
+        out.append((cur, end))
+        return out, 1
+
+    monkeypatch.setattr(adaptive_mod, "_split_long_spans", _fake_split_long_spans)
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "very_long"
+    assert bool(stats["adaptive_fragmentation_guard_applied"]) is True
+    assert str(stats["adaptive_guard_mode"]) == "soft_band"
+    assert int(stats["adaptive_fragmentation_before_chunks"]) > int(stats["adaptive_fragmentation_after_chunks"])
+    assert int(stats["adaptive_fragmentation_target_min"]) <= int(stats["adaptive_stage_chunk_counts"]["final"])
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) <= int(stats["adaptive_fragmentation_target_max"])
+    assert int(stats["adaptive_fragmentation_merge_ops"]) > 0
 
 
 def test_adaptive_chunker_no_single_chunk_fixed_token_fallback() -> None:

@@ -65,6 +65,16 @@ def _sample_proxy_score(
     return float(score)
 
 
+def _trigger_kind(*, floor_applied: bool, guard_applied: bool) -> str:
+    if floor_applied and guard_applied:
+        return "both"
+    if floor_applied:
+        return "floor_only"
+    if guard_applied:
+        return "guard_only"
+    return "none"
+
+
 def build_case_report(
     *,
     baseline_run_dir: Path,
@@ -117,6 +127,9 @@ def build_case_report(
         final_count = _safe_float(stage.get("final"), float(right_chunk_count))
         word_count = int(_safe_float(adaptive_features.get("word_count"), 0.0))
         fallback_reason = diag.get("fallback_reason")
+        floor_applied = bool(diag.get("adaptive_effective_floor_applied", False))
+        guard_applied = bool(diag.get("adaptive_fragmentation_guard_applied", False))
+        trigger_kind = _trigger_kind(floor_applied=floor_applied, guard_applied=guard_applied)
 
         short_singleton_risk = bool(bucket == "short" and word_count >= short_floor_min_words and final_count <= 1.0)
         very_long_fragmentation_risk = False
@@ -149,6 +162,9 @@ def build_case_report(
             "raw_chunk_count": float(raw_count),
             "final_chunk_count": float(final_count),
             "fallback_reason": fallback_reason,
+            "adaptive_effective_floor_applied": bool(floor_applied),
+            "adaptive_fragmentation_guard_applied": bool(guard_applied),
+            "trigger_kind": trigger_kind,
             "short_singleton_risk": bool(short_singleton_risk),
             "very_long_fragmentation_risk": bool(very_long_fragmentation_risk),
             "text_preview": str(right.get("text", "")).replace("\n", " ")[:220],
@@ -162,6 +178,7 @@ def build_case_report(
     rows_sorted = sorted(
         rows,
         key=lambda x: (
+            0 if str(x.get("trigger_kind")) in {"both", "guard_only", "floor_only"} else 1,
             -_safe_float(x.get("proxy_regression_score")),
             -int(bool(x.get("selected_changed", False))),
             -int(bool(x.get("ranking_changed", False))),
@@ -169,6 +186,11 @@ def build_case_report(
         ),
     )
     top_cases = rows_sorted[: max(1, int(top_k))]
+    trigger_ranked: Dict[str, List[Dict[str, Any]]] = {}
+    for kind in ["both", "guard_only", "floor_only", "none"]:
+        subset = [row for row in rows_sorted if str(row.get("trigger_kind", "none")) == kind]
+        trigger_ranked[kind] = subset[: max(1, min(int(top_k), len(subset)))] if subset else []
+
     denom = float(len(common_ids)) if common_ids else 1.0
     return {
         "baseline_run_dir": str(baseline_run_dir),
@@ -179,8 +201,15 @@ def build_case_report(
             "ranking_changed_ratio": float(ranking_changed / denom),
             "very_long_fragmentation_risk_count": int(len(very_long_explosive_cases)),
             "short_singleton_risk_count": int(len(short_singleton_cases)),
+            "trigger_counts": {
+                "both": int(sum(1 for row in rows if row.get("trigger_kind") == "both")),
+                "guard_only": int(sum(1 for row in rows if row.get("trigger_kind") == "guard_only")),
+                "floor_only": int(sum(1 for row in rows if row.get("trigger_kind") == "floor_only")),
+                "none": int(sum(1 for row in rows if row.get("trigger_kind") == "none")),
+            },
         },
         "top_cases": top_cases,
+        "trigger_ranked_cases": trigger_ranked,
         "very_long_fragmentation_cases": very_long_explosive_cases,
         "short_singleton_cases": short_singleton_cases,
     }
@@ -226,6 +255,9 @@ def main() -> None:
         "raw_chunk_count",
         "final_chunk_count",
         "fallback_reason",
+        "adaptive_effective_floor_applied",
+        "adaptive_fragmentation_guard_applied",
+        "trigger_kind",
         "short_singleton_risk",
         "very_long_fragmentation_risk",
         "text_preview",

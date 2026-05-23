@@ -17,7 +17,39 @@ _PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n+")
 _PROFILE_THRESHOLDS = {
     "conservative": {"short_max_words": 64, "medium_max_words": 256, "long_max_words": 768},
     "balanced": {"short_max_words": 96, "medium_max_words": 384, "long_max_words": 960},
+    "balanced_v2": {"short_max_words": 96, "medium_max_words": 384, "long_max_words": 960},
     "aggressive": {"short_max_words": 128, "medium_max_words": 512, "long_max_words": 1200},
+}
+
+_PROFILE_BEHAVIOR = {
+    "conservative": {
+        "profile_version": "v1",
+        "short_structural_floor_gate": False,
+        "guard_mode": "hard_cap",
+        "fragmentation_target_words": 32,
+    },
+    "balanced": {
+        "profile_version": "v1",
+        "short_structural_floor_gate": False,
+        "guard_mode": "hard_cap",
+        "fragmentation_target_words": 32,
+    },
+    "balanced_v2": {
+        "profile_version": "v2",
+        "short_structural_floor_gate": True,
+        "guard_mode": "soft_band",
+        "fragmentation_target_words": 28,
+        "fragmentation_target_min_chunks": 24,
+        "fragmentation_target_max_chunks": 96,
+        "fragmentation_target_low_ratio": 0.80,
+        "fragmentation_target_high_ratio": 1.20,
+    },
+    "aggressive": {
+        "profile_version": "v1",
+        "short_structural_floor_gate": False,
+        "guard_mode": "hard_cap",
+        "fragmentation_target_words": 32,
+    },
 }
 
 _LONG_SPLIT_MAX_WORDS_BY_BUCKET = {
@@ -34,11 +66,12 @@ _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD = 24.0
 _FRAGMENTATION_TARGET_WORDS = 32
 
 
-def _resolve_profile(profile: str) -> Tuple[str, Dict[str, int]]:
+def _resolve_profile(profile: str) -> Tuple[str, Dict[str, int], Dict[str, object]]:
     key = str(profile).strip().lower()
     if key not in _PROFILE_THRESHOLDS:
         key = "balanced"
-    return key, dict(_PROFILE_THRESHOLDS[key])
+    behavior = dict(_PROFILE_BEHAVIOR.get(key, _PROFILE_BEHAVIOR["balanced"]))
+    return key, dict(_PROFILE_THRESHOLDS[key]), behavior
 
 
 def _count_words(text: str) -> int:
@@ -51,6 +84,16 @@ def _count_punct(text: str) -> int:
 
 def _count_sentence_end_est(text: str) -> int:
     return len(_SENT_END_EST_RE.findall(text))
+
+
+def _has_short_structural_signal(*, punct_count: int, newline_count: int, sentence_end_count_est: int) -> bool:
+    if sentence_end_count_est >= 1:
+        return True
+    if punct_count >= 2:
+        return True
+    if newline_count >= 1:
+        return True
+    return False
 
 
 def _spans_from_regex_boundaries(text: str, pattern: re.Pattern[str]) -> List[Tuple[int, int]]:
@@ -525,6 +568,91 @@ def _pack_adjacent_spans_by_word_budget(
     return _cleanup_spans(text, merged)
 
 
+def _collect_sentence_boundaries(text: str) -> set[int]:
+    spans, _, _ = _sentence_spans_with_backend(text)
+    boundaries: set[int] = set()
+    text_len = len(text)
+    for _start, end in spans[:-1]:
+        if 0 < int(end) < text_len:
+            boundaries.add(int(end))
+    return boundaries
+
+
+def _collect_strong_boundaries(text: str) -> set[int]:
+    boundaries = _collect_sentence_boundaries(text)
+    text_len = len(text)
+    for _start, end in _paragraph_spans(text)[:-1]:
+        if 0 < int(end) < text_len:
+            boundaries.add(int(end))
+    return boundaries
+
+
+def _is_quote_paren_boundary(text: str, boundary: int) -> bool:
+    start = max(0, int(boundary) - 6)
+    end = min(len(text), int(boundary) + 6)
+    left = text[start:int(boundary)]
+    right = text[int(boundary):end]
+    return bool(
+        re.search(r"[\)\]\}\"'”’]\s*$", left)
+        and re.search(r"^\s*[\(\[\{\"'“‘]", right)
+    )
+
+
+def _pack_adjacent_spans_to_target_max(
+    text: str,
+    spans: Sequence[Tuple[int, int]],
+    *,
+    target_max: int,
+    target_words: int,
+    strong_boundaries: set[int] | None = None,
+) -> Tuple[List[Tuple[int, int]], int]:
+    merged = [tuple((int(s), int(e))) for s, e in spans if int(e) > int(s)]
+    if len(merged) <= int(target_max):
+        return _cleanup_spans(text, merged), 0
+
+    boundaries = strong_boundaries or set()
+    merge_ops = 0
+    while len(merged) > int(target_max):
+        best_idx = None
+        best_cost = None
+        for i in range(len(merged) - 1):
+            s0, e0 = merged[i]
+            _s1, e1 = merged[i + 1]
+            boundary = int(e0)
+            crosses_strong = boundary in boundaries or _is_quote_paren_boundary(text, boundary)
+            merged_words = _count_words(text[s0:e1])
+            overflow = max(0, merged_words - int(target_words))
+            proximity = abs(merged_words - int(target_words))
+            seg_len = e1 - s0
+            cost = (1 if crosses_strong else 0, overflow, proximity, seg_len, i)
+            if best_cost is None or cost < best_cost:
+                best_cost = cost
+                best_idx = i
+        if best_idx is None:
+            break
+        s0, _e0 = merged[best_idx]
+        _s1, e1 = merged[best_idx + 1]
+        merged[best_idx : best_idx + 2] = [(s0, e1)]
+        merge_ops += 1
+
+    return _cleanup_spans(text, merged), int(merge_ops)
+
+
+def _compute_soft_band_targets(
+    *,
+    word_count: int,
+    target_words: int,
+    min_chunks: int,
+    max_chunks: int,
+    low_ratio: float,
+    high_ratio: float,
+) -> Tuple[int, int]:
+    center = max(1, int((int(word_count) + int(target_words) - 1) // int(target_words)))
+    target_min = max(int(min_chunks), int(center * float(low_ratio)))
+    target_max = min(int(max_chunks), max(target_min, int(center * float(high_ratio))))
+    return int(target_min), int(target_max)
+
+
 def _apply_fragmentation_guard(
     text: str,
     spans: Sequence[Tuple[int, int]],
@@ -532,10 +660,78 @@ def _apply_fragmentation_guard(
     bucket: str,
     raw_count: int,
     word_count: int,
-) -> Tuple[List[Tuple[int, int]], bool, int, int]:
+    behavior: Dict[str, object],
+) -> Tuple[List[Tuple[int, int]], Dict[str, object]]:
     before = int(len(spans))
+    guard_stats: Dict[str, object] = {
+        "applied": False,
+        "mode": "off",
+        "before_chunks": int(before),
+        "after_chunks": int(before),
+        "target_min_chunks": int(before),
+        "target_max_chunks": int(before),
+        "merge_ops": 0,
+        "sentence_seed_used": False,
+    }
     if bucket != "very_long":
-        return _cleanup_spans(text, spans), False, before, before
+        return _cleanup_spans(text, spans), guard_stats
+
+    guard_mode = str(behavior.get("guard_mode", "hard_cap"))
+    target_words = int(behavior.get("fragmentation_target_words", _FRAGMENTATION_TARGET_WORDS))
+    if guard_mode == "soft_band":
+        target_min, target_max = _compute_soft_band_targets(
+            word_count=int(word_count),
+            target_words=target_words,
+            min_chunks=int(behavior.get("fragmentation_target_min_chunks", 24)),
+            max_chunks=int(behavior.get("fragmentation_target_max_chunks", 96)),
+            low_ratio=float(behavior.get("fragmentation_target_low_ratio", 0.80)),
+            high_ratio=float(behavior.get("fragmentation_target_high_ratio", 1.20)),
+        )
+        should_apply = bool(before > int(target_max))
+        if raw_count > 0:
+            ratio = float(before) / float(raw_count)
+            should_apply = should_apply and (
+                raw_count <= 1 or ratio > _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD
+            )
+
+        guard_stats.update(
+            {
+                "mode": "soft_band",
+                "target_min_chunks": int(target_min),
+                "target_max_chunks": int(target_max),
+            }
+        )
+        if not should_apply:
+            return _cleanup_spans(text, spans), guard_stats
+
+        source_spans = list(spans)
+        sentence_seed_used = False
+        if raw_count <= 1:
+            seed_spans, _, _ = _sentence_spans_with_backend(text)
+            seed_spans = _cleanup_spans(text, seed_spans)
+            if len(seed_spans) > 1:
+                source_spans = seed_spans
+                sentence_seed_used = True
+
+        strong_boundaries = _collect_strong_boundaries(text)
+        guarded, merge_ops = _pack_adjacent_spans_to_target_max(
+            text,
+            source_spans,
+            target_max=int(target_max),
+            target_words=int(target_words),
+            strong_boundaries=strong_boundaries,
+        )
+        after = int(len(guarded))
+        guard_stats.update(
+            {
+                "applied": True,
+                "before_chunks": int(before),
+                "after_chunks": int(after),
+                "merge_ops": int(merge_ops),
+                "sentence_seed_used": bool(sentence_seed_used),
+            }
+        )
+        return guarded, guard_stats
 
     should_apply = False
     if raw_count <= 1 and before > _VERY_LONG_FRAGMENTATION_MAX_CHUNKS:
@@ -543,19 +739,35 @@ def _apply_fragmentation_guard(
     elif raw_count > 0 and (float(before) / float(raw_count)) > _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD:
         should_apply = True
 
-    if not should_apply:
-        return _cleanup_spans(text, spans), False, before, before
-
-    target_by_words = max(1, int((int(word_count) + _FRAGMENTATION_TARGET_WORDS - 1) // _FRAGMENTATION_TARGET_WORDS))
+    target_by_words = max(1, int((int(word_count) + target_words - 1) // target_words))
     target_chunks = min(_VERY_LONG_FRAGMENTATION_MAX_CHUNKS, target_by_words)
+    guard_stats.update(
+        {
+            "mode": "hard_cap",
+            "target_min_chunks": int(target_chunks),
+            "target_max_chunks": int(target_chunks),
+        }
+    )
+    if not should_apply:
+        return _cleanup_spans(text, spans), guard_stats
+
     guarded = _pack_adjacent_spans_by_word_budget(
         text,
         spans,
         max_chunks=target_chunks,
-        target_words=_FRAGMENTATION_TARGET_WORDS,
+        target_words=target_words,
     )
     after = int(len(guarded))
-    return guarded, True, before, after
+    guard_stats.update(
+        {
+            "applied": True,
+            "before_chunks": int(before),
+            "after_chunks": int(after),
+            "merge_ops": max(0, int(before) - int(after)),
+            "sentence_seed_used": False,
+        }
+    )
+    return guarded, guard_stats
 
 
 def _bucket_for_word_count(word_count: int, thresholds: Dict[str, int]) -> str:
@@ -618,7 +830,7 @@ def adaptive_chunk_with_stats(
     *,
     profile: str = "balanced",
 ) -> Tuple[List[TextChunk], Dict[str, object]]:
-    profile_key, thresholds = _resolve_profile(profile)
+    profile_key, thresholds, behavior = _resolve_profile(profile)
     word_count = _count_words(text)
     punct_count = _count_punct(text)
     newline_count = int(text.count("\n"))
@@ -640,21 +852,36 @@ def adaptive_chunk_with_stats(
         max_words=int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
     )
     after_effective_floor = _cleanup_spans(text, after_long)
+    floor_base_condition = bool(int(word_count) >= _SHORT_FLOOR_MIN_WORDS)
+    floor_structural_condition = _has_short_structural_signal(
+        punct_count=int(punct_count),
+        newline_count=int(newline_count),
+        sentence_end_count_est=int(sentence_end_est),
+    )
+    use_structural_floor_gate = bool(behavior.get("short_structural_floor_gate", False))
+    effective_floor_condition_met = bool(
+        floor_base_condition and (floor_structural_condition or (not use_structural_floor_gate))
+    )
     effective_floor_applied = False
     effective_floor_split_count = 0
-    if bucket == "short" and int(word_count) >= _SHORT_FLOOR_MIN_WORDS and len(after_effective_floor) < _MIN_EFFECTIVE_CHUNKS:
+    if (
+        bucket == "short"
+        and effective_floor_condition_met
+        and len(after_effective_floor) < _MIN_EFFECTIVE_CHUNKS
+    ):
         after_effective_floor, effective_floor_applied, effective_floor_split_count = _apply_effective_chunk_floor(
             text,
             after_effective_floor,
             target_chunks=_MIN_EFFECTIVE_CHUNKS,
         )
 
-    after_fragmentation_guard, frag_guard_applied, frag_before_count, frag_after_count = _apply_fragmentation_guard(
+    after_fragmentation_guard, frag_guard_stats = _apply_fragmentation_guard(
         text,
         after_effective_floor,
         bucket=bucket,
         raw_count=len(raw_spans),
         word_count=int(word_count),
+        behavior=behavior,
     )
     final_spans = _cleanup_spans(text, after_fragmentation_guard)
     chunks = _spans_to_chunks(text, final_spans)
@@ -662,6 +889,7 @@ def adaptive_chunk_with_stats(
     stats: Dict[str, object] = {
         "adaptive_enabled": True,
         "adaptive_profile": profile_key,
+        "adaptive_profile_version": str(behavior.get("profile_version", "v1")),
         "adaptive_bucket": bucket,
         "adaptive_features": {
             "word_count": int(word_count),
@@ -674,8 +902,8 @@ def adaptive_chunk_with_stats(
             "short_merge_count": int(short_merge_count),
             "long_split_count": int(long_split_count),
             "adaptive_effective_floor_split_count": int(effective_floor_split_count),
-            "adaptive_fragmentation_before_chunks": int(frag_before_count),
-            "adaptive_fragmentation_after_chunks": int(frag_after_count),
+            "adaptive_fragmentation_before_chunks": int(frag_guard_stats.get("before_chunks", len(after_effective_floor))),
+            "adaptive_fragmentation_after_chunks": int(frag_guard_stats.get("after_chunks", len(after_fragmentation_guard))),
         },
         "adaptive_stage_chunk_counts": {
             "raw": int(len(raw_spans)),
@@ -687,12 +915,18 @@ def adaptive_chunk_with_stats(
             "final": int(len(final_spans)),
         },
         "adaptive_long_split_max_words": int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
+        "adaptive_effective_floor_condition_met": bool(effective_floor_condition_met),
         "adaptive_effective_floor_applied": bool(effective_floor_applied),
         "adaptive_effective_floor_target_chunks": int(_MIN_EFFECTIVE_CHUNKS),
         "adaptive_effective_floor_split_count": int(effective_floor_split_count),
-        "adaptive_fragmentation_guard_applied": bool(frag_guard_applied),
-        "adaptive_fragmentation_before_chunks": int(frag_before_count),
-        "adaptive_fragmentation_after_chunks": int(frag_after_count),
+        "adaptive_fragmentation_guard_applied": bool(frag_guard_stats.get("applied", False)),
+        "adaptive_fragmentation_before_chunks": int(frag_guard_stats.get("before_chunks", len(after_effective_floor))),
+        "adaptive_fragmentation_after_chunks": int(frag_guard_stats.get("after_chunks", len(after_fragmentation_guard))),
+        "adaptive_fragmentation_target_min": int(frag_guard_stats.get("target_min_chunks", len(after_fragmentation_guard))),
+        "adaptive_fragmentation_target_max": int(frag_guard_stats.get("target_max_chunks", len(after_fragmentation_guard))),
+        "adaptive_fragmentation_merge_ops": int(frag_guard_stats.get("merge_ops", 0)),
+        "adaptive_fragmentation_sentence_seed_used": bool(frag_guard_stats.get("sentence_seed_used", False)),
+        "adaptive_guard_mode": str(frag_guard_stats.get("mode", "off")),
     }
     stats.update(backend_stats)
     return chunks, stats
