@@ -116,8 +116,13 @@ def _adaptive_run_impl(
     tokenizer,
     fixed_token_size: int,
     adaptive_profile: str,
+    adaptive_overrides: Dict[str, object] | None,
 ) -> Tuple[List[TextChunk], Dict[str, object]]:
-    chunks, adaptive_stats = adaptive_chunk_with_stats(text=text, profile=adaptive_profile)
+    chunks, adaptive_stats = adaptive_chunk_with_stats(
+        text=text,
+        profile=adaptive_profile,
+        overrides=adaptive_overrides,
+    )
     ok, _ = validate_chunk_coverage(text, chunks)
     fallback_applied = False
     fallback_reason = None
@@ -149,6 +154,7 @@ def build_chunker(
     tokenizer=None,
     fixed_token_size: int = 64,
     adaptive_profile: str = "balanced",
+    adaptive_overrides: Dict[str, object] | None = None,
 ) -> Chunker:
     method = method.lower().strip()
 
@@ -184,6 +190,7 @@ def build_chunker(
                 tokenizer=tokenizer,
                 fixed_token_size=fixed_token_size,
                 adaptive_profile=adaptive_profile,
+                adaptive_overrides=adaptive_overrides,
             )
         )
 

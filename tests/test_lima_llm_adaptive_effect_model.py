@@ -169,7 +169,7 @@ def test_adaptive_effect_model_builds_cross_root_summary(tmp_path: Path) -> None
         aopc_c=0.33,
         aopc_s=0.35,
         runtime_seconds=90.0,
-        adaptive_profile="balanced_v2",
+        adaptive_profile="aggressive",
         samples=cand_samples,
     )
 

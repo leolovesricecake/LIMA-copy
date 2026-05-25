@@ -209,6 +209,7 @@ def _load_hf_text_classification_dataset(
     split: str,
     max_samples: Optional[int],
     dataset_ref: str,
+    dataset_cache_dir: Optional[str] = None,
 ) -> DatasetBundle:
     try:
         from datasets import load_dataset
@@ -219,7 +220,10 @@ def _load_hf_text_classification_dataset(
 
     dataset_id = _normalize_hf_dataset_ref(dataset_ref)
     hf_split = _canonical_hf_split_for_dataset(dataset_name, split)
-    ds = load_dataset(dataset_id, split=hf_split)
+    load_kwargs = {"split": hf_split}
+    if dataset_cache_dir:
+        load_kwargs["cache_dir"] = str(_cache_dir(dataset_cache_dir))
+    ds = load_dataset(dataset_id, **load_kwargs)
     label_names = _hf_label_names(ds)
     label_name_to_id = {name.strip().lower(): idx for idx, name in enumerate(label_names)}
     dynamic_label_id_by_raw: Dict[str, int] = {}
@@ -409,6 +413,7 @@ def _load_sst2_from_hf(
     split: str,
     max_samples: Optional[int],
     dataset_ref: str = "nyu-mll/glue",
+    dataset_cache_dir: Optional[str] = None,
 ) -> DatasetBundle:
     try:
         from datasets import load_dataset
@@ -419,10 +424,13 @@ def _load_sst2_from_hf(
 
     # For GLUE wrapper datasets, we need subset/config = sst2.
     dataset_id = _normalize_hf_dataset_ref(dataset_ref)
+    cache_kwargs = {}
+    if dataset_cache_dir:
+        cache_kwargs["cache_dir"] = str(_cache_dir(dataset_cache_dir))
     if dataset_id in {"glue", "nyu-mll/glue"}:
-        ds = load_dataset(dataset_id, "sst2", split=hf_split)
+        ds = load_dataset(dataset_id, "sst2", split=hf_split, **cache_kwargs)
     else:
-        ds = load_dataset(dataset_id, split=hf_split)
+        ds = load_dataset(dataset_id, split=hf_split, **cache_kwargs)
 
     samples: List[TextSample] = []
     for idx, row in enumerate(ds):
@@ -676,6 +684,7 @@ def _load_eraser_movie_reviews_hf(
     split: str,
     max_samples: Optional[int],
     dataset_ref: str = _DEFAULT_ERASER_HF_DATASET,
+    dataset_cache_dir: Optional[str] = None,
 ) -> DatasetBundle:
     try:
         from datasets import load_dataset
@@ -686,7 +695,10 @@ def _load_eraser_movie_reviews_hf(
 
     hf_split = _canonical_split(split)
     dataset_id = _normalize_hf_dataset_ref(dataset_ref)
-    ds = load_dataset(dataset_id, split=hf_split)
+    load_kwargs = {"split": hf_split}
+    if dataset_cache_dir:
+        load_kwargs["cache_dir"] = str(_cache_dir(dataset_cache_dir))
+    ds = load_dataset(dataset_id, **load_kwargs)
 
     samples: List[TextSample] = []
     label_names = ["negative", "positive"]
@@ -738,14 +750,24 @@ def load_dataset_bundle(
     if name == "sst2":
         if sst2_source:
             if _is_hf_dataset_ref(sst2_source):
-                return _load_sst2_from_hf(split=split, max_samples=max_samples, dataset_ref=sst2_source)
+                return _load_sst2_from_hf(
+                    split=split,
+                    max_samples=max_samples,
+                    dataset_ref=sst2_source,
+                    dataset_cache_dir=dataset_cache_dir,
+                )
             return _load_sst2_from_local_source(
                 split=split,
                 source=sst2_source,
                 max_samples=max_samples,
                 dataset_cache_dir=dataset_cache_dir,
             )
-        return _load_sst2_from_hf(split=split, max_samples=max_samples, dataset_ref="nyu-mll/glue")
+        return _load_sst2_from_hf(
+            split=split,
+            max_samples=max_samples,
+            dataset_ref="nyu-mll/glue",
+            dataset_cache_dir=dataset_cache_dir,
+        )
 
     if name in {"eraser_movie_reviews", "eraser-movie-reviews", "eraser"}:
         if eraser_root:
@@ -754,6 +776,7 @@ def load_dataset_bundle(
                     split=split,
                     max_samples=max_samples,
                     dataset_ref=eraser_root,
+                    dataset_cache_dir=dataset_cache_dir,
                 )
             resolved = _resolve_source_to_local_path(eraser_root, dataset_cache_dir=dataset_cache_dir)
             return _load_eraser_movie_reviews_local(
@@ -767,6 +790,7 @@ def load_dataset_bundle(
             split=split,
             max_samples=max_samples,
             dataset_ref=_DEFAULT_ERASER_HF_DATASET,
+            dataset_cache_dir=dataset_cache_dir,
         )
 
     if name == "imdb":
@@ -775,6 +799,7 @@ def load_dataset_bundle(
             split=split,
             max_samples=max_samples,
             dataset_ref=_DEFAULT_IMDB_HF_DATASET,
+            dataset_cache_dir=dataset_cache_dir,
         )
 
     if name in {"rotten_tomatoes", "rotten-tomatoes"}:
@@ -783,6 +808,7 @@ def load_dataset_bundle(
             split=split,
             max_samples=max_samples,
             dataset_ref=_DEFAULT_ROTTEN_TOMATOES_HF_DATASET,
+            dataset_cache_dir=dataset_cache_dir,
         )
 
     if name == "emotion":
@@ -791,6 +817,7 @@ def load_dataset_bundle(
             split=split,
             max_samples=max_samples,
             dataset_ref=_DEFAULT_EMOTION_HF_DATASET,
+            dataset_cache_dir=dataset_cache_dir,
         )
 
     raise ValueError(f"Unsupported dataset: {dataset_name}")

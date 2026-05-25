@@ -153,7 +153,7 @@
 - 原则3：环境变化（GPU/deterministic/commit）必须显式披露，不能与算法结论混写。  
 - 原则4：当前主线不为分钟级提速牺牲解释正确性与指标稳定性。  
 
-## 6. Adaptive 0523 结论与 V2.1 分支（2026-05-24）
+## 6. Adaptive 0523 结论与 V2.1 归档（2026-05-24）
 
 最新跨数据集观测（`lima_llm_results-0523`）：
 - `emotion / rotten_tomatoes / sst2`：`adaptive` 相比旧划分方法整体更优。
@@ -164,12 +164,36 @@
 - 短文本收益主要来自 `effective_floor` 缓解 `top20_count=0`。
 - 长文本退化主要与 `very_long` 的 guard 压缩策略相关，存在边界粗化风险。
 
-V2.1 分支策略（`balanced_v2`，不替换主线）：
+V2.1 历史尝试（已归档，不再可运行）：
 - `short`：floor 增加结构信号门控，降低误触发。
 - `very_long`：guard 由 `hard_cap` 改为 `soft_band`，并加入边界保真约束。
 - 新增机制字段：`adaptive_profile_version / adaptive_guard_mode / adaptive_fragmentation_target_min/max / adaptive_fragmentation_merge_ops`。
 
+归档结论：
+- `balanced_v2` 已在 Phase D-2 硬移除，CLI 不再接受该 profile。
+- 相关结果仅保留复盘价值，不作为后续上线路径。
+
 当前禁区（继续生效）：
 - 禁止在未同口径（同配置、同 commit）结果上做强因果归因。
 - 禁止以轻微耗时收益换取系统性 faithfulness 退化。
-- `adaptive` 仍为实验支线；`sentence` 仍为稳定主线，待 V2.1 通过后再讨论替换策略。
+- `adaptive` 仍为实验支线；`sentence` 仍为稳定主线，后续仅依据内联搜索产出的稳健候选讨论替换。
+
+## 7. Adaptive 多版本复盘结论（2026-05-25）
+
+本轮新增结论（基于 `phase-d / 0523 / 0524-balanced / 0524-balanced_v2`）：
+- `0524-balanced` 与 `0523` 解释输出等价（`selected/ranking/trace` 全量一致，`1e-8` 容差下通过）。
+- `0524-balanced_v2` 在 `emotion` 出现系统性退化；`eraser/imdb` 仅局部修正且不稳；`rotten/sst2` 变化小。
+- 主线决策：adaptive 默认回到 `balanced`（等价 `0523/0524-balanced`），并在 Phase D-2 中硬移除 `balanced_v2`。
+
+后续推进方式（稳健优先）：
+- 参数空间全局统一，但允许每数据集独立最优参数。
+- 采用低预算快试：`Stage-1 grid 12` + `Stage-2 random 8`，先 `80/40` 子集筛选，再进大样本。
+- 主推荐入口：`python -m lima_llm` 内联搜索（`--hparam-search-split`）。
+- 离线工具链保留为辅助分析，不作为主流程：
+  - `scripts/build_adaptive_tune_split.py`
+  - `scripts/search_adaptive_hparams.py`
+  - `scripts/adaptive_hparam_report.py`
+
+验收闸门补充：
+- 回退后默认参数必须保持与 `0524-balanced` 语义一致（解释级对账）。
+- 长文本数据集（`eraser/imdb`）出现多项明显反向退化时，直接判为不可升级候选。

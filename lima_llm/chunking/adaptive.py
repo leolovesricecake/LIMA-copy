@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from ..types import TextChunk
 from .diagnostics import is_orphan_punctuation_chunk_text
@@ -17,7 +17,6 @@ _PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n+")
 _PROFILE_THRESHOLDS = {
     "conservative": {"short_max_words": 64, "medium_max_words": 256, "long_max_words": 768},
     "balanced": {"short_max_words": 96, "medium_max_words": 384, "long_max_words": 960},
-    "balanced_v2": {"short_max_words": 96, "medium_max_words": 384, "long_max_words": 960},
     "aggressive": {"short_max_words": 128, "medium_max_words": 512, "long_max_words": 1200},
 }
 
@@ -33,16 +32,6 @@ _PROFILE_BEHAVIOR = {
         "short_structural_floor_gate": False,
         "guard_mode": "hard_cap",
         "fragmentation_target_words": 32,
-    },
-    "balanced_v2": {
-        "profile_version": "v2",
-        "short_structural_floor_gate": True,
-        "guard_mode": "soft_band",
-        "fragmentation_target_words": 28,
-        "fragmentation_target_min_chunks": 24,
-        "fragmentation_target_max_chunks": 96,
-        "fragmentation_target_low_ratio": 0.80,
-        "fragmentation_target_high_ratio": 1.20,
     },
     "aggressive": {
         "profile_version": "v1",
@@ -66,12 +55,160 @@ _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD = 24.0
 _FRAGMENTATION_TARGET_WORDS = 32
 
 
-def _resolve_profile(profile: str) -> Tuple[str, Dict[str, int], Dict[str, object]]:
+def _to_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _to_float(value: object, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _normalize_short_floor_mode(value: object) -> str:
+    mode = str(value).strip().lower()
+    if mode in {"always", "structural"}:
+        return mode
+    return "always"
+
+
+def _normalize_guard_mode(value: object) -> str:
+    mode = str(value).strip().lower()
+    if mode in {"hard_cap", "soft_band"}:
+        return mode
+    return "hard_cap"
+
+
+def _apply_overrides_to_profile(
+    *,
+    thresholds: Dict[str, int],
+    behavior: Dict[str, object],
+    overrides: Mapping[str, object] | None,
+) -> Dict[str, object]:
+    if not overrides:
+        return {}
+
+    applied: Dict[str, object] = {}
+
+    for src_key, dst_key in (
+        ("short_max_words", "short_max_words"),
+        ("medium_max_words", "medium_max_words"),
+        ("long_max_words", "long_max_words"),
+    ):
+        if src_key in overrides:
+            thresholds[dst_key] = max(1, _to_int(overrides[src_key], thresholds[dst_key]))
+            applied[src_key] = thresholds[dst_key]
+
+    if "min_effective_chunks" in overrides:
+        behavior["min_effective_chunks"] = max(1, _to_int(overrides["min_effective_chunks"], _MIN_EFFECTIVE_CHUNKS))
+        applied["min_effective_chunks"] = behavior["min_effective_chunks"]
+    if "short_floor_min_words" in overrides:
+        behavior["short_floor_min_words"] = max(1, _to_int(overrides["short_floor_min_words"], _SHORT_FLOOR_MIN_WORDS))
+        applied["short_floor_min_words"] = behavior["short_floor_min_words"]
+    if "short_floor_signal_mode" in overrides:
+        behavior["short_floor_signal_mode"] = _normalize_short_floor_mode(overrides["short_floor_signal_mode"])
+        behavior["short_structural_floor_gate"] = behavior["short_floor_signal_mode"] == "structural"
+        applied["short_floor_signal_mode"] = behavior["short_floor_signal_mode"]
+
+    for src_key, dst_key in (
+        ("fragmentation_target_words", "fragmentation_target_words"),
+        ("target_words", "fragmentation_target_words"),
+    ):
+        if src_key in overrides:
+            behavior[dst_key] = max(1, _to_int(overrides[src_key], int(behavior.get(dst_key, _FRAGMENTATION_TARGET_WORDS))))
+            applied["fragmentation_target_words"] = behavior[dst_key]
+            break
+
+    for src_key, dst_key in (
+        ("fragmentation_target_min_chunks", "fragmentation_target_min_chunks"),
+        ("target_min", "fragmentation_target_min_chunks"),
+    ):
+        if src_key in overrides:
+            behavior[dst_key] = max(1, _to_int(overrides[src_key], int(behavior.get(dst_key, 24))))
+            applied["fragmentation_target_min_chunks"] = behavior[dst_key]
+            break
+    for src_key, dst_key in (
+        ("fragmentation_target_max_chunks", "fragmentation_target_max_chunks"),
+        ("target_max", "fragmentation_target_max_chunks"),
+    ):
+        if src_key in overrides:
+            behavior[dst_key] = max(1, _to_int(overrides[src_key], int(behavior.get(dst_key, 96))))
+            applied["fragmentation_target_max_chunks"] = behavior[dst_key]
+            break
+    if int(behavior.get("fragmentation_target_max_chunks", 96)) < int(
+        behavior.get("fragmentation_target_min_chunks", 24)
+    ):
+        behavior["fragmentation_target_max_chunks"] = int(behavior["fragmentation_target_min_chunks"])
+
+    for src_key, dst_key in (
+        ("fragmentation_target_low_ratio", "fragmentation_target_low_ratio"),
+        ("band_low", "fragmentation_target_low_ratio"),
+    ):
+        if src_key in overrides:
+            behavior[dst_key] = max(0.0, _to_float(overrides[src_key], float(behavior.get(dst_key, 0.80))))
+            applied["fragmentation_target_low_ratio"] = behavior[dst_key]
+            break
+    for src_key, dst_key in (
+        ("fragmentation_target_high_ratio", "fragmentation_target_high_ratio"),
+        ("band_high", "fragmentation_target_high_ratio"),
+    ):
+        if src_key in overrides:
+            behavior[dst_key] = max(0.0, _to_float(overrides[src_key], float(behavior.get(dst_key, 1.20))))
+            applied["fragmentation_target_high_ratio"] = behavior[dst_key]
+            break
+    if float(behavior.get("fragmentation_target_high_ratio", 1.20)) < float(
+        behavior.get("fragmentation_target_low_ratio", 0.80)
+    ):
+        behavior["fragmentation_target_high_ratio"] = float(behavior["fragmentation_target_low_ratio"])
+
+    if "guard_mode" in overrides:
+        behavior["guard_mode"] = _normalize_guard_mode(overrides["guard_mode"])
+        applied["guard_mode"] = behavior["guard_mode"]
+    if "ratio_threshold" in overrides:
+        behavior["ratio_threshold"] = max(
+            0.0, _to_float(overrides["ratio_threshold"], float(behavior.get("ratio_threshold", _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD)))
+        )
+        applied["ratio_threshold"] = behavior["ratio_threshold"]
+
+    if "long_split_max_words_by_bucket" in overrides and isinstance(overrides["long_split_max_words_by_bucket"], Mapping):
+        current = dict(behavior.get("long_split_max_words_by_bucket", _LONG_SPLIT_MAX_WORDS_BY_BUCKET))
+        for bucket, raw in overrides["long_split_max_words_by_bucket"].items():
+            key = str(bucket).strip().lower()
+            if key in current:
+                current[key] = max(1, _to_int(raw, int(current[key])))
+        behavior["long_split_max_words_by_bucket"] = current
+        applied["long_split_max_words_by_bucket"] = dict(current)
+
+    return applied
+
+
+def _resolve_profile(
+    profile: str,
+    overrides: Mapping[str, object] | None = None,
+) -> Tuple[str, Dict[str, int], Dict[str, object], Dict[str, object]]:
     key = str(profile).strip().lower()
     if key not in _PROFILE_THRESHOLDS:
         key = "balanced"
     behavior = dict(_PROFILE_BEHAVIOR.get(key, _PROFILE_BEHAVIOR["balanced"]))
-    return key, dict(_PROFILE_THRESHOLDS[key]), behavior
+    thresholds = dict(_PROFILE_THRESHOLDS[key])
+    behavior.setdefault("min_effective_chunks", _MIN_EFFECTIVE_CHUNKS)
+    behavior.setdefault("short_floor_min_words", _SHORT_FLOOR_MIN_WORDS)
+    behavior.setdefault("short_floor_signal_mode", "always")
+    behavior.setdefault("ratio_threshold", _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD)
+    behavior.setdefault("long_split_max_words_by_bucket", dict(_LONG_SPLIT_MAX_WORDS_BY_BUCKET))
+    behavior.setdefault("fragmentation_target_min_chunks", 24)
+    behavior.setdefault("fragmentation_target_max_chunks", 96)
+    behavior.setdefault("fragmentation_target_low_ratio", 0.80)
+    behavior.setdefault("fragmentation_target_high_ratio", 1.20)
+
+    applied = _apply_overrides_to_profile(thresholds=thresholds, behavior=behavior, overrides=overrides)
+    if behavior.get("short_floor_signal_mode") == "structural":
+        behavior["short_structural_floor_gate"] = True
+    return key, thresholds, behavior, applied
 
 
 def _count_words(text: str) -> int:
@@ -678,6 +815,7 @@ def _apply_fragmentation_guard(
 
     guard_mode = str(behavior.get("guard_mode", "hard_cap"))
     target_words = int(behavior.get("fragmentation_target_words", _FRAGMENTATION_TARGET_WORDS))
+    ratio_threshold = float(behavior.get("ratio_threshold", _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD))
     if guard_mode == "soft_band":
         target_min, target_max = _compute_soft_band_targets(
             word_count=int(word_count),
@@ -691,7 +829,7 @@ def _apply_fragmentation_guard(
         if raw_count > 0:
             ratio = float(before) / float(raw_count)
             should_apply = should_apply and (
-                raw_count <= 1 or ratio > _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD
+                raw_count <= 1 or ratio > ratio_threshold
             )
 
         guard_stats.update(
@@ -736,7 +874,7 @@ def _apply_fragmentation_guard(
     should_apply = False
     if raw_count <= 1 and before > _VERY_LONG_FRAGMENTATION_MAX_CHUNKS:
         should_apply = True
-    elif raw_count > 0 and (float(before) / float(raw_count)) > _VERY_LONG_FRAGMENTATION_RATIO_THRESHOLD:
+    elif raw_count > 0 and (float(before) / float(raw_count)) > ratio_threshold:
         should_apply = True
 
     target_by_words = max(1, int((int(word_count) + target_words - 1) // target_words))
@@ -829,8 +967,9 @@ def adaptive_chunk_with_stats(
     text: str,
     *,
     profile: str = "balanced",
+    overrides: Mapping[str, object] | None = None,
 ) -> Tuple[List[TextChunk], Dict[str, object]]:
-    profile_key, thresholds, behavior = _resolve_profile(profile)
+    profile_key, thresholds, behavior, applied_overrides = _resolve_profile(profile, overrides=overrides)
     word_count = _count_words(text)
     punct_count = _count_punct(text)
     newline_count = int(text.count("\n"))
@@ -849,10 +988,12 @@ def adaptive_chunk_with_stats(
     after_long, long_split_count = _split_long_spans(
         text,
         after_short,
-        max_words=int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
+        max_words=int(behavior.get("long_split_max_words_by_bucket", _LONG_SPLIT_MAX_WORDS_BY_BUCKET).get(bucket, _LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket])),
     )
     after_effective_floor = _cleanup_spans(text, after_long)
-    floor_base_condition = bool(int(word_count) >= _SHORT_FLOOR_MIN_WORDS)
+    short_floor_min_words = int(behavior.get("short_floor_min_words", _SHORT_FLOOR_MIN_WORDS))
+    min_effective_chunks = int(behavior.get("min_effective_chunks", _MIN_EFFECTIVE_CHUNKS))
+    floor_base_condition = bool(int(word_count) >= short_floor_min_words)
     floor_structural_condition = _has_short_structural_signal(
         punct_count=int(punct_count),
         newline_count=int(newline_count),
@@ -867,12 +1008,12 @@ def adaptive_chunk_with_stats(
     if (
         bucket == "short"
         and effective_floor_condition_met
-        and len(after_effective_floor) < _MIN_EFFECTIVE_CHUNKS
+        and len(after_effective_floor) < min_effective_chunks
     ):
         after_effective_floor, effective_floor_applied, effective_floor_split_count = _apply_effective_chunk_floor(
             text,
             after_effective_floor,
-            target_chunks=_MIN_EFFECTIVE_CHUNKS,
+            target_chunks=min_effective_chunks,
         )
 
     after_fragmentation_guard, frag_guard_stats = _apply_fragmentation_guard(
@@ -890,6 +1031,7 @@ def adaptive_chunk_with_stats(
         "adaptive_enabled": True,
         "adaptive_profile": profile_key,
         "adaptive_profile_version": str(behavior.get("profile_version", "v1")),
+        "adaptive_overrides_applied": dict(applied_overrides),
         "adaptive_bucket": bucket,
         "adaptive_features": {
             "word_count": int(word_count),
@@ -914,10 +1056,14 @@ def adaptive_chunk_with_stats(
             "after_fragmentation_guard": int(len(after_fragmentation_guard)),
             "final": int(len(final_spans)),
         },
-        "adaptive_long_split_max_words": int(_LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]),
+        "adaptive_long_split_max_words": int(
+            behavior.get("long_split_max_words_by_bucket", _LONG_SPLIT_MAX_WORDS_BY_BUCKET).get(
+                bucket, _LONG_SPLIT_MAX_WORDS_BY_BUCKET[bucket]
+            )
+        ),
         "adaptive_effective_floor_condition_met": bool(effective_floor_condition_met),
         "adaptive_effective_floor_applied": bool(effective_floor_applied),
-        "adaptive_effective_floor_target_chunks": int(_MIN_EFFECTIVE_CHUNKS),
+        "adaptive_effective_floor_target_chunks": int(min_effective_chunks),
         "adaptive_effective_floor_split_count": int(effective_floor_split_count),
         "adaptive_fragmentation_guard_applied": bool(frag_guard_stats.get("applied", False)),
         "adaptive_fragmentation_before_chunks": int(frag_guard_stats.get("before_chunks", len(after_effective_floor))),
@@ -932,6 +1078,11 @@ def adaptive_chunk_with_stats(
     return chunks, stats
 
 
-def adaptive_chunk(text: str, *, profile: str = "balanced") -> List[TextChunk]:
-    chunks, _ = adaptive_chunk_with_stats(text=text, profile=profile)
+def adaptive_chunk(
+    text: str,
+    *,
+    profile: str = "balanced",
+    overrides: Mapping[str, object] | None = None,
+) -> List[TextChunk]:
+    chunks, _ = adaptive_chunk_with_stats(text=text, profile=profile, overrides=overrides)
     return chunks

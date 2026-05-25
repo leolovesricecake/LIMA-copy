@@ -248,24 +248,13 @@ def test_adaptive_short_bucket_effective_floor_applies() -> None:
     assert int(stats["adaptive_effective_floor_split_count"]) >= 1
 
 
-def test_adaptive_balanced_v2_short_floor_requires_structure_signal() -> None:
-    text = " ".join(f"tok{i}" for i in range(24))
-    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
-    ok, msg = validate_chunk_coverage(text, chunks)
-    assert ok, msg
-    assert stats["adaptive_bucket"] == "short"
-    assert bool(stats["adaptive_effective_floor_condition_met"]) is False
-    assert bool(stats["adaptive_effective_floor_applied"]) is False
-    assert int(stats["adaptive_stage_chunk_counts"]["final"]) < 5
-
-
-def test_adaptive_balanced_v2_short_floor_applies_with_structure_signal() -> None:
+def test_adaptive_unknown_profile_falls_back_to_balanced() -> None:
     text = " ".join(f"tok{i}" for i in range(24)) + "."
-    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="unknown_profile")
     ok, msg = validate_chunk_coverage(text, chunks)
     assert ok, msg
+    assert stats["adaptive_profile"] == "balanced"
     assert stats["adaptive_bucket"] == "short"
-    assert bool(stats["adaptive_effective_floor_condition_met"]) is True
     assert bool(stats["adaptive_effective_floor_applied"]) is True
     assert int(stats["adaptive_stage_chunk_counts"]["final"]) >= 5
 
@@ -296,7 +285,7 @@ def test_adaptive_very_long_fragmentation_guard_applies(monkeypatch: pytest.Monk
     assert int(stats["adaptive_stage_chunk_counts"]["final"]) <= 48
 
 
-def test_adaptive_balanced_v2_very_long_guard_uses_soft_band(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adaptive_overrides_can_enable_soft_band_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     text = _make_word_text(1300)
 
     def _fake_split_long_spans(_text: str, spans, *, max_words: int):
@@ -312,7 +301,16 @@ def test_adaptive_balanced_v2_very_long_guard_uses_soft_band(monkeypatch: pytest
         return out, 1
 
     monkeypatch.setattr(adaptive_mod, "_split_long_spans", _fake_split_long_spans)
-    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced_v2")
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(
+        text,
+        profile="balanced",
+        overrides={
+            "guard_mode": "soft_band",
+            "fragmentation_target_words": 28,
+            "fragmentation_target_min_chunks": 24,
+            "fragmentation_target_max_chunks": 96,
+        },
+    )
     ok, msg = validate_chunk_coverage(text, chunks)
     assert ok, msg
     assert stats["adaptive_bucket"] == "very_long"
@@ -332,3 +330,49 @@ def test_adaptive_chunker_no_single_chunk_fixed_token_fallback() -> None:
     assert len(chunks) == 1
     assert bool(diag.get("fallback_applied", False)) is False
     assert str(diag.get("chunk_strategy")) == "adaptive"
+
+
+def test_adaptive_overrides_apply_and_are_recorded() -> None:
+    text = " ".join(f"tok{i}" for i in range(30)) + "."
+    overrides = {
+        "min_effective_chunks": 7,
+        "short_floor_min_words": 12,
+        "short_floor_signal_mode": "always",
+        "guard_mode": "soft_band",
+        "fragmentation_target_words": 36,
+        "fragmentation_target_min_chunks": 20,
+        "fragmentation_target_max_chunks": 72,
+    }
+    chunks, stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced", overrides=overrides)
+    ok, msg = validate_chunk_coverage(text, chunks)
+    assert ok, msg
+    assert stats["adaptive_bucket"] == "short"
+    assert int(stats["adaptive_effective_floor_target_chunks"]) == 7
+    assert int(stats["adaptive_stage_chunk_counts"]["final"]) >= 7
+    applied = stats.get("adaptive_overrides_applied", {})
+    assert isinstance(applied, dict)
+    assert int(applied.get("min_effective_chunks", 0)) == 7
+    assert int(applied.get("short_floor_min_words", 0)) == 12
+    assert str(applied.get("short_floor_signal_mode")) == "always"
+
+
+def test_adaptive_overrides_can_change_bucket_thresholds() -> None:
+    text = _make_word_text(110)
+    _, base_stats = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    _, ov_stats = adaptive_mod.adaptive_chunk_with_stats(
+        text,
+        profile="balanced",
+        overrides={"short_max_words": 120},
+    )
+    assert base_stats["adaptive_bucket"] == "medium"
+    assert ov_stats["adaptive_bucket"] == "short"
+
+
+def test_adaptive_empty_overrides_keep_default_behavior() -> None:
+    text = _make_word_text(240)
+    chunks_a, stats_a = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced")
+    chunks_b, stats_b = adaptive_mod.adaptive_chunk_with_stats(text, profile="balanced", overrides={})
+    assert [(c.start_char, c.end_char) for c in chunks_a] == [(c.start_char, c.end_char) for c in chunks_b]
+    assert stats_a["adaptive_bucket"] == stats_b["adaptive_bucket"]
+    assert stats_a["adaptive_stage_chunk_counts"] == stats_b["adaptive_stage_chunk_counts"]
+    assert stats_b.get("adaptive_overrides_applied", {}) == {}
