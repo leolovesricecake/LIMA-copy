@@ -108,8 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Optional split for adaptive hparam search; empty means no search.",
     )
-    parser.add_argument("--hparam-train-size", type=int, default=60)
-    parser.add_argument("--hparam-dev-size", type=int, default=40)
+    parser.add_argument(
+        "--hparam-tune-size",
+        type=int,
+        default=100,
+        help="Number of samples used for hparam tuning (dev-only selection; no model training).",
+    )
+    parser.add_argument("--hparam-train-size", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--hparam-dev-size", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--hparam-search-method",
         type=str,
@@ -465,6 +471,22 @@ def _split_train_dev(*, samples: Sequence, train_size: int, dev_size: int, seed:
     return picked[:train_target], picked[train_target : train_target + dev_target]
 
 
+def _resolve_hparam_tune_size(args) -> int:
+    legacy_train = args.hparam_train_size
+    legacy_dev = args.hparam_dev_size
+    if legacy_train is None and legacy_dev is None:
+        return max(0, int(args.hparam_tune_size))
+
+    train_part = max(0, int(legacy_train or 0))
+    dev_part = max(0, int(legacy_dev or 0))
+    merged = train_part + dev_part
+    print(
+        "[hparam-search][deprecated] --hparam-train-size/--hparam-dev-size are deprecated. "
+        "Please use --hparam-tune-size. Current run maps them to tune_size=train+dev."
+    )
+    return max(0, int(merged))
+
+
 def _output_root_from_values(
     *,
     output_dir: Path,
@@ -614,6 +636,7 @@ def _augment_final_reports_hparam(
     *,
     output_root: Path,
     hparam_search_split: str,
+    hparam_tune_size: int,
     best_adaptive_overrides: Mapping[str, Any],
     best_lambdas: str,
     lambda_search_enabled: bool,
@@ -627,6 +650,7 @@ def _augment_final_reports_hparam(
             continue
         payload["hparam_search_enabled"] = True
         payload["hparam_search_split"] = str(hparam_search_split)
+        payload["hparam_tune_size"] = int(hparam_tune_size)
         payload["best_adaptive_overrides"] = dict(best_adaptive_overrides)
         payload["best_lambdas"] = str(best_lambdas)
         payload["lambda_search_enabled"] = bool(lambda_search_enabled)
@@ -683,13 +707,15 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
     print(f"[hparam-search] search pool size={len(search_bundle.samples)}")
 
     same_split = _canonical_hf_split(args.dataset, args.split) == _canonical_hf_split(args.dataset, search_split)
-    requested_search_count = int(args.hparam_train_size) + int(args.hparam_dev_size)
+    requested_search_count = _resolve_hparam_tune_size(args)
     total_search_pool = int(len(search_bundle.samples))
+    if requested_search_count <= 0:
+        raise ValueError("hparam tune size must be > 0.")
 
     if total_search_pool < requested_search_count:
         raise ValueError(
-            "Search pool is too small for requested train/dev: "
-            f"total={total_search_pool}, train={args.hparam_train_size}, dev={args.hparam_dev_size}."
+            "Search pool is too small for requested tune size: "
+            f"total={total_search_pool}, tune_size={requested_search_count}."
         )
 
     if same_split:
@@ -697,23 +723,21 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         if remaining <= 0:
             raise ValueError(
                 "Search split equals eval split but no samples remain for evaluation: "
-                f"total={len(eval_bundle.samples)}, train={args.hparam_train_size}, "
-                f"dev={args.hparam_dev_size}, remaining_eval={remaining}."
+                f"total={len(eval_bundle.samples)}, tune_size={requested_search_count}, remaining_eval={remaining}."
             )
 
-    train_samples, dev_samples = _split_train_dev(
+    tune_samples, _ = _split_train_dev(
         samples=search_bundle.samples,
-        train_size=int(args.hparam_train_size),
-        dev_size=int(args.hparam_dev_size),
+        train_size=int(requested_search_count),
+        dev_size=0,
         seed=int(args.seed),
     )
     print(
         f"[hparam-search] split done same_split={same_split} "
-        f"train={len(train_samples)} dev={len(dev_samples)}"
+        f"tune={len(tune_samples)}"
     )
 
-    used_search_ids = {_sample_id(s) for s in train_samples}
-    used_search_ids.update(_sample_id(s) for s in dev_samples)
+    used_search_ids = {_sample_id(s) for s in tune_samples}
 
     eval_candidates = [s for s in eval_bundle.samples if _sample_id(s) not in used_search_ids]
 
@@ -732,11 +756,9 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         raise ValueError("No evaluation samples remain after removing search samples and applying filters.")
     print(f"[hparam-search] eval candidates after disjoint/filter/max={len(eval_candidates)}")
 
-    train_ids_path = hparam_root / "train_ids.json"
-    dev_ids_path = hparam_root / "dev_ids.json"
+    tune_ids_path = hparam_root / "tune_ids.json"
     eval_ids_path = hparam_root / "eval_ids.json"
-    _write_json(train_ids_path, {"sample_ids": [_sample_id(s) for s in train_samples]})
-    _write_json(dev_ids_path, {"sample_ids": [_sample_id(s) for s in dev_samples]})
+    _write_json(tune_ids_path, {"sample_ids": [_sample_id(s) for s in tune_samples]})
     _write_json(eval_ids_path, {"sample_ids": [_sample_id(s) for s in eval_candidates]})
 
     raw_hparam_space = _load_hparam_space(args.hparam_space_file)
@@ -777,26 +799,19 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         train_result = _run_subprocess_trial(
             args=args,
             split=search_split,
-            output_dir=trial_root / "train",
-            sample_ids_file=train_ids_path,
+            output_dir=trial_root / "tune",
+            sample_ids_file=tune_ids_path,
             adaptive_overrides=candidate_overrides,
             lambdas=trial_lambdas,
         )
         print(
-            f"[hparam-search] [{idx + 1}/{len(candidates)}] {trial_id} train "
+            f"[hparam-search] [{idx + 1}/{len(candidates)}] {trial_id} tune "
             f"elapsed={train_result['elapsed_seconds']:.2f}s"
         )
-        dev_result = _run_subprocess_trial(
-            args=args,
-            split=search_split,
-            output_dir=trial_root / "dev",
-            sample_ids_file=dev_ids_path,
-            adaptive_overrides=candidate_overrides,
-            lambdas=trial_lambdas,
-        )
+        tune_result = train_result
         print(
-            f"[hparam-search] [{idx + 1}/{len(candidates)}] {trial_id} dev "
-            f"elapsed={dev_result['elapsed_seconds']:.2f}s metrics={json.dumps(dev_result['metrics'], ensure_ascii=False)}"
+            f"[hparam-search] [{idx + 1}/{len(candidates)}] {trial_id} tune "
+            f"metrics={json.dumps(tune_result['metrics'], ensure_ascii=False)}"
         )
         trial_rows.append(
             {
@@ -805,25 +820,26 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
                 "candidate_lambdas": trial_lambdas,
                 "adaptive_overrides": dict(candidate_overrides),
                 "lambda_params": candidate_lambda_params,
-                "train": train_result,
-                "dev": dev_result,
+                "tune": tune_result,
             }
         )
 
-    baseline_dev_metrics = trial_rows[0]["dev"]["metrics"]
+    baseline_tune_metrics = trial_rows[0]["tune"]["metrics"]
     for row in trial_rows:
-        row["quality_gain_dev_vs_baseline"] = _quality_gain(row["dev"]["metrics"], baseline_dev_metrics)
+        gain_tune = _quality_gain(row["tune"]["metrics"], baseline_tune_metrics)
+        row["quality_gain_tune_vs_baseline"] = gain_tune
+        row["quality_gain_dev_vs_baseline"] = gain_tune
 
     ranked = sorted(
         trial_rows,
-        key=lambda x: (-float(x.get("quality_gain_dev_vs_baseline", 0.0)), str(x.get("trial_id", ""))),
+        key=lambda x: (-float(x.get("quality_gain_tune_vs_baseline", 0.0)), str(x.get("trial_id", ""))),
     )
     best = ranked[0]
     best_overrides = dict(best.get("candidate_adaptive_overrides") or {})
     best_lambdas = str(best.get("candidate_lambdas", str(args.lambdas)))
     print(
         f"[hparam-search] best trial={best.get('trial_id')} "
-        f"gain={float(best.get('quality_gain_dev_vs_baseline', 0.0)):.6f} "
+        f"gain={float(best.get('quality_gain_tune_vs_baseline', 0.0)):.6f} "
         f"lambdas={best_lambdas}"
     )
 
@@ -845,8 +861,9 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "eval_split": args.split,
         "hparam_search_split": search_split,
         "same_split": bool(same_split),
-        "hparam_train_size": int(args.hparam_train_size),
-        "hparam_dev_size": int(args.hparam_dev_size),
+        "hparam_tune_size": int(requested_search_count),
+        "hparam_train_size": int(args.hparam_train_size or 0),
+        "hparam_dev_size": int(args.hparam_dev_size or 0),
         "hparam_search_method": str(args.hparam_search_method),
         "hparam_random_trials": int(args.hparam_random_trials),
         "hparam_max_trials": int(args.hparam_max_trials),
@@ -855,8 +872,9 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "lambda_space": lambda_space,
         "requested_search_count": int(requested_search_count),
         "search_pool_count": int(total_search_pool),
-        "train_count": int(len(train_samples)),
-        "dev_count": int(len(dev_samples)),
+        "tune_count": int(len(tune_samples)),
+        "train_count": int(len(tune_samples)),
+        "dev_count": 0,
         "eval_count_after_disjoint_and_filters": int(len(eval_candidates)),
         "candidate_adaptive_overrides": [dict(row.get("adaptive_params") or {}) for row in candidates],
         "candidate_lambdas": [
@@ -872,7 +890,8 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "trials": trial_rows,
         "best_trial": {
             "trial_id": str(best.get("trial_id", "")),
-            "quality_gain_dev_vs_baseline": float(best.get("quality_gain_dev_vs_baseline", 0.0)),
+            "quality_gain_tune_vs_baseline": float(best.get("quality_gain_tune_vs_baseline", 0.0)),
+            "quality_gain_dev_vs_baseline": float(best.get("quality_gain_tune_vs_baseline", 0.0)),
             "adaptive_overrides": best_overrides,
             "lambdas": best_lambdas,
         },
@@ -884,6 +903,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
     _augment_final_reports_hparam(
         output_root=final_run_root,
         hparam_search_split=search_split,
+        hparam_tune_size=int(requested_search_count),
         best_adaptive_overrides=best_overrides,
         best_lambdas=best_lambdas,
         lambda_search_enabled=bool(args.hparam_enable_lambda_search),

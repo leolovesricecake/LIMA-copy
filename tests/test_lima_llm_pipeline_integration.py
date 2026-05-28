@@ -338,10 +338,8 @@ def test_pipeline_hparam_search_inline_and_final_eval(tmp_path: Path) -> None:
         "2",
         "--hparam-search-split",
         "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
+        "--hparam-tune-size",
+        "2",
         "--hparam-search-method",
         "random",
         "--hparam-random-trials",
@@ -361,6 +359,7 @@ def test_pipeline_hparam_search_inline_and_final_eval(tmp_path: Path) -> None:
     assert run_cfg.get("hparam_search_enabled") is True
     assert report.get("hparam_search_enabled") is True
     assert run_cfg.get("hparam_search_split") == "validation"
+    assert int(run_cfg.get("hparam_tune_size")) == 2
     assert run_cfg.get("lambda_search_enabled") is False
     assert isinstance(run_cfg.get("best_lambdas"), str)
     assert run_cfg.get("best_lambdas") == "1,1,1,1"
@@ -391,10 +390,8 @@ def test_pipeline_hparam_search_same_split_requires_eval_remainder(tmp_path: Pat
         "adaptive",
         "--hparam-search-split",
         "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
+        "--hparam-tune-size",
+        "2",
         "--hparam-search-method",
         "random",
         "--hparam-random-trials",
@@ -437,10 +434,8 @@ def test_pipeline_hparam_search_with_lambda_enabled(tmp_path: Path) -> None:
         "balanced",
         "--hparam-search-split",
         "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
+        "--hparam-tune-size",
+        "2",
         "--hparam-search-method",
         "grid",
         "--hparam-max-trials",
@@ -528,10 +523,8 @@ def test_pipeline_hparam_search_rejects_lambda_keys_when_disabled(tmp_path: Path
         "adaptive",
         "--hparam-search-split",
         "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
+        "--hparam-tune-size",
+        "2",
         "--hparam-search-method",
         "random",
         "--hparam-random-trials",
@@ -543,6 +536,40 @@ def test_pipeline_hparam_search_rejects_lambda_keys_when_disabled(tmp_path: Path
     ]
     with pytest.raises(ValueError, match="--hparam-enable-lambda-search"):
         main(argv)
+
+
+def test_pipeline_hparam_search_legacy_train_dev_maps_to_tune_size(tmp_path: Path) -> None:
+    eraser_root = tmp_path / "eraser_legacy_size"
+    _build_tiny_eraser_three(eraser_root)
+    out = tmp_path / "results_hparam_legacy_size"
+    argv = [
+        "--dataset",
+        "eraser_movie_reviews",
+        "--split",
+        "validation",
+        "--eraser-root",
+        str(eraser_root),
+        "--mock-backbone",
+        "--chunker",
+        "adaptive",
+        "--hparam-search-split",
+        "validation",
+        "--hparam-train-size",
+        "1",
+        "--hparam-dev-size",
+        "1",
+        "--hparam-search-method",
+        "random",
+        "--hparam-random-trials",
+        "1",
+        "--output-dir",
+        str(out),
+        "--run-eval",
+    ]
+    main(argv)
+    run_cfg_path = next(out.glob("**/run_config.json"))
+    run_cfg = json.loads(run_cfg_path.read_text(encoding="utf-8"))
+    assert int(run_cfg.get("hparam_tune_size", 0)) == 2
 
 
 def test_pipeline_hparam_search_applies_max_samples_after_disjoint(tmp_path: Path) -> None:
@@ -561,10 +588,8 @@ def test_pipeline_hparam_search_applies_max_samples_after_disjoint(tmp_path: Pat
         "adaptive",
         "--hparam-search-split",
         "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
+        "--hparam-tune-size",
+        "2",
         "--hparam-search-method",
         "random",
         "--hparam-random-trials",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 from lima_llm.pipeline import run as run_mod
@@ -159,6 +160,24 @@ def test_hparam_candidate_budget_is_deterministic() -> None:
     )
     assert len(rows_a) == 4
     assert rows_a == rows_b
+
+
+def test_resolve_hparam_tune_size_prefers_new_flag() -> None:
+    args = SimpleNamespace(
+        hparam_tune_size=88,
+        hparam_train_size=None,
+        hparam_dev_size=None,
+    )
+    assert run_mod._resolve_hparam_tune_size(args) == 88
+
+
+def test_resolve_hparam_tune_size_accepts_legacy_sum() -> None:
+    args = SimpleNamespace(
+        hparam_tune_size=999,
+        hparam_train_size=60,
+        hparam_dev_size=40,
+    )
+    assert run_mod._resolve_hparam_tune_size(args) == 100
 
 
 def test_parser_rejects_balanced_v2_profile() -> None:

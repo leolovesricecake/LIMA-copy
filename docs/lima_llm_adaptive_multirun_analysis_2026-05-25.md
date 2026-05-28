@@ -72,7 +72,7 @@
 
 采用“单一全局参数空间 + 每数据集独立最优参数”的低预算搜索：
 
-1. 先构造每数据集 `train/dev` 子集（默认 `80/40`）。
+1. 先构造每数据集 `tune` 子集（默认 `100`）。
 2. Stage-1：12 组 grid（覆盖 short-floor 与 very-long-guard 主轴）。
 3. Stage-2：围绕 Stage-1 前 3 名做 8 组 random 局部扰动。
 4. Dev 复选 top-k，按稳健规则排序：
@@ -111,8 +111,7 @@ python -m lima_llm \
   --chunker adaptive \
   --adaptive-profile balanced \
   --hparam-search-split validation \
-  --hparam-train-size 60 \
-  --hparam-dev-size 40 \
+  --hparam-tune-size 100 \
   --hparam-search-method grid+random \
   --hparam-random-trials 8 \
   --hparam-max-trials 16 \
@@ -130,8 +129,7 @@ python -m lima_llm \
   --chunker adaptive \
   --adaptive-profile balanced \
   --hparam-search-split validation \
-  --hparam-train-size 60 \
-  --hparam-dev-size 40 \
+  --hparam-tune-size 100 \
   --hparam-search-method grid+random \
   --hparam-random-trials 8 \
   --hparam-max-trials 16 \

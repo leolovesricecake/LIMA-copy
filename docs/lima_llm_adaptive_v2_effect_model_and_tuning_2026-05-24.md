@@ -44,8 +44,9 @@ python -m lima_llm \
 说明：
 - `--split` 是最终评估集。
 - `--hparam-search-split` 是搜索集；为空表示不搜索。
-- 默认搜索子集大小是 `train=60 / dev=40`，可通过参数覆盖。
+- 默认搜索子集大小是 `tune=100`，可通过 `--hparam-tune-size` 覆盖。
 - 若搜索集与评估集相同，系统会先抽走搜索样本，再从剩余样本做评估，最后才应用 `--max-samples`。
+- `--hparam-train-size/--hparam-dev-size` 仅为兼容旧脚本，建议不再使用（内部会映射为 `tune-size`）。
 - 搜索候选永远包含 baseline（`adaptive_overrides={}` + 当前 `--lambdas`）。
 - 默认总 trial 预算由 `--hparam-max-trials` 控制（默认 `16`）；超预算时做固定 seed 的确定性下采样。
 - `lambda` 搜索能力已支持，但默认关闭；启用时需加 `--hparam-enable-lambda-search`。
@@ -61,8 +62,7 @@ python -m lima_llm \
   --adaptive-profile balanced \
   --adaptive-overrides-json "" \
   --hparam-search-split train \
-  --hparam-train-size 60 \
-  --hparam-dev-size 40 \
+  --hparam-tune-size 100 \
   --hparam-search-method grid+random \
   --hparam-random-trials 8 \
   --hparam-max-trials 16 \
@@ -109,8 +109,7 @@ python -m lima_llm \
 - 运行目录下会生成 `hparam_search/` 子目录。
 - 关键文件：
   - `hparam_search/search_summary.json`
-  - `hparam_search/train_ids.json`
-  - `hparam_search/dev_ids.json`
+  - `hparam_search/tune_ids.json`
   - `hparam_search/eval_ids.json`
 
 最终 `eval_report.json` 会附带：
