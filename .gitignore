@@ -9,6 +9,7 @@ lima_origin/explanation_results
 lima_origin/explanation_insertion_results
 lima_origin/submodular_results
 lima_llm_results*
+*samples*
 
 **cache**
 __pycache__/

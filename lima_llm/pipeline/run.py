@@ -267,15 +267,23 @@ def _load_json_if_possible(path: Path) -> Dict | None:
 
 def _default_hparam_space() -> Dict[str, List[Any]]:
     return {
-        "short_max_words": [96, 120],
-        "medium_max_words": [384, 448],
+        # "short_max_words": [64, 96],
+        # "medium_max_words": [384, 448],
         "long_max_words": [960, 1152],
-        "min_effective_chunks": [4, 5],
-        "short_floor_min_words": [12, 15],
-        "short_floor_signal_mode": ["always", "structural"],
-        "guard_mode": ["hard_cap", "soft_band"],
-        "ratio_threshold": [20, 24, 28],
-        "fragmentation_target_words": [28, 32],
+        "min_effective_chunks": [4, 6],
+        # "short_floor_min_words": [12, 15],
+        # "short_floor_signal_mode": ["always", "structural"],
+        # "guard_mode": ["hard_cap", "soft_band"],
+        # "ratio_threshold": [20, 24, 28],
+        # "fragmentation_target_words": [28, 32],
+        # - - common best of sst2 & rotten_tomatoes - -
+        "short_max_words": [64],
+        "medium_max_words": [384],
+        "short_floor_min_words": [12],
+        # "long_max_words": [1152],
+        # "short_floor_signal_mode": ["always"]
+        # "guard_mode": ["hard_cap"],
+        "fragmentation_target_words": [28],
     }
 
 
