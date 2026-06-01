@@ -20,6 +20,7 @@ from .metrics import (
     aml_faithfulness_metrics,
     aopc_metrics,
     build_perturbation_plan,
+    top_percent_chunk_count,
 )
 
 _WORD_UNIT_RE = re.compile(r"\s*\S+\s*")
@@ -467,6 +468,8 @@ def evaluate_saved_explanations(
     sparsity_values: List[float] = []
     plaus_f1_values: List[float] = []
     plaus_iou_values: List[float] = []
+    top20_count_zero_samples = 0
+    selected_all_samples = 0
 
     total = 0
     acc_hits = 0
@@ -623,6 +626,11 @@ def evaluate_saved_explanations(
         selected_len = chunk_char_length(chunks, selected)
         total_len = max(1, len(sample.text))
         sparsity_values.append(selected_len / total_len)
+        top20_count = top_percent_chunk_count(total_chunks=len(chunks), q_percent=AML_PRIMARY_Q_PERCENT)
+        if int(top20_count) == 0:
+            top20_count_zero_samples += 1
+        if len(chunks) > 0 and len(set(int(x) for x in selected)) >= len(chunks):
+            selected_all_samples += 1
 
         if sample.rationale_char_spans:
             chunk_by_id = {c.chunk_id: c for c in chunks}
@@ -752,6 +760,12 @@ def evaluate_saved_explanations(
             "sparsity": _safe_mean(sparsity_values),
             "plausibility_f1": _safe_mean(plaus_f1_values),
             "plausibility_iou": _safe_mean(plaus_iou_values),
+            "top20_count_zero_ratio": (float(top20_count_zero_samples) / float(total)) if total > 0 else 0.0,
+            "selected_all_ratio": (float(selected_all_samples) / float(total)) if total > 0 else 0.0,
+            "plausibility_available": bool((total - no_rationale_samples) > 0),
+            "plausibility_coverage_ratio": (
+                float(total - no_rationale_samples) / float(total) if total > 0 else 0.0
+            ),
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
             "method_diagnostics": mode_reports["gold"]["method_diagnostics"],

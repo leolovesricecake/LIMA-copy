@@ -267,23 +267,17 @@ def _load_json_if_possible(path: Path) -> Dict | None:
 
 def _default_hparam_space() -> Dict[str, List[Any]]:
     return {
-        # "short_max_words": [64, 96],
-        # "medium_max_words": [384, 448],
+        # Low-budget default space:
+        # keep coverage over short/long controls but avoid combinatorial explosion.
+        "short_max_words": [64, 96],
+        "medium_max_words": [384],
         "long_max_words": [960, 1152],
         "min_effective_chunks": [4, 6],
-        # "short_floor_min_words": [12, 15],
-        # "short_floor_signal_mode": ["always", "structural"],
-        # "guard_mode": ["hard_cap", "soft_band"],
-        # "ratio_threshold": [20, 24, 28],
-        # "fragmentation_target_words": [28, 32],
-        # - - common best of sst2 & rotten_tomatoes - -
-        "short_max_words": [64],
-        "medium_max_words": [384],
-        "short_floor_min_words": [12],
-        # "long_max_words": [1152],
-        # "short_floor_signal_mode": ["always"]
-        # "guard_mode": ["hard_cap"],
-        "fragmentation_target_words": [28],
+        "short_floor_min_words": [12, 15],
+        "short_floor_signal_mode": ["always", "structural"],
+        "guard_mode": ["hard_cap", "soft_band"],
+        "ratio_threshold": [24, 28],
+        "fragmentation_target_words": [28, 32],
     }
 
 
@@ -325,6 +319,54 @@ def _dedup_candidates(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]
         seen.add(key)
         out.append(dict(row))
     return out
+
+
+def _candidate_signature(row: Mapping[str, Any]) -> str:
+    return json.dumps(dict(row), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _candidate_feature_map(row: Mapping[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    adaptive = dict(row.get("adaptive_params") or {})
+    lambdas = dict(row.get("lambda_params") or {})
+    for key, value in adaptive.items():
+        out[f"a:{str(key)}"] = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    for key, value in lambdas.items():
+        out[f"l:{str(key)}"] = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return out
+
+
+def _candidate_distance(row_a: Mapping[str, Any], row_b: Mapping[str, Any]) -> int:
+    fa = _candidate_feature_map(row_a)
+    fb = _candidate_feature_map(row_b)
+    keys = set(fa.keys()).union(fb.keys())
+    return int(sum(1 for key in keys if fa.get(key) != fb.get(key)))
+
+
+def _downsample_candidates_diverse(rows: Sequence[Mapping[str, Any]], budget: int) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+    base = dict(rows[0])
+    if int(budget) <= 1:
+        return [base]
+    pool = [dict(row) for row in rows[1:]]
+    if not pool:
+        return [base]
+    pool.sort(key=_candidate_signature)
+    selected: List[Dict[str, Any]] = [base]
+    while len(selected) < int(budget) and pool:
+        best_idx = 0
+        best_dist = -1
+        best_sig = ""
+        for idx, row in enumerate(pool):
+            dist = min(_candidate_distance(row, picked) for picked in selected)
+            sig = _candidate_signature(row)
+            if dist > best_dist or (dist == best_dist and (best_sig == "" or sig < best_sig)):
+                best_idx = idx
+                best_dist = int(dist)
+                best_sig = sig
+        selected.append(pool.pop(best_idx))
+    return selected
 
 
 def _build_candidates(
@@ -375,19 +417,7 @@ def _build_candidates(
     budget = max(1, int(max_trials))
     if len(deduped) <= budget:
         return deduped
-
-    baseline = deduped[0]
-    if budget == 1:
-        return [baseline]
-
-    rest = deduped[1:]
-    sample_n = min(len(rest), budget - 1)
-    keep_rows = rng.sample(rest, k=sample_n) if sample_n > 0 else []
-    keep_rows = sorted(
-        keep_rows,
-        key=lambda row: json.dumps(dict(row), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-    )
-    return [baseline, *keep_rows]
+    return _downsample_candidates_diverse(deduped, budget=budget)
 
 
 def _split_hparam_space(
@@ -616,6 +646,8 @@ def _run_subprocess_trial(
     primary = report.get("metrics_by_target", {}).get("gold", {}).get("metrics_primary", {})
     if not primary:
         primary = report.get("metrics_primary", {})
+    secondary = report.get("metrics_secondary", {})
+    method_diag = dict(secondary.get("method_diagnostics", {}) or {})
 
     return {
         "elapsed_seconds": elapsed,
@@ -627,6 +659,14 @@ def _run_subprocess_trial(
             "sufficiency": float(primary.get("sufficiency", 0.0)),
             "aopc_comprehensiveness": float(primary.get("aopc_comprehensiveness", 0.0)),
             "aopc_sufficiency": float(primary.get("aopc_sufficiency", 0.0)),
+        },
+        "diagnostics": {
+            "top20_count_zero_ratio": float(secondary.get("top20_count_zero_ratio", 0.0)),
+            "selected_all_ratio": float(secondary.get("selected_all_ratio", 0.0)),
+            "plausibility_available": bool(secondary.get("plausibility_available", False)),
+            "plausibility_coverage_ratio": float(secondary.get("plausibility_coverage_ratio", 0.0)),
+            "runtime_seconds": float(secondary.get("runtime_seconds", elapsed)),
+            "failed_samples": int(method_diag.get("failed_samples", 0)),
         },
     }
 
@@ -829,6 +869,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
                 "adaptive_overrides": dict(candidate_overrides),
                 "lambda_params": candidate_lambda_params,
                 "tune": tune_result,
+                "diagnostics": dict(tune_result.get("diagnostics", {})),
             }
         )
 
@@ -840,7 +881,12 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
 
     ranked = sorted(
         trial_rows,
-        key=lambda x: (-float(x.get("quality_gain_tune_vs_baseline", 0.0)), str(x.get("trial_id", ""))),
+        key=lambda x: (
+            -float(x.get("quality_gain_tune_vs_baseline", 0.0)),
+            float(dict(x.get("diagnostics", {})).get("top20_count_zero_ratio", 0.0)),
+            float(dict(x.get("diagnostics", {})).get("selected_all_ratio", 0.0)),
+            str(x.get("trial_id", "")),
+        ),
     )
     best = ranked[0]
     best_overrides = dict(best.get("candidate_adaptive_overrides") or {})
@@ -902,6 +948,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
             "quality_gain_dev_vs_baseline": float(best.get("quality_gain_tune_vs_baseline", 0.0)),
             "adaptive_overrides": best_overrides,
             "lambdas": best_lambdas,
+            "diagnostics": dict(best.get("diagnostics", {})),
         },
         "command": raw_argv,
     }

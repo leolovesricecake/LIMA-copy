@@ -75,6 +75,13 @@ def test_method_level_reports_and_shared_chunk_partition(tmp_path: Path) -> None
         mdir = _method_dir(out, method)
         report = json.loads((mdir / "eval_report.json").read_text(encoding="utf-8"))
         assert report["report_method"] == method
+        sec = dict(report.get("metrics_secondary", {}))
+        assert "top20_count_zero_ratio" in sec
+        assert "selected_all_ratio" in sec
+        assert "plausibility_available" in sec
+        assert "plausibility_coverage_ratio" in sec
+        assert sec["plausibility_available"] is True
+        assert float(sec["plausibility_coverage_ratio"]) == 1.0
 
         payloads = _sample_payloads(mdir)
         assert len(payloads) == 2
