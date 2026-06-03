@@ -28,9 +28,12 @@ Datasets sizes are the original datasets sizes, unless defined otherwise.
 ## Running AML
 Examples of running our method on BERT and LLAMA:
 ```
-python run.py emotions BERT BERT SUFFICIENCY
+cd baselines/aml-main_copy
+python runs/run.py emotions BERT BERT SUFFICIENCY
 ```
 ```
-python run.py emotions LLAMA ROBERTA SUFFICIENCY
+cd baselines/aml-main_copy
+python runs/run.py emotions LLAMA ROBERTA SUFFICIENCY
 ```
 
+For a fuller setup and per-dataset command list, see `REPRO_GUIDE.md`.

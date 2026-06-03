@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train-size", type=int, default=80)
     parser.add_argument("--dev-size", type=int, default=40)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", type=str, default="adaptive_tune_splits")
+    parser.add_argument("--save-root", type=str, default="adaptive_tune_splits")
     parser.add_argument("--eraser-root", type=str, default=None)
     parser.add_argument("--sst2-source", type=str, default=None)
     parser.add_argument("--dataset-cache-dir", type=str, default=None)
@@ -157,7 +157,7 @@ def main() -> None:
         seed=int(args.seed),
     )
 
-    out_dir = Path(args.output_dir) / args.dataset
+    out_dir = Path(args.save_root) / args.dataset
     out_dir.mkdir(parents=True, exist_ok=True)
     train_path = out_dir / "train_ids.json"
     dev_path = out_dir / "dev_ids.json"

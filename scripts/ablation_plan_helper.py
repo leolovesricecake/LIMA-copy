@@ -42,8 +42,15 @@ def _flag_items(cfg: Dict[str, Any], key: str, cli_name: str) -> List[str]:
     return [cli_name, str(value)]
 
 
+def _results_root(cfg: Dict[str, Any]) -> Path:
+    base_save_dir = str(cfg.get("base_save_dir", "results"))
+    save_dir = str(cfg.get("save_dir", "")).strip()
+    if save_dir == "":
+        raise ValueError("template run config must contain non-empty `save_dir` for command generation")
+    return Path(base_save_dir) / save_dir
+
+
 def _build_run_dir(cfg: Dict[str, Any], lambdas: str) -> Path:
-    output_dir = str(cfg.get("output_dir", "lima_llm_results"))
     dataset = str(cfg.get("dataset", ""))
     model_path = str(cfg.get("model_path", ""))
     chunker = str(cfg.get("chunker", "sentence"))
@@ -58,7 +65,7 @@ def _build_run_dir(cfg: Dict[str, Any], lambdas: str) -> Path:
         f"_lam-{lambdas.replace(',', '-')}_seed-{seed}"
         f"_method-{explain_method}"
     )
-    return Path(output_dir) / dataset / f"model-{model_leaf}" / run_name
+    return _results_root(cfg) / dataset / f"model-{model_leaf}" / run_name
 
 
 def _build_base_cmd(cfg: Dict[str, Any], python_bin: str) -> List[str]:
@@ -79,7 +86,8 @@ def _build_base_cmd(cfg: Dict[str, Any], python_bin: str) -> List[str]:
     cmd.extend(_flag_items(cfg, "search", "--search"))
     cmd.extend(_flag_items(cfg, "seed", "--seed"))
     cmd.extend(_flag_items(cfg, "max_samples", "--max-samples"))
-    cmd.extend(_flag_items(cfg, "output_dir", "--output-dir"))
+    cmd.extend(_flag_items(cfg, "base_save_dir", "--base-save-dir"))
+    cmd.extend(_flag_items(cfg, "save_dir", "--save-dir"))
     cmd.extend(_flag_items(cfg, "resume_check", "--resume-check"))
     cmd.extend(_flag_items(cfg, "eval_q_values", "--eval-q-values"))
     cmd.extend(_flag_items(cfg, "eval_granularity", "--eval-granularity"))

@@ -1,8 +1,10 @@
 import sys
+from pathlib import Path
 
 
-
-sys.path.append("../..")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 from main.hp_search import HpSearch
 from main.run_fine_tune import FineTune

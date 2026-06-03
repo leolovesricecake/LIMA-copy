@@ -11,7 +11,8 @@ set -euo pipefail
 #   --chunker sentence \
 #   --search greedy \
 #   --max-samples 100 \
-#   --output-dir lima_llm_results \
+#   --base-save-dir results \
+#   --save-dir smoke-sst2 \
 #   --run-eval
 
 # Example 2: ERASER Movie Reviews with local HF 7B model
@@ -27,7 +28,8 @@ set -euo pipefail
 #   --search greedy \
 #   --explain-method ours \
 #   --dataset-cache-dir /path/to/dataset_cache \
-#   --output-dir lima_llm_results \
+#   --base-save-dir results \
+#   --save-dir eraser-qwen \
 #   --run-eval
 export HF_ENDPOINT=https://hf-mirror.com
 

@@ -34,7 +34,8 @@ def test_ablation_plan_helper_generates_grid_and_commands(tmp_path: Path) -> Non
         "seed": 42,
         "deterministic": True,
         "max_samples": 20,
-        "output_dir": str(tmp_path / "runs"),
+        "base_save_dir": str(tmp_path),
+        "save_dir": "runs",
         "resume_check": "strict",
         "run_eval": True,
         "eval_q_values": "1,5,10,20,50",
@@ -53,6 +54,8 @@ def test_ablation_plan_helper_generates_grid_and_commands(tmp_path: Path) -> Non
     commands = [row["command"] for row in payload["entries"]]
     assert any("--lambdas 1,1,1,1" in cmd for cmd in commands)
     assert any("--lambdas 0,1,1,1" in cmd for cmd in commands)
+    assert all("--base-save-dir" in cmd for cmd in commands)
+    assert all("--save-dir runs" in cmd for cmd in commands)
 
     for row in payload["entries"]:
         assert "chunk-sentence_search-greedy_k-8" in row["run_dir"]
@@ -71,7 +74,8 @@ def test_ablation_plan_helper_phase_b2_grid(tmp_path: Path) -> None:
         "chunker": "sentence",
         "search": "greedy",
         "seed": 42,
-        "output_dir": str(tmp_path / "runs"),
+        "base_save_dir": str(tmp_path),
+        "save_dir": "runs",
         "explain_method": "ours",
     }
     cfg_path = tmp_path / "run_config.json"

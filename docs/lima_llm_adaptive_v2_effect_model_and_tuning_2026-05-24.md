@@ -36,7 +36,8 @@ python -m lima_llm \
   --lambdas 1,1,0,1 \
   --run-eval \
   --max-samples 200 \
-  --output-dir lima_llm_results-adaptive-baseline
+  --base-save-dir results \
+  --save-dir adaptive-baseline
 ```
 
 ### 3.2 内联超参搜索 + 最终评估（单数据集单命令）
@@ -46,9 +47,8 @@ python -m lima_llm \
 - `--hparam-search-split` 是搜索集；为空表示不搜索。
 - 默认搜索子集大小是 `tune=100`，可通过 `--hparam-tune-size` 覆盖。
 - 若搜索集与评估集相同，系统会先抽走搜索样本，再从剩余样本做评估，最后才应用 `--max-samples`。
-- `--hparam-train-size/--hparam-dev-size` 仅为兼容旧脚本，建议不再使用（内部会映射为 `tune-size`）。
 - 搜索候选永远包含 baseline（`adaptive_overrides={}` + 当前 `--lambdas`）。
-- 默认总 trial 预算由 `--hparam-max-trials` 控制（默认 `16`）；超预算时做固定 seed 的确定性下采样。
+- 默认总 trial 预算等于 `--hparam-tune-size`；显式传 `--hparam-max-trials` 时才覆盖该上限。超预算时做固定 seed 的确定性多样性下采样。
 - `lambda` 搜索能力已支持，但默认关闭；启用时需加 `--hparam-enable-lambda-search`。
 
 ```bash
@@ -71,7 +71,8 @@ python -m lima_llm \
   --lambdas 1,1,0,1 \
   --run-eval \
   --max-samples 200 \
-  --output-dir lima_llm_results-adaptive-inline-search
+  --base-save-dir results \
+  --save-dir adaptive-inline-search
 ```
 
 可选参数空间文件（JSON）格式：

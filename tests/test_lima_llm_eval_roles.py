@@ -41,6 +41,10 @@ def _method_dir(root: Path, method: str) -> Path:
     return matches[0]
 
 
+def _save_args(output_root: Path) -> list[str]:
+    return ["--base-save-dir", str(output_root.parent), "--save-dir", output_root.name]
+
+
 def test_method_level_reports_and_shared_chunk_partition(tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser"
     _build_tiny_eraser(eraser_root)
@@ -60,8 +64,7 @@ def test_method_level_reports_and_shared_chunk_partition(tmp_path: Path) -> None
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
         "--seed",
         "42",
@@ -127,8 +130,8 @@ def test_random_method_is_reproducible_with_same_seed(tmp_path: Path) -> None:
         "42",
     ]
 
-    main([*argv, "--output-dir", str(out_a)])
-    main([*argv, "--output-dir", str(out_b)])
+    main([*argv, *_save_args(out_a)])
+    main([*argv, *_save_args(out_b)])
 
     payloads_a = _sample_payloads(_method_dir(out_a, "random"))
     payloads_b = _sample_payloads(_method_dir(out_b, "random"))

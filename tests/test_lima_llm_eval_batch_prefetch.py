@@ -52,6 +52,10 @@ def _canonical_report(report: dict) -> dict:
     return out
 
 
+def _save_args(output_root: Path) -> list[str]:
+    return ["--base-save-dir", str(output_root.parent), "--save-dir", output_root.name]
+
+
 def test_eval_batch_prefetch_keeps_metrics_identical(monkeypatch, tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser"
     _build_tiny_eraser(eraser_root)
@@ -72,8 +76,7 @@ def test_eval_batch_prefetch_keeps_metrics_identical(monkeypatch, tmp_path: Path
             "greedy",
             "--k",
             "2",
-            "--output-dir",
-            str(results_root),
+            *_save_args(results_root),
         ]
     )
 
@@ -155,8 +158,7 @@ def test_eval_prefetch_length_sort_env_is_deprecated_noop(monkeypatch, tmp_path:
             "greedy",
             "--k",
             "2",
-            "--output-dir",
-            str(results_root),
+            *_save_args(results_root),
         ]
     )
 
@@ -243,8 +245,7 @@ def test_eval_prefetch_warn_policy_records_fallback(monkeypatch, tmp_path: Path)
             "greedy",
             "--k",
             "2",
-            "--output-dir",
-            str(results_root),
+            *_save_args(results_root),
         ]
     )
 
@@ -294,8 +295,7 @@ def test_eval_prefetch_fail_policy_raises(monkeypatch, tmp_path: Path) -> None:
             "greedy",
             "--k",
             "2",
-            "--output-dir",
-            str(results_root),
+            *_save_args(results_root),
         ]
     )
 

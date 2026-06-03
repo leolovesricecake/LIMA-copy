@@ -165,19 +165,57 @@ def test_hparam_candidate_budget_is_deterministic() -> None:
 def test_resolve_hparam_tune_size_prefers_new_flag() -> None:
     args = SimpleNamespace(
         hparam_tune_size=88,
-        hparam_train_size=None,
-        hparam_dev_size=None,
     )
     assert run_mod._resolve_hparam_tune_size(args) == 88
 
 
-def test_resolve_hparam_tune_size_accepts_legacy_sum() -> None:
+def test_resolve_hparam_max_trials_defaults_to_tune_size() -> None:
     args = SimpleNamespace(
-        hparam_tune_size=999,
-        hparam_train_size=60,
-        hparam_dev_size=40,
+        hparam_max_trials=None,
     )
-    assert run_mod._resolve_hparam_tune_size(args) == 100
+    assert run_mod._resolve_hparam_max_trials(args, tune_size=60) == 60
+
+
+def test_resolve_hparam_max_trials_prefers_explicit_value() -> None:
+    args = SimpleNamespace(
+        hparam_max_trials=12,
+    )
+    assert run_mod._resolve_hparam_max_trials(args, tune_size=60) == 12
+
+
+def test_parser_requires_save_dir() -> None:
+    parser = run_mod.build_parser()
+    try:
+        _ = parser.parse_args(
+            [
+                "--dataset",
+                "sst2",
+            ]
+        )
+    except SystemExit as exc:
+        assert int(exc.code) == 2
+    else:
+        raise AssertionError("Expected parser to require --save-dir")
+
+
+def test_parser_rejects_removed_legacy_args() -> None:
+    parser = run_mod.build_parser()
+    for legacy_flag in ("--output-dir", "--hparam-train-size", "--hparam-dev-size"):
+        try:
+            _ = parser.parse_args(
+                [
+                    "--dataset",
+                    "sst2",
+                    "--save-dir",
+                    "unit-test",
+                    legacy_flag,
+                    "value",
+                ]
+            )
+        except SystemExit as exc:
+            assert int(exc.code) == 2
+        else:
+            raise AssertionError(f"Expected parser to reject {legacy_flag}")
 
 
 def test_parser_rejects_balanced_v2_profile() -> None:
@@ -188,6 +226,8 @@ def test_parser_rejects_balanced_v2_profile() -> None:
             [
                 "--dataset",
                 "sst2",
+                "--save-dir",
+                "unit-test",
                 "--adaptive-profile",
                 "balanced_v2",
             ]

@@ -93,6 +93,10 @@ def _build_tiny_eraser_four(root: Path) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _save_args(output_root: Path) -> list[str]:
+    return ["--base-save-dir", str(output_root.parent), "--save-dir", output_root.name]
+
+
 def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser"
     _build_tiny_eraser(eraser_root)
@@ -112,8 +116,7 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
     ]
     main(argv)
@@ -203,8 +206,7 @@ def test_pipeline_adaptive_chunker_emits_adaptive_diagnostics(tmp_path: Path) ->
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     main(argv)
 
@@ -255,8 +257,7 @@ def test_pipeline_adaptive_overrides_json_is_applied(tmp_path: Path) -> None:
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     main(argv)
 
@@ -292,8 +293,7 @@ def test_pipeline_sample_ids_file_filters_samples(tmp_path: Path) -> None:
         "2",
         "--sample-ids-file",
         str(sample_ids_path),
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     main(argv)
 
@@ -346,8 +346,7 @@ def test_pipeline_hparam_search_inline_and_final_eval(tmp_path: Path) -> None:
         "1",
         "--hparam-space-file",
         str(hparam_space),
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
     ]
     main(argv)
@@ -396,8 +395,7 @@ def test_pipeline_hparam_search_same_split_requires_eval_remainder(tmp_path: Pat
         "random",
         "--hparam-random-trials",
         "1",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     with pytest.raises(ValueError, match="remaining_eval"):
         main(argv)
@@ -443,8 +441,7 @@ def test_pipeline_hparam_search_with_lambda_enabled(tmp_path: Path) -> None:
         "--hparam-enable-lambda-search",
         "--hparam-space-file",
         str(hparam_space),
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
     ]
     main(argv)
@@ -487,8 +484,7 @@ def test_pipeline_hparam_search_requires_adaptive_chunker(tmp_path: Path) -> Non
         "sentence",
         "--hparam-search-split",
         "validation",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     with pytest.raises(ValueError, match="requires --chunker adaptive"):
         main(argv)
@@ -531,45 +527,10 @@ def test_pipeline_hparam_search_rejects_lambda_keys_when_disabled(tmp_path: Path
         "1",
         "--hparam-space-file",
         str(hparam_space),
-        "--output-dir",
-        str(out),
+        *_save_args(out),
     ]
     with pytest.raises(ValueError, match="--hparam-enable-lambda-search"):
         main(argv)
-
-
-def test_pipeline_hparam_search_legacy_train_dev_maps_to_tune_size(tmp_path: Path) -> None:
-    eraser_root = tmp_path / "eraser_legacy_size"
-    _build_tiny_eraser_three(eraser_root)
-    out = tmp_path / "results_hparam_legacy_size"
-    argv = [
-        "--dataset",
-        "eraser_movie_reviews",
-        "--split",
-        "validation",
-        "--eraser-root",
-        str(eraser_root),
-        "--mock-backbone",
-        "--chunker",
-        "adaptive",
-        "--hparam-search-split",
-        "validation",
-        "--hparam-train-size",
-        "1",
-        "--hparam-dev-size",
-        "1",
-        "--hparam-search-method",
-        "random",
-        "--hparam-random-trials",
-        "1",
-        "--output-dir",
-        str(out),
-        "--run-eval",
-    ]
-    main(argv)
-    run_cfg_path = next(out.glob("**/run_config.json"))
-    run_cfg = json.loads(run_cfg_path.read_text(encoding="utf-8"))
-    assert int(run_cfg.get("hparam_tune_size", 0)) == 2
 
 
 def test_pipeline_hparam_search_applies_max_samples_after_disjoint(tmp_path: Path) -> None:
@@ -596,8 +557,7 @@ def test_pipeline_hparam_search_applies_max_samples_after_disjoint(tmp_path: Pat
         "1",
         "--max-samples",
         "1",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
     ]
     main(argv)
@@ -627,8 +587,7 @@ def test_pipeline_eval_granularity_word_override(tmp_path: Path) -> None:
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
         "--eval-granularity",
         "word",
@@ -667,8 +626,7 @@ def test_pipeline_deterministic_mode_is_recorded(tmp_path: Path) -> None:
         "greedy",
         "--k",
         "2",
-        "--output-dir",
-        str(out),
+        *_save_args(out),
         "--run-eval",
         "--deterministic",
     ]
@@ -710,8 +668,8 @@ def test_deterministic_mode_keeps_sample_outputs_reproducible(tmp_path: Path) ->
         "2",
         "--deterministic",
     ]
-    main([*common_argv, "--output-dir", str(out_a)])
-    main([*common_argv, "--output-dir", str(out_b)])
+    main([*common_argv, *_save_args(out_a)])
+    main([*common_argv, *_save_args(out_b)])
 
     payloads_a = {
         p.stem: json.loads(p.read_text(encoding="utf-8"))

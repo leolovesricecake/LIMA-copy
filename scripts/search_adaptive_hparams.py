@@ -314,7 +314,7 @@ def _model_tag(model_path: str) -> str:
 
 def _expected_run_dir(
     *,
-    output_dir: Path,
+    results_root: Path,
     dataset: str,
     model_path: str,
     search: str,
@@ -327,7 +327,7 @@ def _expected_run_dir(
         f"chunk-adaptive_search-{search}_k-{k}"
         f"_lam-{str(lambdas).replace(',', '-')}_seed-{seed}_method-{explain_method}"
     )
-    return output_dir / dataset / f"model-{_model_tag(model_path)}" / run_name
+    return results_root / dataset / f"model-{_model_tag(model_path)}" / run_name
 
 
 def _run_trial(
@@ -360,7 +360,7 @@ def _run_trial(
 ) -> Dict[str, Any]:
     run_output_dir = trial_output_root / trial_id
     run_dir = _expected_run_dir(
-        output_dir=run_output_dir,
+        results_root=run_output_dir,
         dataset=dataset,
         model_path=model_path,
         search=search,
@@ -403,8 +403,10 @@ def _run_trial(
         lambdas,
         "--seed",
         str(seed),
-        "--output-dir",
-        str(run_output_dir),
+        "--base-save-dir",
+        str(trial_output_root),
+        "--save-dir",
+        str(trial_id),
         "--resume-check",
         resume_check,
         "--run-eval",

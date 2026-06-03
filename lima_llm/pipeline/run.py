@@ -114,8 +114,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Number of samples used for hparam tuning (dev-only selection; no model training).",
     )
-    parser.add_argument("--hparam-train-size", type=int, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--hparam-dev-size", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--hparam-search-method",
         type=str,
@@ -124,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--hparam-space-file", type=str, default=None)
     parser.add_argument("--hparam-random-trials", type=int, default=8)
-    parser.add_argument("--hparam-max-trials", type=int, default=16)
+    parser.add_argument("--hparam-max-trials", type=int, default=None)
     parser.add_argument("--hparam-enable-lambda-search", action="store_true")
 
     parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])
@@ -135,7 +133,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", type=int, default=0)
     parser.add_argument("--verbose-chunks", action="store_true")
 
-    parser.add_argument("--output-dir", type=str, default="lima_llm_results")
+    parser.add_argument("--base-save-dir", type=str, default="results")
+    parser.add_argument("--save-dir", type=str, required=True)
     parser.add_argument("--resume-check", type=str, default="strict", choices=["strict", "exists-only"])
 
     parser.add_argument("--run-eval", action="store_true")
@@ -267,16 +266,14 @@ def _load_json_if_possible(path: Path) -> Dict | None:
 
 def _default_hparam_space() -> Dict[str, List[Any]]:
     return {
-        # Low-budget default space:
-        # keep coverage over short/long controls but avoid combinatorial explosion.
-        "short_max_words": [64, 96],
-        "medium_max_words": [384],
+        "short_max_words": [96, 120],
+        "medium_max_words": [384, 448],
         "long_max_words": [960, 1152],
-        "min_effective_chunks": [4, 6],
+        "min_effective_chunks": [4, 5],
         "short_floor_min_words": [12, 15],
         "short_floor_signal_mode": ["always", "structural"],
         "guard_mode": ["hard_cap", "soft_band"],
-        "ratio_threshold": [24, 28],
+        "ratio_threshold": [20, 24, 28],
         "fragmentation_target_words": [28, 32],
     }
 
@@ -510,24 +507,26 @@ def _split_train_dev(*, samples: Sequence, train_size: int, dev_size: int, seed:
 
 
 def _resolve_hparam_tune_size(args) -> int:
-    legacy_train = args.hparam_train_size
-    legacy_dev = args.hparam_dev_size
-    if legacy_train is None and legacy_dev is None:
-        return max(0, int(args.hparam_tune_size))
+    return max(0, int(args.hparam_tune_size))
 
-    train_part = max(0, int(legacy_train or 0))
-    dev_part = max(0, int(legacy_dev or 0))
-    merged = train_part + dev_part
-    print(
-        "[hparam-search][deprecated] --hparam-train-size/--hparam-dev-size are deprecated. "
-        "Please use --hparam-tune-size. Current run maps them to tune_size=train+dev."
-    )
-    return max(0, int(merged))
+
+def _resolve_hparam_max_trials(args, *, tune_size: int) -> int:
+    raw_value = getattr(args, "hparam_max_trials", None)
+    if raw_value is None:
+        return max(1, int(tune_size))
+    return max(1, int(raw_value))
+
+
+def _results_root(base_save_dir: str | Path, save_dir: str) -> Path:
+    save_dir_text = str(save_dir).strip()
+    if save_dir_text == "":
+        raise ValueError("--save-dir must be a non-empty path segment.")
+    return Path(base_save_dir) / save_dir_text
 
 
 def _output_root_from_values(
     *,
-    output_dir: Path,
+    results_root: Path,
     dataset: str,
     model_path: str,
     chunker: str,
@@ -538,7 +537,7 @@ def _output_root_from_values(
     explain_method: str,
 ) -> Path:
     return (
-        output_dir
+        results_root
         / dataset
         / f"model-{model_path.split('/')[-1].replace('.', '_')}"
         / (
@@ -553,7 +552,8 @@ def _run_subprocess_trial(
     *,
     args,
     split: str,
-    output_dir: Path,
+    base_save_dir: Path,
+    save_dir: str,
     sample_ids_file: Path,
     adaptive_overrides: Mapping[str, Any],
     lambdas: str,
@@ -594,8 +594,10 @@ def _run_subprocess_trial(
         str(args.seed),
         "--sample-ids-file",
         str(sample_ids_file),
-        "--output-dir",
-        str(output_dir),
+        "--base-save-dir",
+        str(base_save_dir),
+        "--save-dir",
+        str(save_dir),
         "--resume-check",
         str(args.resume_check),
         "--explain-method",
@@ -628,7 +630,7 @@ def _run_subprocess_trial(
         raise RuntimeError(f"Subprocess failed code={proc.returncode}, split={split}")
 
     run_root = _output_root_from_values(
-        output_dir=Path(output_dir),
+        results_root=_results_root(base_save_dir, save_dir),
         dataset=str(args.dataset),
         model_path=str(args.model_path),
         chunker=str(args.chunker),
@@ -720,7 +722,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
     )
 
     output_root = _output_root_from_values(
-        output_dir=Path(args.output_dir),
+        results_root=_results_root(args.base_save_dir, args.save_dir),
         dataset=str(args.dataset),
         model_path=str(args.model_path),
         chunker=str(args.chunker),
@@ -756,6 +758,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
 
     same_split = _canonical_hf_split(args.dataset, args.split) == _canonical_hf_split(args.dataset, search_split)
     requested_search_count = _resolve_hparam_tune_size(args)
+    resolved_max_trials = _resolve_hparam_max_trials(args, tune_size=requested_search_count)
     total_search_pool = int(len(search_bundle.samples))
     if requested_search_count <= 0:
         raise ValueError("hparam tune size must be > 0.")
@@ -820,7 +823,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         lambda_space=lambda_space,
         enable_lambda_search=bool(args.hparam_enable_lambda_search),
         random_trials=int(args.hparam_random_trials),
-        max_trials=int(args.hparam_max_trials),
+        max_trials=int(resolved_max_trials),
         seed=int(args.seed),
     )
     base_lambdas = parse_lambdas(str(args.lambdas))
@@ -847,7 +850,8 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         train_result = _run_subprocess_trial(
             args=args,
             split=search_split,
-            output_dir=trial_root / "tune",
+            base_save_dir=trial_root,
+            save_dir="tune",
             sample_ids_file=tune_ids_path,
             adaptive_overrides=candidate_overrides,
             lambdas=trial_lambdas,
@@ -877,16 +881,10 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
     for row in trial_rows:
         gain_tune = _quality_gain(row["tune"]["metrics"], baseline_tune_metrics)
         row["quality_gain_tune_vs_baseline"] = gain_tune
-        row["quality_gain_dev_vs_baseline"] = gain_tune
 
     ranked = sorted(
         trial_rows,
-        key=lambda x: (
-            -float(x.get("quality_gain_tune_vs_baseline", 0.0)),
-            float(dict(x.get("diagnostics", {})).get("top20_count_zero_ratio", 0.0)),
-            float(dict(x.get("diagnostics", {})).get("selected_all_ratio", 0.0)),
-            str(x.get("trial_id", "")),
-        ),
+        key=lambda x: (-float(x.get("quality_gain_tune_vs_baseline", 0.0)), str(x.get("trial_id", ""))),
     )
     best = ranked[0]
     best_overrides = dict(best.get("candidate_adaptive_overrides") or {})
@@ -897,11 +895,11 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         f"lambdas={best_lambdas}"
     )
 
-    final_output_dir = Path(args.output_dir)
     final_result = _run_subprocess_trial(
         args=args,
         split=str(args.split),
-        output_dir=final_output_dir,
+        base_save_dir=Path(args.base_save_dir),
+        save_dir=str(args.save_dir),
         sample_ids_file=eval_ids_path,
         adaptive_overrides=best_overrides,
         lambdas=best_lambdas,
@@ -916,19 +914,15 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "hparam_search_split": search_split,
         "same_split": bool(same_split),
         "hparam_tune_size": int(requested_search_count),
-        "hparam_train_size": int(args.hparam_train_size or 0),
-        "hparam_dev_size": int(args.hparam_dev_size or 0),
         "hparam_search_method": str(args.hparam_search_method),
         "hparam_random_trials": int(args.hparam_random_trials),
-        "hparam_max_trials": int(args.hparam_max_trials),
+        "hparam_max_trials": int(resolved_max_trials),
         "hparam_space": raw_hparam_space,
         "adaptive_space": adaptive_space,
         "lambda_space": lambda_space,
         "requested_search_count": int(requested_search_count),
         "search_pool_count": int(total_search_pool),
         "tune_count": int(len(tune_samples)),
-        "train_count": int(len(tune_samples)),
-        "dev_count": 0,
         "eval_count_after_disjoint_and_filters": int(len(eval_candidates)),
         "candidate_adaptive_overrides": [dict(row.get("adaptive_params") or {}) for row in candidates],
         "candidate_lambdas": [
@@ -945,7 +939,6 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "best_trial": {
             "trial_id": str(best.get("trial_id", "")),
             "quality_gain_tune_vs_baseline": float(best.get("quality_gain_tune_vs_baseline", 0.0)),
-            "quality_gain_dev_vs_baseline": float(best.get("quality_gain_tune_vs_baseline", 0.0)),
             "adaptive_overrides": best_overrides,
             "lambdas": best_lambdas,
             "diagnostics": dict(best.get("diagnostics", {})),
@@ -1050,7 +1043,7 @@ def main(argv: List[str] | None = None) -> None:
         return
 
     output_root = _output_root_from_values(
-        output_dir=Path(args.output_dir),
+        results_root=_results_root(args.base_save_dir, args.save_dir),
         dataset=str(args.dataset),
         model_path=str(args.model_path),
         chunker=str(args.chunker),

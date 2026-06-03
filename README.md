@@ -13,7 +13,7 @@
 
 ```bash
 # 1) Dry-run（无需大模型）
-python -m lima_llm --dataset sst2 --split validation --mock-backbone --dry-run 10
+python -m lima_llm --dataset sst2 --split validation --mock-backbone --save-dir dry-run-sst2 --dry-run 10
 
 # 2) 端到端（mock，含评估）
 bash scripts/run_lima_llm_v1.sh \
@@ -26,7 +26,8 @@ bash scripts/run_lima_llm_v1.sh \
   --search greedy \
   --explain-method ours \
   --max-samples 100 \
-  --output-dir lima_llm_results \
+  --base-save-dir results \
+  --save-dir smoke-sst2 \
   --run-eval
 ```
 
@@ -38,7 +39,7 @@ bash scripts/run_lima_llm_v1.sh \
 
 `--deterministic` 可开启更强确定性设置（用于回归对账/复现实验）。运行产物 `run_config.json`、`eval_config.json`、`eval_report.json` 会包含 `provenance` 字段（git/命令/环境/时间信息）。
 
-可用 `python scripts/analysis_snapshot.py --results-root lima_llm_results --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
+可用 `python scripts/analysis_snapshot.py --results-root results/smoke-sst2 --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
 
 可用 `python scripts/lambda_sweep_report.py --baseline-run-dir <baseline_run_dir> --candidate-run-dirs <run_dir_1> <run_dir_2>` 生成 `lambda` 小网格的 Faithfulness 五指标方向判定与速度/稳定性副作用汇总。
 
@@ -66,7 +67,7 @@ python -m lima_llm \
   --run-eval \
   --explain-method ours \
   --deterministic --max-samples 20 \
-  --output-dir lima_llm_results-20-0515-deter --device cuda:1
+  --base-save-dir results --save-dir 20-0515-deter --device cuda:1
 ```
 
 
@@ -87,5 +88,5 @@ LIMA_EVAL_PREFETCH_LENGTH_SORT=1 python -m lima_llm \
   --run-eval \
   --explain-method ours \
   --deterministic --max-samples 20 \
-  --output-dir lima_llm_results-20-0515-deter-sort --device cuda:1
+  --base-save-dir results --save-dir 20-0515-deter-sort --device cuda:1
 ```

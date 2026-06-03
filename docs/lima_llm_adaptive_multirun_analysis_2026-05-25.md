@@ -117,7 +117,8 @@ python -m lima_llm \
   --hparam-max-trials 16 \
   --search greedy --k 8 --lambdas 1,1,0,1 \
   --run-eval --deterministic --max-samples 20 \
-  --output-dir lima_llm_results-adaptive-tune
+  --base-save-dir results \
+  --save-dir adaptive-tune
 ```
 
 200 样本 production（稳态结论）：
@@ -135,7 +136,8 @@ python -m lima_llm \
   --hparam-max-trials 16 \
   --search greedy --k 8 --lambdas 1,1,0,1 \
   --run-eval --max-samples 200 \
-  --output-dir lima_llm_results-adaptive-tune
+  --base-save-dir results \
+  --save-dir adaptive-tune
 ```
 
 其余数据集替换两项即可：
