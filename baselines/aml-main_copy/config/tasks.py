@@ -27,8 +27,8 @@ IMDB_TASK: Task = Task(  #
     name = "imdb",  #
     paper_name = "IMDB",  #
     hp_search_n_trials = 30,  #
-    llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama_Llama-2-7b-hf",  #
-    mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai_Mistral-7B-v0.1",  #
+    llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama/Llama-2-7b-hf",  #
+    mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai/Mistral-7B-v0.1",  #
     is_finetuned_with_lora = False,  #
     llm_task_prompt = "Classify the sentiment of the movie review. For each sentence the label is positive (P) or negative (N)",
     #
@@ -68,9 +68,9 @@ EMOTION_TASK: Task = Task(dataset_name = "emotion",  #
 
                           bert_base_model = "bert-base-uncased",  #
 
-                          llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama_Llama-2-7b-hf",  #
+                          llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama/Llama-2-7b-hf",  #
 
-                          mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai_Mistral-7B-v0.1",  #
+                          mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai/Mistral-7B-v0.1",  #
 
                           is_finetuned_with_lora = True,  #
 
@@ -105,8 +105,8 @@ SST_TASK: Task = Task(dataset_name = "sst2",  #
                       dataset_column_label = "label",  #
                       bert_fine_tuned_model = "textattack/bert-base-uncased-SST-2",  #
                       roberta_fine_tuned_model = "textattack/roberta-base-SST-2",  #
-                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama_Llama-2-7b-hf",  #
-                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai_Mistral-7B-v0.1",  #
+                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama/Llama-2-7b-hf",  #
+                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai/Mistral-7B-v0.1",  #
                       is_finetuned_with_lora = False,  #
                       labels_str_int_maps = dict(negative = 'N', positive = 'P'),  #
                       distilbert_fine_tuned_model = "distilbert-base-uncased-finetuned-sst-2-english",  #
@@ -151,8 +151,8 @@ AGN_TASK: Task = Task(dataset_name = "ag_news",  #
                       name = "agn",  #
                       paper_name = "AGN",  #
                       hp_search_n_trials = 30,  #
-                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama_Llama-2-7b-hf",  #
-                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai_Mistral-7B-v0.1",  #
+                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama/Llama-2-7b-hf",  #
+                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai/Mistral-7B-v0.1",  #
                       llm_task_prompt = "Classify the news articles. For each article label is World (A) Sports (B) Business (C) Sci/Tech (D)",
                       roberta_base_model = "FacebookAI/roberta-base",  #
                       distilbert_base_model = "distilbert/distilbert-base-uncased",  #
@@ -185,8 +185,8 @@ RTN_TASK: Task = Task(dataset_name = "rotten_tomatoes",  #
                       name = "rtn",  #
                       paper_name = "RTN",  #
                       hp_search_n_trials = 30,  #
-                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama_Llama-2-7b-hf",  #
-                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai_Mistral-7B-v0.1",  #
+                      llama_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/meta-llama/Llama-2-7b-hf",  #
+                      mistral_model = f"{LOCAL_MODELS_PREFIX}/DOWNLOADED_MODELS/mistralai/Mistral-7B-v0.1",  #
                       llm_task_prompt = "Classify the sentiment of sentences. For each sentence the label is positive (P) or negative (N)",
                       llm_few_shots_prompt = [
                           ("the film desperately sinks further and further into comedy futility .",  #

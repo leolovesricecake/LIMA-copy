@@ -23,5 +23,5 @@ NEW_ADDED_TRAINABLE_PARAMS = "_new_added_trainable_params_"
 NAN_FLOAT = float('nan')
 
 
-HF_CACHE = "./"
-LOCAL_MODELS_PREFIX = "./"
+HF_CACHE = "/mnt/huawei/nsq/temp/hf"
+LOCAL_MODELS_PREFIX = "/mnt/huawei/nsq/models"

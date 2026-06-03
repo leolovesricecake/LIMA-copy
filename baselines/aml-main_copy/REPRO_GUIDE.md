@@ -41,11 +41,9 @@ Recommended setup:
 
 ```bash
 cd /Users/apple/LEO/codes/LIMA-main/baselines/aml-main_copy
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -r requirements.txt
-python -m pip install optuna peft scikit-learn pandas sentencepiece
+conda activate aml
+pip install -r requirements.txt
+pip install optuna peft scikit-learn pandas sentencepiece
 ```
 
 If your PyTorch / CUDA stack is managed elsewhere, keep that environment and install the missing Python packages into it instead.
@@ -111,7 +109,7 @@ These are the safest first commands because they use public encoder models rathe
 
 ```bash
 cd /Users/apple/LEO/codes/LIMA-main/baselines/aml-main_copy
-source .venv/bin/activate
+conda activate aml
 ```
 
 IMDB:
