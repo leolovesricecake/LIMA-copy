@@ -1,0 +1,378 @@
+{
+  "report_method": "ours",
+  "dataset": "rotten_tomatoes",
+  "split": "validation",
+  "sample_count": 1066,
+  "metric_settings": {
+    "protocol": "AML",
+    "primary_top_k_percent": 20,
+    "aopc_top_k_percentages": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ],
+    "aopc_average_denominator": "len(top_k_percentages)+1",
+    "log_odds_reference_token": "<|endoftext|>",
+    "perturbation_unit": "token",
+    "unit_segmentation": "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable",
+    "chunk_to_unit_projection": "overlap-weighted average chunk rank; lower rank is more important",
+    "unit_segmentation_counts": {
+      "tokenizer_offset_mapping": 1066
+    },
+    "eval_batch_prefetch_enabled": true,
+    "prefetch_fallback_policy": "warn",
+    "prefetch_length_sort_enabled": false
+  },
+  "metrics_primary": {
+    "accuracy_full": 0.6969981238273921,
+    "log_odds": -0.2056551435847989,
+    "comprehensiveness": 0.07946389949616585,
+    "sufficiency": -0.08778931755803204,
+    "aopc_sufficiency": -0.020538475568783198,
+    "aopc_comprehensiveness": 0.05119173713871878,
+    "aopc": 0.14523049399395638
+  },
+  "metrics_secondary": {
+    "sparsity": 1.0,
+    "plausibility_f1": 0.0,
+    "plausibility_iou": 0.0,
+    "top20_count_zero_ratio": 0.1801125703564728,
+    "selected_all_ratio": 1.0,
+    "plausibility_available": false,
+    "plausibility_coverage_ratio": 0.0,
+    "runtime_seconds": 663.7286207675934,
+    "forward_counters_delta": {
+      "batch_pack_seconds": 40.95711646077689,
+      "model_forward_calls": 16938,
+      "batch_rows": 32301,
+      "embed_calls": 0,
+      "batch_forward_calls": 16938,
+      "oom_shrink_events": 0,
+      "batch_calls": 1066,
+      "batch_pack_calls": 16938,
+      "predict_calls": 32301,
+      "batch_forward_seconds": 374.9437767023919,
+      "batch_tokenize_calls": 8469,
+      "batch_tokenize_seconds": 11.430903570260853,
+      "gradient_calls": 0
+    },
+    "method_diagnostics": {
+      "evaluated_samples": 1066,
+      "failed_samples": 0,
+      "error_type_counts": {},
+      "error_examples": []
+    },
+    "timing_breakdown": {
+      "unit_build_seconds": 0.5839695930480957,
+      "text_build_seconds": 0.564661979675293,
+      "prefetch_seconds": 657.4694409370422,
+      "metric_compute_seconds": 0.23246526718139648
+    },
+    "cache_stats": {
+      "required_text_count": 40230,
+      "unique_text_count": 32301,
+      "cache_requests": 79686,
+      "cache_hits": 79686,
+      "cache_misses": 0,
+      "cache_hit_rate": 1.0
+    },
+    "prefetch_stats": {
+      "batch_enabled": true,
+      "fallback_policy": "warn",
+      "length_sort_enabled": false,
+      "batch_attempt_count": 1066,
+      "batch_success_count": 1066,
+      "batch_fallback_count": 0,
+      "prefetched_text_count": 32301,
+      "missing_text_count": 32301,
+      "fallback_error_examples": []
+    },
+    "backbone_batch_stats": {
+      "batch_calls": 1066,
+      "batch_rows": 32301,
+      "model_forward_calls": 16938,
+      "oom_shrink_events": 0,
+      "batch_tokenize_calls": 8469,
+      "batch_pack_calls": 16938,
+      "batch_forward_calls": 16938,
+      "batch_tokenize_seconds": 11.430903570260853,
+      "batch_pack_seconds": 40.95711646077689,
+      "batch_forward_seconds": 374.9437767023919
+    }
+  },
+  "metrics_by_target": {
+    "gold": {
+      "report_method": "ours",
+      "metrics_primary": {
+        "log_odds": -0.2056551435847989,
+        "comprehensiveness": 0.07946389949616585,
+        "sufficiency": -0.08778931755803204,
+        "aopc_sufficiency": -0.020538475568783198,
+        "aopc_comprehensiveness": 0.05119173713871878,
+        "aopc": 0.14523049399395638
+      },
+      "method_diagnostics": {
+        "evaluated_samples": 1066,
+        "failed_samples": 0,
+        "error_type_counts": {},
+        "error_examples": []
+      },
+      "per_q": {
+        "comprehensiveness": {
+          "1": 0.0,
+          "5": 0.017621167155033358,
+          "10": 0.041389183241270715,
+          "20": 0.07946389949616585,
+          "50": 0.16867617293984274
+        },
+        "sufficiency": {
+          "1": 0.0,
+          "5": 0.06635530346630605,
+          "10": 0.009325161632185358,
+          "20": -0.08778931755803204,
+          "50": -0.11112200095315855
+        }
+      }
+    },
+    "predicted": {
+      "report_method": "ours",
+      "metrics_primary": {
+        "log_odds": -0.42528459857587525,
+        "comprehensiveness": 0.08015586753370586,
+        "sufficiency": 0.17670610308242324,
+        "aopc_sufficiency": 0.12336088827824523,
+        "aopc_comprehensiveness": 0.05171056449282032,
+        "aopc": 0.16369925754207068
+      },
+      "method_diagnostics": {
+        "evaluated_samples": 1066,
+        "failed_samples": 0,
+        "error_type_counts": {},
+        "error_examples": []
+      },
+      "per_q": {
+        "comprehensiveness": {
+          "1": 0.0,
+          "5": 0.016659800732057493,
+          "10": 0.03975572379211603,
+          "20": 0.08015586753370586,
+          "50": 0.17369199489904252
+        },
+        "sufficiency": {
+          "1": 0.0,
+          "5": 0.20585156690340126,
+          "10": 0.23889681495046072,
+          "20": 0.17670610308242324,
+          "50": 0.11871084473318617
+        }
+      }
+    }
+  },
+  "dataset_diagnostics": {
+    "samples_with_empty_text": 0,
+    "samples_without_rationale": 1066,
+    "samples_over_backbone_max_length": 0,
+    "predicted_not_gold_samples": 323,
+    "token_len_eval_errors": 0,
+    "skipped_missing_sample_id": 0,
+    "skipped_empty_chunks": 0,
+    "backbone_max_length": 2048,
+    "eval_unit_count_total": 26378,
+    "units_split_across_chunks_total": 0,
+    "units_split_across_chunks_rate": 0.0,
+    "tokenizer_fallback_samples": 0,
+    "tokenizer_fallback_unit_total": 0
+  },
+  "q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ],
+  "per_q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ],
+  "timing_breakdown": {
+    "unit_build_seconds": 0.5839695930480957,
+    "text_build_seconds": 0.564661979675293,
+    "prefetch_seconds": 657.4694409370422,
+    "metric_compute_seconds": 0.23246526718139648
+  },
+  "cache_stats": {
+    "required_text_count": 40230,
+    "unique_text_count": 32301,
+    "cache_requests": 79686,
+    "cache_hits": 79686,
+    "cache_misses": 0,
+    "cache_hit_rate": 1.0
+  },
+  "prefetch_stats": {
+    "batch_enabled": true,
+    "fallback_policy": "warn",
+    "length_sort_enabled": false,
+    "batch_attempt_count": 1066,
+    "batch_success_count": 1066,
+    "batch_fallback_count": 0,
+    "prefetched_text_count": 32301,
+    "missing_text_count": 32301,
+    "fallback_error_examples": []
+  },
+  "backbone_batch_stats": {
+    "batch_calls": 1066,
+    "batch_rows": 32301,
+    "model_forward_calls": 16938,
+    "oom_shrink_events": 0,
+    "batch_tokenize_calls": 8469,
+    "batch_pack_calls": 16938,
+    "batch_forward_calls": 16938,
+    "batch_tokenize_seconds": 11.430903570260853,
+    "batch_pack_seconds": 40.95711646077689,
+    "batch_forward_seconds": 374.9437767023919
+  },
+  "provenance": {
+    "schema_version": 1,
+    "stage": "eval_report",
+    "captured_at_utc": "2026-06-01T16:22:35Z",
+    "timing": {
+      "start_utc": "2026-06-01T16:11:31Z",
+      "end_utc": "2026-06-01T16:22:35Z",
+      "elapsed_seconds": 663.820778131485
+    },
+    "git": {
+      "available": true,
+      "root": "/mnt/huawei/nsq/LIMA-copy",
+      "commit": "fbe696b8d1c70043d404a55e5de82622f5996dac",
+      "commit_short": "fbe696b",
+      "branch": "feat/lima-llm-transfer-v1",
+      "describe": "best-0516-19-gfbe696b",
+      "dirty": false
+    },
+    "command": {
+      "argv": [
+        "--dataset",
+        "rotten_tomatoes",
+        "--split",
+        "validation",
+        "--model-path",
+        "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "--device",
+        "cuda:2",
+        "--dtype",
+        "bfloat16",
+        "--max-length",
+        "2048",
+        "--embedding-layer-ratio",
+        "0.7",
+        "--k",
+        "8",
+        "--lambdas",
+        "1,1,0,1",
+        "--chunker",
+        "adaptive",
+        "--fixed-token-size",
+        "64",
+        "--adaptive-profile",
+        "balanced",
+        "--adaptive-overrides-json",
+        "{\"fragmentation_target_words\":28,\"guard_mode\":\"hard_cap\",\"long_max_words\":960,\"medium_max_words\":384,\"min_effective_chunks\":6,\"ratio_threshold\":24,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"structural\",\"short_max_words\":96}",
+        "--search",
+        "greedy",
+        "--seed",
+        "42",
+        "--sample-ids-file",
+        "lima_llm_results-0601-hsearch/rotten_tomatoes/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "--output-dir",
+        "lima_llm_results-0601-hsearch",
+        "--resume-check",
+        "strict",
+        "--explain-method",
+        "ours",
+        "--eval-q-values",
+        "1,5,10,20,50",
+        "--eval-granularity",
+        "token",
+        "--run-eval",
+        "--dataset-cache-dir",
+        "/mnt/huawei/nsq/LIMA-copy/datasets"
+      ],
+      "parsed_args": {
+        "dataset": "rotten_tomatoes",
+        "split": "validation",
+        "eraser_root": null,
+        "sst2_source": null,
+        "dataset_cache_dir": "/mnt/huawei/nsq/LIMA-copy/datasets",
+        "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "device": "cuda:2",
+        "dtype": "bfloat16",
+        "max_length": 2048,
+        "embedding_layer_ratio": 0.7,
+        "mock_backbone": false,
+        "k": 8,
+        "lambdas": "1,1,0,1",
+        "chunker": "adaptive",
+        "fixed_token_size": 64,
+        "adaptive_profile": "balanced",
+        "adaptive_overrides_json": "{\"fragmentation_target_words\":28,\"guard_mode\":\"hard_cap\",\"long_max_words\":960,\"medium_max_words\":384,\"min_effective_chunks\":6,\"ratio_threshold\":24,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"structural\",\"short_max_words\":96}",
+        "sample_ids_file": "lima_llm_results-0601-hsearch/rotten_tomatoes/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "hparam_search_split": "",
+        "hparam_tune_size": 100,
+        "hparam_train_size": null,
+        "hparam_dev_size": null,
+        "hparam_search_method": "grid+random",
+        "hparam_space_file": null,
+        "hparam_random_trials": 8,
+        "hparam_max_trials": 16,
+        "hparam_enable_lambda_search": false,
+        "search": "greedy",
+        "seed": 42,
+        "deterministic": false,
+        "max_samples": null,
+        "dry_run": 0,
+        "verbose_chunks": false,
+        "output_dir": "lima_llm_results-0601-hsearch",
+        "resume_check": "strict",
+        "run_eval": true,
+        "eval_q_values": "1,5,10,20,50",
+        "eval_granularity": "token",
+        "explain_method": "ours"
+      }
+    },
+    "environment": {
+      "python_version": "3.8.0",
+      "platform": "Linux-5.15.0-179-generic-x86_64-with-glibc2.10",
+      "cwd": "/mnt/huawei/nsq/LIMA-copy",
+      "pid": 3895331,
+      "deterministic": {
+        "enabled": false,
+        "applied": false
+      },
+      "vars": {
+        "HF_ENDPOINT": "https://hf-mirror.com"
+      }
+    }
+  },
+  "hparam_search_enabled": true,
+  "hparam_search_split": "train",
+  "hparam_tune_size": 40,
+  "best_adaptive_overrides": {
+    "fragmentation_target_words": 28,
+    "guard_mode": "hard_cap",
+    "long_max_words": 960,
+    "medium_max_words": 384,
+    "min_effective_chunks": 6,
+    "ratio_threshold": 24,
+    "short_floor_min_words": 12,
+    "short_floor_signal_mode": "structural",
+    "short_max_words": 96
+  },
+  "best_lambdas": "1,1,0,1",
+  "lambda_search_enabled": false,
+  "hparam_search_summary_path": "lima_llm_results-0601-hsearch/rotten_tomatoes/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/search_summary.json"
+}
