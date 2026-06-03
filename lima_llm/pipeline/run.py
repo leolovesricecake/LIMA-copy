@@ -318,6 +318,86 @@ def _dedup_candidates(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]
     return out
 
 
+def _is_numeric_value(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _space_values_support_out_of_grid_random(values: Sequence[Any]) -> bool:
+    uniq = list(dict.fromkeys(values))
+    if len(uniq) <= 1:
+        return False
+    if not all(_is_numeric_value(v) for v in uniq):
+        return False
+    if all(isinstance(v, int) and not isinstance(v, bool) for v in uniq):
+        low = int(min(uniq))
+        high = int(max(uniq))
+        return len(uniq) < (high - low + 1)
+    return True
+
+
+def _sample_random_value(values: Sequence[Any], rng: random.Random) -> Any:
+    uniq = list(dict.fromkeys(values))
+    if len(uniq) == 1:
+        return uniq[0]
+    if all(_is_numeric_value(v) for v in uniq):
+        if all(isinstance(v, int) and not isinstance(v, bool) for v in uniq):
+            low = int(min(uniq))
+            high = int(max(uniq))
+            return int(rng.randint(low, high))
+        low = float(min(uniq))
+        high = float(max(uniq))
+        if low == high:
+            return float(low)
+        return float(round(rng.uniform(low, high), 6))
+    return uniq[int(rng.randrange(len(uniq)))]
+
+
+def _sample_random_param_row(space: Mapping[str, Sequence[Any]], rng: random.Random) -> Dict[str, Any]:
+    return {key: _sample_random_value(space[key], rng) for key in sorted(space.keys())}
+
+
+def _sample_random_candidates(
+    *,
+    adaptive_space: Mapping[str, Sequence[Any]],
+    lambda_space: Mapping[str, Sequence[Any]],
+    count: int,
+    seed: int,
+    blocked_signatures: Set[str],
+) -> List[Dict[str, Any]]:
+    if int(count) <= 0:
+        return []
+
+    rng = random.Random(int(seed))
+    support_out_of_grid = any(
+        _space_values_support_out_of_grid_random(values)
+        for values in list(adaptive_space.values()) + list(lambda_space.values())
+    )
+    rows: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+
+    def _try_fill(*, allow_blocked: bool, attempt_factor: int) -> None:
+        max_attempts = max(int(count) * attempt_factor, 64)
+        attempts = 0
+        while len(rows) < int(count) and attempts < max_attempts:
+            candidate = {
+                "adaptive_params": _sample_random_param_row(adaptive_space, rng),
+                "lambda_params": _sample_random_param_row(lambda_space, rng),
+            }
+            signature = _candidate_signature(candidate)
+            attempts += 1
+            if signature in seen:
+                continue
+            if not allow_blocked and signature in blocked_signatures:
+                continue
+            seen.add(signature)
+            rows.append(candidate)
+
+    _try_fill(allow_blocked=not support_out_of_grid, attempt_factor=64)
+    if len(rows) < int(count):
+        _try_fill(allow_blocked=True, attempt_factor=32)
+    return rows
+
+
 def _candidate_signature(row: Mapping[str, Any]) -> str:
     return json.dumps(dict(row), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -373,7 +453,7 @@ def _build_candidates(
     lambda_space: Mapping[str, Sequence[Any]],
     enable_lambda_search: bool,
     random_trials: int,
-    max_trials: int,
+    max_trials: int | None,
     seed: int,
 ) -> List[Dict[str, Any]]:
     adaptive_grid = _expand_grid(adaptive_space)
@@ -392,13 +472,14 @@ def _build_candidates(
                 }
             )
 
-    rng = random.Random(int(seed))
-    random_rows: List[Dict[str, Any]] = []
-    if int(random_trials) > 0:
-        if len(grid_rows) <= int(random_trials):
-            random_rows = list(grid_rows)
-        else:
-            random_rows = rng.sample(grid_rows, k=int(random_trials))
+    blocked_random_signatures = {_candidate_signature(row) for row in grid_rows}
+    random_rows = _sample_random_candidates(
+        adaptive_space=adaptive_space,
+        lambda_space=lambda_space,
+        count=int(random_trials),
+        seed=int(seed),
+        blocked_signatures=blocked_random_signatures,
+    )
 
     baseline_row = {"adaptive_params": {}, "lambda_params": {}}
     if method == "grid":
@@ -411,6 +492,8 @@ def _build_candidates(
         raise ValueError(f"Unsupported hparam search method: {method}")
 
     deduped = _dedup_candidates(rows)
+    if max_trials is None:
+        return deduped
     budget = max(1, int(max_trials))
     if len(deduped) <= budget:
         return deduped
@@ -510,10 +593,19 @@ def _resolve_hparam_tune_size(args) -> int:
     return max(0, int(args.hparam_tune_size))
 
 
-def _resolve_hparam_max_trials(args, *, tune_size: int) -> int:
+def _resolve_hparam_max_trials(args, *, method: str, random_trials: int) -> int | None:
     raw_value = getattr(args, "hparam_max_trials", None)
     if raw_value is None:
-        return max(1, int(tune_size))
+        method_key = str(method).strip().lower()
+        if method_key == "grid":
+            return None
+        if method_key in {"random", "grid+random"}:
+            if random_trials is None:
+                raise ValueError(
+                    f"{method_key} search requires hparam_random_trials when --hparam-max-trials is not set."
+                )
+            return None
+        raise ValueError(f"Unsupported hparam search method: {method}")
     return max(1, int(raw_value))
 
 
@@ -758,7 +850,11 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
 
     same_split = _canonical_hf_split(args.dataset, args.split) == _canonical_hf_split(args.dataset, search_split)
     requested_search_count = _resolve_hparam_tune_size(args)
-    resolved_max_trials = _resolve_hparam_max_trials(args, tune_size=requested_search_count)
+    resolved_max_trials = _resolve_hparam_max_trials(
+        args,
+        method=str(args.hparam_search_method),
+        random_trials=int(args.hparam_random_trials),
+    )
     total_search_pool = int(len(search_bundle.samples))
     if requested_search_count <= 0:
         raise ValueError("hparam tune size must be > 0.")
@@ -823,7 +919,7 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         lambda_space=lambda_space,
         enable_lambda_search=bool(args.hparam_enable_lambda_search),
         random_trials=int(args.hparam_random_trials),
-        max_trials=int(resolved_max_trials),
+        max_trials=resolved_max_trials,
         seed=int(args.seed),
     )
     base_lambdas = parse_lambdas(str(args.lambdas))
@@ -916,7 +1012,8 @@ def _run_hparam_search_and_final(args, raw_argv: List[str]) -> None:
         "hparam_tune_size": int(requested_search_count),
         "hparam_search_method": str(args.hparam_search_method),
         "hparam_random_trials": int(args.hparam_random_trials),
-        "hparam_max_trials": int(resolved_max_trials),
+        "hparam_max_trials": None if resolved_max_trials is None else int(resolved_max_trials),
+        "effective_trial_budget": int(len(candidates)),
         "hparam_space": raw_hparam_space,
         "adaptive_space": adaptive_space,
         "lambda_space": lambda_space,

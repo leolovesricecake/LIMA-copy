@@ -48,7 +48,12 @@ python -m lima_llm \
 - 默认搜索子集大小是 `tune=100`，可通过 `--hparam-tune-size` 覆盖。
 - 若搜索集与评估集相同，系统会先抽走搜索样本，再从剩余样本做评估，最后才应用 `--max-samples`。
 - 搜索候选永远包含 baseline（`adaptive_overrides={}` + 当前 `--lambdas`）。
-- 默认总 trial 预算等于 `--hparam-tune-size`；显式传 `--hparam-max-trials` 时才覆盖该上限。超预算时做固定 seed 的确定性多样性下采样。
+- `--hparam-tune-size` 只控制搜索样本规模，不控制 trial 数。
+- 若不显式传 `--hparam-max-trials`，系统不会额外截断候选：
+  - `grid` 走完整候选空间
+  - `random / grid+random` 按 `--hparam-random-trials` 的原生候选数工作
+- `random / grid+random` 的随机部分不再从离散 grid 中抽样；对于数值参数，会在当前参数空间的数值范围内继续采样，从而允许探索 grid 之外的新点。
+- 只有显式传 `--hparam-max-trials` 时，才会触发超预算确定性多样性下采样。
 - `lambda` 搜索能力已支持，但默认关闭；启用时需加 `--hparam-enable-lambda-search`。
 
 ```bash

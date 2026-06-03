@@ -162,6 +162,63 @@ def test_hparam_candidate_budget_is_deterministic() -> None:
     assert rows_a == rows_b
 
 
+def test_random_search_can_explore_outside_grid() -> None:
+    adaptive_space = {
+        "short_max_words": [96, 120],
+        "ratio_threshold": [20, 24],
+    }
+    grid_rows = run_mod._build_candidates(
+        method="grid",
+        adaptive_space=adaptive_space,
+        lambda_space={},
+        enable_lambda_search=False,
+        random_trials=0,
+        max_trials=None,
+        seed=42,
+    )
+    random_rows = run_mod._build_candidates(
+        method="random",
+        adaptive_space=adaptive_space,
+        lambda_space={},
+        enable_lambda_search=False,
+        random_trials=6,
+        max_trials=None,
+        seed=42,
+    )
+    grid_signatures = {run_mod._candidate_signature(row) for row in grid_rows[1:]}
+    random_signatures = [run_mod._candidate_signature(row) for row in random_rows[1:]]
+    assert any(sig not in grid_signatures for sig in random_signatures)
+
+
+def test_grid_plus_random_adds_candidates_beyond_grid_when_space_allows() -> None:
+    adaptive_space = {
+        "short_max_words": [96, 120],
+        "ratio_threshold": [20, 24],
+    }
+    grid_rows = run_mod._build_candidates(
+        method="grid",
+        adaptive_space=adaptive_space,
+        lambda_space={},
+        enable_lambda_search=False,
+        random_trials=0,
+        max_trials=None,
+        seed=42,
+    )
+    grid_plus_random_rows = run_mod._build_candidates(
+        method="grid+random",
+        adaptive_space=adaptive_space,
+        lambda_space={},
+        enable_lambda_search=False,
+        random_trials=6,
+        max_trials=None,
+        seed=42,
+    )
+    grid_signatures = {run_mod._candidate_signature(row) for row in grid_rows[1:]}
+    extra_signatures = [run_mod._candidate_signature(row) for row in grid_plus_random_rows[1:]]
+    assert len(grid_plus_random_rows) > len(grid_rows)
+    assert any(sig not in grid_signatures for sig in extra_signatures)
+
+
 def test_resolve_hparam_tune_size_prefers_new_flag() -> None:
     args = SimpleNamespace(
         hparam_tune_size=88,
@@ -169,18 +226,32 @@ def test_resolve_hparam_tune_size_prefers_new_flag() -> None:
     assert run_mod._resolve_hparam_tune_size(args) == 88
 
 
-def test_resolve_hparam_max_trials_defaults_to_tune_size() -> None:
+def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_grid() -> None:
     args = SimpleNamespace(
         hparam_max_trials=None,
     )
-    assert run_mod._resolve_hparam_max_trials(args, tune_size=60) == 60
+    assert run_mod._resolve_hparam_max_trials(args, method="grid", random_trials=8) is None
+
+
+def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_random() -> None:
+    args = SimpleNamespace(
+        hparam_max_trials=None,
+    )
+    assert run_mod._resolve_hparam_max_trials(args, method="random", random_trials=8) is None
+
+
+def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_grid_plus_random() -> None:
+    args = SimpleNamespace(
+        hparam_max_trials=None,
+    )
+    assert run_mod._resolve_hparam_max_trials(args, method="grid+random", random_trials=8) is None
 
 
 def test_resolve_hparam_max_trials_prefers_explicit_value() -> None:
     args = SimpleNamespace(
         hparam_max_trials=12,
     )
-    assert run_mod._resolve_hparam_max_trials(args, tune_size=60) == 12
+    assert run_mod._resolve_hparam_max_trials(args, method="grid", random_trials=8) == 12
 
 
 def test_parser_requires_save_dir() -> None:
