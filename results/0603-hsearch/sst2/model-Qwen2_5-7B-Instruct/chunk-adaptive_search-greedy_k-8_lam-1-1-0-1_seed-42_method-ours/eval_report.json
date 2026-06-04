@@ -1,0 +1,379 @@
+{
+  "report_method": "ours",
+  "dataset": "sst2",
+  "split": "validation",
+  "sample_count": 872,
+  "metric_settings": {
+    "protocol": "AML",
+    "primary_top_k_percent": 20,
+    "aopc_top_k_percentages": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ],
+    "aopc_average_denominator": "len(top_k_percentages)+1",
+    "log_odds_reference_token": "<|endoftext|>",
+    "perturbation_unit": "token",
+    "unit_segmentation": "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable",
+    "chunk_to_unit_projection": "overlap-weighted average chunk rank; lower rank is more important",
+    "unit_segmentation_counts": {
+      "tokenizer_offset_mapping": 872
+    },
+    "eval_batch_prefetch_enabled": true,
+    "prefetch_fallback_policy": "warn",
+    "prefetch_length_sort_enabled": false
+  },
+  "metrics_primary": {
+    "accuracy_full": 0.8165137614678899,
+    "log_odds": -0.34343540659267446,
+    "comprehensiveness": 0.11206940174158321,
+    "sufficiency": 0.04127129312463686,
+    "aopc_sufficiency": 0.04133860753199074,
+    "aopc_comprehensiveness": 0.06926718921847755,
+    "aopc": 0.2025584106033243
+  },
+  "metrics_secondary": {
+    "sparsity": 1.0,
+    "plausibility_f1": 0.0,
+    "plausibility_iou": 0.0,
+    "top20_count_zero_ratio": 0.20527522935779816,
+    "selected_all_ratio": 1.0,
+    "plausibility_available": false,
+    "plausibility_coverage_ratio": 0.0,
+    "runtime_seconds": 717.8413188457489,
+    "forward_counters_delta": {
+      "embed_calls": 0,
+      "batch_calls": 872,
+      "gradient_calls": 0,
+      "batch_rows": 25552,
+      "oom_shrink_events": 0,
+      "model_forward_calls": 13380,
+      "batch_tokenize_calls": 6690,
+      "batch_forward_calls": 13380,
+      "predict_calls": 25552,
+      "batch_pack_calls": 13380,
+      "batch_tokenize_seconds": 5.102718878071755,
+      "batch_forward_seconds": 313.2271664261352,
+      "batch_pack_seconds": 89.14016332291067
+    },
+    "method_diagnostics": {
+      "evaluated_samples": 872,
+      "failed_samples": 0,
+      "error_type_counts": {},
+      "error_examples": []
+    },
+    "timing_breakdown": {
+      "unit_build_seconds": 0.40912866592407227,
+      "text_build_seconds": 0.42427539825439453,
+      "prefetch_seconds": 713.3851609230042,
+      "metric_compute_seconds": 0.18153142929077148
+    },
+    "cache_stats": {
+      "required_text_count": 32049,
+      "unique_text_count": 25552,
+      "cache_requests": 63410,
+      "cache_hits": 63410,
+      "cache_misses": 0,
+      "cache_hit_rate": 1.0
+    },
+    "prefetch_stats": {
+      "batch_enabled": true,
+      "fallback_policy": "warn",
+      "length_sort_enabled": false,
+      "batch_attempt_count": 872,
+      "batch_success_count": 872,
+      "batch_fallback_count": 0,
+      "prefetched_text_count": 25552,
+      "missing_text_count": 25552,
+      "fallback_error_examples": []
+    },
+    "backbone_batch_stats": {
+      "batch_calls": 872,
+      "batch_rows": 25552,
+      "model_forward_calls": 13380,
+      "oom_shrink_events": 0,
+      "batch_tokenize_calls": 6690,
+      "batch_pack_calls": 13380,
+      "batch_forward_calls": 13380,
+      "batch_tokenize_seconds": 5.102718878071755,
+      "batch_pack_seconds": 89.14016332291067,
+      "batch_forward_seconds": 313.2271664261352
+    }
+  },
+  "metrics_by_target": {
+    "gold": {
+      "report_method": "ours",
+      "metrics_primary": {
+        "log_odds": -0.34343540659267446,
+        "comprehensiveness": 0.11206940174158321,
+        "sufficiency": 0.04127129312463686,
+        "aopc_sufficiency": 0.04133860753199074,
+        "aopc_comprehensiveness": 0.06926718921847755,
+        "aopc": 0.2025584106033243
+      },
+      "method_diagnostics": {
+        "evaluated_samples": 872,
+        "failed_samples": 0,
+        "error_type_counts": {},
+        "error_examples": []
+      },
+      "per_q": {
+        "comprehensiveness": {
+          "1": 0.0,
+          "5": 0.016988500785039856,
+          "10": 0.05480842085324501,
+          "20": 0.11206940174158321,
+          "50": 0.23173681193099724
+        },
+        "sufficiency": {
+          "1": 0.0,
+          "5": 0.1029248278462029,
+          "10": 0.10075315798273943,
+          "20": 0.04127129312463686,
+          "50": 0.0030823662383652746
+        }
+      }
+    },
+    "predicted": {
+      "report_method": "ours",
+      "metrics_primary": {
+        "log_odds": -0.3224885890965788,
+        "comprehensiveness": 0.0944754009117979,
+        "sufficiency": 0.1505178110161369,
+        "aopc_sufficiency": 0.09305767886262652,
+        "aopc_comprehensiveness": 0.059330401418353954,
+        "aopc": 0.18982649571205065
+      },
+      "method_diagnostics": {
+        "evaluated_samples": 872,
+        "failed_samples": 0,
+        "error_type_counts": {},
+        "error_examples": []
+      },
+      "per_q": {
+        "comprehensiveness": {
+          "1": 0.0,
+          "5": 0.016729959132952974,
+          "10": 0.04158976678565623,
+          "20": 0.0944754009117979,
+          "50": 0.20318728167971664
+        },
+        "sufficiency": {
+          "1": 0.0,
+          "5": 0.14649943478721614,
+          "10": 0.18460361998412894,
+          "20": 0.1505178110161369,
+          "50": 0.07672520738827714
+        }
+      }
+    }
+  },
+  "dataset_diagnostics": {
+    "samples_with_empty_text": 0,
+    "samples_without_rationale": 872,
+    "samples_over_backbone_max_length": 0,
+    "predicted_not_gold_samples": 160,
+    "token_len_eval_errors": 0,
+    "skipped_missing_sample_id": 0,
+    "skipped_empty_chunks": 0,
+    "backbone_max_length": 2048,
+    "eval_unit_count_total": 20716,
+    "units_split_across_chunks_total": 0,
+    "units_split_across_chunks_rate": 0.0,
+    "tokenizer_fallback_samples": 0,
+    "tokenizer_fallback_unit_total": 0
+  },
+  "q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ],
+  "per_q_values": [
+    1,
+    5,
+    10,
+    20,
+    50
+  ],
+  "timing_breakdown": {
+    "unit_build_seconds": 0.40912866592407227,
+    "text_build_seconds": 0.42427539825439453,
+    "prefetch_seconds": 713.3851609230042,
+    "metric_compute_seconds": 0.18153142929077148
+  },
+  "cache_stats": {
+    "required_text_count": 32049,
+    "unique_text_count": 25552,
+    "cache_requests": 63410,
+    "cache_hits": 63410,
+    "cache_misses": 0,
+    "cache_hit_rate": 1.0
+  },
+  "prefetch_stats": {
+    "batch_enabled": true,
+    "fallback_policy": "warn",
+    "length_sort_enabled": false,
+    "batch_attempt_count": 872,
+    "batch_success_count": 872,
+    "batch_fallback_count": 0,
+    "prefetched_text_count": 25552,
+    "missing_text_count": 25552,
+    "fallback_error_examples": []
+  },
+  "backbone_batch_stats": {
+    "batch_calls": 872,
+    "batch_rows": 25552,
+    "model_forward_calls": 13380,
+    "oom_shrink_events": 0,
+    "batch_tokenize_calls": 6690,
+    "batch_pack_calls": 13380,
+    "batch_forward_calls": 13380,
+    "batch_tokenize_seconds": 5.102718878071755,
+    "batch_pack_seconds": 89.14016332291067,
+    "batch_forward_seconds": 313.2271664261352
+  },
+  "provenance": {
+    "schema_version": 1,
+    "stage": "eval_report",
+    "captured_at_utc": "2026-06-03T22:43:20Z",
+    "timing": {
+      "start_utc": "2026-06-03T22:31:23Z",
+      "end_utc": "2026-06-03T22:43:20Z",
+      "elapsed_seconds": 717.909411907196
+    },
+    "git": {
+      "available": true,
+      "root": "/mnt/huawei/nsq/LIMA-copy",
+      "commit": "d742744a15ade24cff4dc5a727f8080387dbafea",
+      "commit_short": "d742744",
+      "branch": "feat/lima-llm-transfer-v1",
+      "describe": "best-0516-23-gd742744-dirty",
+      "dirty": true
+    },
+    "command": {
+      "argv": [
+        "--dataset",
+        "sst2",
+        "--split",
+        "validation",
+        "--model-path",
+        "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "--device",
+        "cuda:1",
+        "--dtype",
+        "bfloat16",
+        "--max-length",
+        "2048",
+        "--embedding-layer-ratio",
+        "0.7",
+        "--k",
+        "8",
+        "--lambdas",
+        "1,1,0,1",
+        "--chunker",
+        "adaptive",
+        "--fixed-token-size",
+        "64",
+        "--adaptive-profile",
+        "balanced",
+        "--adaptive-overrides-json",
+        "{\"fragmentation_target_words\":28,\"guard_mode\":\"hard_cap\",\"long_max_words\":960,\"medium_max_words\":384,\"min_effective_chunks\":5,\"ratio_threshold\":20,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"always\",\"short_max_words\":96}",
+        "--search",
+        "greedy",
+        "--seed",
+        "42",
+        "--sample-ids-file",
+        "results/0603-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "--base-save-dir",
+        "results",
+        "--save-dir",
+        "0603-hsearch",
+        "--resume-check",
+        "strict",
+        "--explain-method",
+        "ours",
+        "--eval-q-values",
+        "1,5,10,20,50",
+        "--eval-granularity",
+        "token",
+        "--run-eval",
+        "--dataset-cache-dir",
+        "/mnt/huawei/nsq/LIMA-copy/datasets"
+      ],
+      "parsed_args": {
+        "dataset": "sst2",
+        "split": "validation",
+        "eraser_root": null,
+        "sst2_source": null,
+        "dataset_cache_dir": "/mnt/huawei/nsq/LIMA-copy/datasets",
+        "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+        "device": "cuda:1",
+        "dtype": "bfloat16",
+        "max_length": 2048,
+        "embedding_layer_ratio": 0.7,
+        "mock_backbone": false,
+        "k": 8,
+        "lambdas": "1,1,0,1",
+        "chunker": "adaptive",
+        "fixed_token_size": 64,
+        "adaptive_profile": "balanced",
+        "adaptive_overrides_json": "{\"fragmentation_target_words\":28,\"guard_mode\":\"hard_cap\",\"long_max_words\":960,\"medium_max_words\":384,\"min_effective_chunks\":5,\"ratio_threshold\":20,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"always\",\"short_max_words\":96}",
+        "sample_ids_file": "results/0603-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "hparam_search_split": "",
+        "hparam_tune_size": 100,
+        "hparam_search_method": "grid+random",
+        "hparam_space_file": null,
+        "hparam_random_trials": 8,
+        "hparam_max_trials": null,
+        "hparam_enable_lambda_search": false,
+        "search": "greedy",
+        "seed": 42,
+        "deterministic": false,
+        "max_samples": null,
+        "dry_run": 0,
+        "verbose_chunks": false,
+        "base_save_dir": "results",
+        "save_dir": "0603-hsearch",
+        "resume_check": "strict",
+        "run_eval": true,
+        "eval_q_values": "1,5,10,20,50",
+        "eval_granularity": "token",
+        "explain_method": "ours"
+      }
+    },
+    "environment": {
+      "python_version": "3.8.0",
+      "platform": "Linux-5.15.0-179-generic-x86_64-with-glibc2.10",
+      "cwd": "/mnt/huawei/nsq/LIMA-copy",
+      "pid": 2218904,
+      "deterministic": {
+        "enabled": false,
+        "applied": false
+      },
+      "vars": {
+        "HF_ENDPOINT": "https://hf-mirror.com"
+      }
+    }
+  },
+  "hparam_search_enabled": true,
+  "hparam_search_split": "train",
+  "hparam_tune_size": 40,
+  "best_adaptive_overrides": {
+    "fragmentation_target_words": 28,
+    "guard_mode": "hard_cap",
+    "long_max_words": 960,
+    "medium_max_words": 384,
+    "min_effective_chunks": 5,
+    "ratio_threshold": 20,
+    "short_floor_min_words": 12,
+    "short_floor_signal_mode": "always",
+    "short_max_words": 96
+  },
+  "best_lambdas": "1,1,0,1",
+  "lambda_search_enabled": false,
+  "hparam_search_summary_path": "results/0603-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/search_summary.json"
+}
