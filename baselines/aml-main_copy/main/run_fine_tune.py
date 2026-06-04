@@ -3,6 +3,7 @@ import os
 import time
 from pathlib import Path
 
+import pandas as pd
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -10,6 +11,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from config.config import ExpArgs
 from config.constants import INPUT_TXT
 from config.types_enums import ValidationType
+from evaluations.results_reporting import evaluate_all_metrics, save_all_metrics_report
 from main.data_module import DataModule
 from main.explained_model_utils import init_exp, set_hp, save_running_time
 from models.aml_model_fine_tune import \
@@ -33,6 +35,7 @@ class FineTune:
         init_exp()
         set_config()
         set_hp(hp)
+        self.hp = hp
 
         ExpArgs.lr = ExpArgs.task.default_lr
         if not is_model_encoder_only(ExpArgs.explained_model_backbone):
@@ -63,6 +66,7 @@ class FineTune:
         fine_tuned_results_path = str(Path(self.pretrain_path, "RESULTS_DF", self.experiment_name))
         os.makedirs(fine_tuned_results_path, exist_ok = True)
         tb_logger = TensorBoardLogger(Path(self.pretrain_path, "TB_LOGS", self.experiment_name))
+        primary_results, all_metrics_results = [], []
 
         device = "gpu" if torch.cuda.is_available() else "cpu"
 
@@ -98,15 +102,42 @@ class FineTune:
             run_trainer(trainer, model = current_model, data_module = item_module,
                         explained_model = self.explained_model)
 
+            evaluation_item = current_model.best_item
+            primary_results.append(evaluation_item.copy())
             if ExpArgs.is_save_results:
                 save_to = Path(fine_tuned_results_path, "results.csv")
-                evaluation_item = current_model.best_item
                 evaluation_item[INPUT_TXT] = item[INPUT_TXT]
                 with open(save_to, 'a', newline = '', encoding = 'utf-8-sig') as f:
                     evaluation_item.to_csv(f, header = f.tell() == 0, index = False)
 
+            all_metrics_results.append(evaluate_all_metrics(
+                model = self.explained_model,
+                explained_tokenizer = current_model.explained_tokenizer,
+                ref_token_id = current_model.ref_token_id,
+                data = current_model.best_evaluation_data,
+                experiment_path = fine_tuned_results_path,
+                step = int(current_model.best_item["step"].iloc[0]),
+                epoch = int(current_model.best_item["epoch"].iloc[0]),
+                item_index = str(current_model.best_item["item_index"].iloc[0]),
+                save_support_results = False,
+                experiment_name = self.experiment_name,
+                report_stage = "FINE_TUNE",
+                input_text = item[INPUT_TXT],
+                result_row_id = item_id,
+                selection_metric = ExpArgs.target_eval_metric,
+                selection_metric_result = float(current_model.best_metric_result),
+                selection_mode = "best_by_target_metric"))
+
             del current_model
 
         end = time.time()
+
+        save_all_metrics_report(all_metrics_results = pd.concat(all_metrics_results, ignore_index = True),
+                                experiment_path = fine_tuned_results_path,
+                                experiment_name = self.experiment_name,
+                                report_stage = "FINE_TUNE",
+                                primary_results = pd.concat(primary_results, ignore_index = True),
+                                selected_hyperparameters = self.hp,
+                                extra_metadata = dict(selection_mode = "best_by_target_metric"))
 
         save_running_time(end, begin, self.experiment_name, file_type = "FineTune")

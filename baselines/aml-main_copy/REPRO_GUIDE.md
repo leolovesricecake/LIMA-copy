@@ -183,6 +183,19 @@ Useful artifacts to check after a run:
 - Optuna result pickle under `OUT/CONFIG/OPTUNA_RESULTS`
 - Pre-train checkpoints under `OUT/PRE_TRAIN/CHECKPOINTS`
 - Fine-tune CSV results under `OUT/FINE_TUNE/RESULTS_DF`
+- New multi-metric reports under each inference / fine-tune result directory:
+  - `all_metrics_results_long.csv`
+  - `all_metrics_results_wide.csv`
+  - `all_metrics_summary.csv`
+  - `all_metrics_report.json`
+
+What these new files mean:
+
+- `results.csv` still stores the primary run target metric only
+- `all_metrics_results_long.csv` stores one row per sample per evaluation metric
+- `all_metrics_results_wide.csv` stores one row per sample with one column per metric
+- `all_metrics_summary.csv` stores dataset-level aggregates for each metric
+- `all_metrics_report.json` stores training configuration, selected hyper-parameters, target metric, stage metadata, and the aggregate metric summary
 
 ## 9. Dataset-Specific Notes
 

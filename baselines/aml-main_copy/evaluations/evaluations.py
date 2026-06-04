@@ -7,23 +7,31 @@ from utils.dataclasses.evaluations import DataForEvaluation
 
 
 def evaluate_tokens_attributions(model, explained_tokenizer: AutoTokenizer, ref_token_id, data: DataForEvaluation,
-                                 experiment_path: str, step: int, epoch: int, item_index: str):
-    if ExpArgs.eval_metric == EvalMetric.AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY.value:
-        return combined_eval(combined_metric = EvalMetric.AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY.value,
-            comprehensiveness_metric = EvalMetric.AOPC_COMPREHENSIVENESS.value,
-            sufficiency_metric = EvalMetric.AOPC_SUFFICIENCY.value, model = model,
-            explained_tokenizer = explained_tokenizer, ref_token_id = ref_token_id, data = data,
-            experiment_path = experiment_path, step = step, epoch = epoch, item_index = item_index)
-    elif ExpArgs.eval_metric == EvalMetric.COMPREHENSIVENESS_SUFFICIENCY.value:
-        return combined_eval(combined_metric = EvalMetric.COMPREHENSIVENESS_SUFFICIENCY.value,
-            comprehensiveness_metric = EvalMetric.COMPREHENSIVENESS.value,
-            sufficiency_metric = EvalMetric.SUFFICIENCY.value, model = model, explained_tokenizer = explained_tokenizer,
-            ref_token_id = ref_token_id, data = data, experiment_path = experiment_path, step = step, epoch = epoch,
-            item_index = item_index)
-    else:
-        return evaluate_tokens_attr_handler(model = model, explained_tokenizer = explained_tokenizer,
-                                            ref_token_id = ref_token_id, data = data, experiment_path = experiment_path,
-                                            step = step, epoch = epoch, item_index = item_index)
+                                 experiment_path: str, step: int, epoch: int, item_index: str, eval_metric: str = None):
+    original_metric = ExpArgs.eval_metric
+    if eval_metric is not None:
+        ExpArgs.eval_metric = eval_metric
+
+    try:
+        if ExpArgs.eval_metric == EvalMetric.AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY.value:
+            return combined_eval(combined_metric = EvalMetric.AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY.value,
+                comprehensiveness_metric = EvalMetric.AOPC_COMPREHENSIVENESS.value,
+                sufficiency_metric = EvalMetric.AOPC_SUFFICIENCY.value, model = model,
+                explained_tokenizer = explained_tokenizer, ref_token_id = ref_token_id, data = data,
+                experiment_path = experiment_path, step = step, epoch = epoch, item_index = item_index)
+        elif ExpArgs.eval_metric == EvalMetric.COMPREHENSIVENESS_SUFFICIENCY.value:
+            return combined_eval(combined_metric = EvalMetric.COMPREHENSIVENESS_SUFFICIENCY.value,
+                comprehensiveness_metric = EvalMetric.COMPREHENSIVENESS.value,
+                sufficiency_metric = EvalMetric.SUFFICIENCY.value, model = model, explained_tokenizer = explained_tokenizer,
+                ref_token_id = ref_token_id, data = data, experiment_path = experiment_path, step = step, epoch = epoch,
+                item_index = item_index)
+        else:
+            return evaluate_tokens_attr_handler(model = model, explained_tokenizer = explained_tokenizer,
+                                                ref_token_id = ref_token_id, data = data, experiment_path = experiment_path,
+                                                step = step, epoch = epoch, item_index = item_index)
+    finally:
+        if eval_metric is not None:
+            ExpArgs.eval_metric = original_metric
 
 
 def evaluate_tokens_attr_handler(model, explained_tokenizer: AutoTokenizer, ref_token_id, data: DataForEvaluation,
@@ -53,8 +61,10 @@ def combined_eval(combined_metric: str, comprehensiveness_metric: str, sufficien
                                                                                 ref_token_id, data, experiment_path,
                                                                                 step, epoch, item_index)
 
-    item = evaluation_item_comp
-    item["metric_result"] = evaluation_result_comp - evaluation_result_suff
-    item["eval_metric"] = combined_metric
+    item = evaluation_item_comp.copy()
+    metric_result = evaluation_result_comp - evaluation_result_suff
+    item["metric_result"] = metric_result
+    item["metric_result_str"] = "{:.6f}".format(metric_result)
+    item["evaluation_metric"] = combined_metric
     ExpArgs.eval_metric = combined_metric
     return item["metric_result"].item(), item

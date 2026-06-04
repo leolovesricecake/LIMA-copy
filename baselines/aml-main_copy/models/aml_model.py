@@ -118,6 +118,7 @@ class AmlModel(pl.LightningModule):
             batch = {k: v.to(get_device()) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
             begin = time.time()
+            duration, item_data = None, None
 
             if is_use_prompt():
                 for k in [TASK_PROMPT_INPUT_IDS, TASK_PROMPT_ATTENTION_MASK, EXPLAINED_INPUT_IDS_NAME,
@@ -191,7 +192,7 @@ class AmlModel(pl.LightningModule):
                 end = time.time()
                 duration = end - begin
 
-        return tokens_attribution, evaluation_item, duration
+        return tokens_attribution, evaluation_item, duration, item_data
 
     def calculate_tokens_attribution(self, explained_model_probabilities, batch):
         input_ids = batch[INTERPRETER_INPUT_IDS_NAME].clone()
@@ -684,5 +685,4 @@ class AmlModel(pl.LightningModule):
         #     print(log_dict)
         #
         #     self.log_dict(log_dict, on_step = True, on_epoch = False)
-
 

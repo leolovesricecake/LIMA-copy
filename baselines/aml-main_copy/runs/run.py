@@ -38,6 +38,7 @@ ExpArgs.task = get_task(arg_task)
 ExpArgs.explained_model_backbone = arg_explained_model_backbone
 ExpArgs.interpreter_model_backbone = arg_interpreter_model_backbone
 ExpArgs.eval_metric = arg_metric
+ExpArgs.target_eval_metric = arg_metric
 
 is_llm = not is_model_encoder_only(ExpArgs.explained_model_backbone)
 

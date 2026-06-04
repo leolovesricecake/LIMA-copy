@@ -21,6 +21,7 @@ class AmlModelFineTune(AmlModel):
         self.training_step_outputs: List[StepOutput] = []
         self.val_step_outputs: List[StepOutput] = []
         self.best_metric_result, self.best_item, self.best_tokens_attr = None, None, None
+        self.best_evaluation_data = None
 
     def set_index(self, item_idx: str):
         self.item_idx = item_idx
@@ -105,16 +106,26 @@ class AmlModelFineTune(AmlModel):
 
             metric_results_dict = {ExpArgs.eval_metric: evaluation_result}
             self.set_best_results(evaluation_result, evaluation_item,
-                                  best_tokens_attr = step_output.tokens_attr[0].detach().squeeze())
+                                  best_tokens_attr = step_output.tokens_attr[0].detach().squeeze(),
+                                  evaluation_data = item_data)
             new_logs = {f"Val_metric/{k}": v for k, v in metric_results_dict.items()}
             self.log_dict(new_logs, on_step = False, on_epoch = True)
 
-    def set_best_results(self, metric_result, item, best_tokens_attr):
+    def set_best_results(self, metric_result, item, best_tokens_attr, evaluation_data):
         if self.best_metric_result is None:
-            self.best_metric_result, self.best_item, self.best_tokens_attr = metric_result, item, best_tokens_attr
+            self.best_metric_result = metric_result
+            self.best_item = item
+            self.best_tokens_attr = best_tokens_attr
+            self.best_evaluation_data = evaluation_data
         elif (self.best_metric_result < metric_result) and (
                 MetricsMetaData.directions[ExpArgs.eval_metric] == DirectionTypes.MAX.value):
-            self.best_metric_result, self.best_item, self.best_tokens_attr = metric_result, item, best_tokens_attr
+            self.best_metric_result = metric_result
+            self.best_item = item
+            self.best_tokens_attr = best_tokens_attr
+            self.best_evaluation_data = evaluation_data
         elif (self.best_metric_result > metric_result) and (
                 MetricsMetaData.directions[ExpArgs.eval_metric] == DirectionTypes.MIN.value):
-            self.best_metric_result, self.best_item, self.best_tokens_attr = metric_result, item, best_tokens_attr
+            self.best_metric_result = metric_result
+            self.best_item = item
+            self.best_tokens_attr = best_tokens_attr
+            self.best_evaluation_data = evaluation_data

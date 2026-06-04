@@ -23,6 +23,7 @@ class ExpArgs:
     log_every_n_steps = 40
     inverse_token_attr_function = InverseLossTypes.NEGATIVE_PROB_LOSS.value
     eval_metric = None
+    target_eval_metric = None
     is_save_results = False
     is_save_support_results = False
     task: Task = None
