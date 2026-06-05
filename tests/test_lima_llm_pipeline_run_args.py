@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from lima_llm.pipeline import run as run_mod
 
@@ -12,9 +12,9 @@ def test_load_adaptive_overrides_inline_and_file(tmp_path: Path) -> None:
     assert isinstance(inline, dict)
     assert int(inline["min_effective_chunks"]) == 6
 
-    p = tmp_path / "ov.json"
-    p.write_text(json.dumps({"guard_mode": "soft_band"}), encoding="utf-8")
-    from_file = run_mod._load_adaptive_overrides(str(p))
+    path = tmp_path / "ov.json"
+    path.write_text(json.dumps({"guard_mode": "soft_band"}), encoding="utf-8")
+    from_file = run_mod._load_adaptive_overrides(str(path))
     assert isinstance(from_file, dict)
     assert str(from_file["guard_mode"]) == "soft_band"
 
@@ -31,9 +31,24 @@ def test_load_sample_ids_from_json_and_csv(tmp_path: Path) -> None:
     assert ids_txt == {"x", "y", "z"}
 
 
+def test_default_hparam_space_matches_98fec49_baseline() -> None:
+    space = run_mod._default_hparam_space()
+    assert space == {
+        "short_max_words": [96, 120],
+        "medium_max_words": [384, 448],
+        "long_max_words": [960, 1152],
+        "min_effective_chunks": [4, 5],
+        "short_floor_min_words": [12, 15],
+        "short_floor_signal_mode": ["always", "structural"],
+        "guard_mode": ["hard_cap", "soft_band"],
+        "ratio_threshold": [20, 24, 28],
+        "fragmentation_target_words": [28, 32],
+    }
+
+
 def test_load_hparam_space_and_candidates(tmp_path: Path) -> None:
-    p = tmp_path / "space.json"
-    p.write_text(
+    path = tmp_path / "space.json"
+    path.write_text(
         json.dumps(
             {
                 "parameters": {
@@ -45,7 +60,7 @@ def test_load_hparam_space_and_candidates(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    raw_space = run_mod._load_hparam_space(str(p))
+    raw_space = run_mod._load_hparam_space(str(path))
     adaptive_space, lambda_space = run_mod._split_hparam_space(
         raw_space=raw_space,
         enable_lambda_search=False,
@@ -62,8 +77,8 @@ def test_load_hparam_space_and_candidates(tmp_path: Path) -> None:
         max_trials=32,
         seed=42,
     )
-    # baseline + 2x2x2 grid
     assert len(grid) == 9
+
     random_rows = run_mod._build_candidates(
         method="random",
         adaptive_space=adaptive_space,
@@ -77,8 +92,8 @@ def test_load_hparam_space_and_candidates(tmp_path: Path) -> None:
 
 
 def test_hparam_space_rejects_lambda_keys_when_disabled(tmp_path: Path) -> None:
-    p = tmp_path / "space_lambda.json"
-    p.write_text(
+    path = tmp_path / "space_lambda.json"
+    path.write_text(
         json.dumps(
             {
                 "parameters": {
@@ -89,7 +104,7 @@ def test_hparam_space_rejects_lambda_keys_when_disabled(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    raw_space = run_mod._load_hparam_space(str(p))
+    raw_space = run_mod._load_hparam_space(str(path))
     try:
         run_mod._split_hparam_space(raw_space=raw_space, enable_lambda_search=False)
     except ValueError as exc:
@@ -99,8 +114,8 @@ def test_hparam_space_rejects_lambda_keys_when_disabled(tmp_path: Path) -> None:
 
 
 def test_hparam_space_accepts_lambda_keys_when_enabled_and_builds_candidates(tmp_path: Path) -> None:
-    p = tmp_path / "space_lambda_enabled.json"
-    p.write_text(
+    path = tmp_path / "space_lambda_enabled.json"
+    path.write_text(
         json.dumps(
             {
                 "parameters": {
@@ -111,7 +126,7 @@ def test_hparam_space_accepts_lambda_keys_when_enabled_and_builds_candidates(tmp
         ),
         encoding="utf-8",
     )
-    raw_space = run_mod._load_hparam_space(str(p))
+    raw_space = run_mod._load_hparam_space(str(path))
     adaptive_space, lambda_space = run_mod._split_hparam_space(
         raw_space=raw_space,
         enable_lambda_search=True,
@@ -131,7 +146,6 @@ def test_hparam_space_accepts_lambda_keys_when_enabled_and_builds_candidates(tmp
     assert len(rows) == 5
     assert rows[0]["adaptive_params"] == {}
     assert rows[0]["lambda_params"] == {}
-    # at least one candidate should carry lambda override
     assert any("lambda1" in dict(row.get("lambda_params") or {}) for row in rows[1:])
 
 
@@ -162,7 +176,7 @@ def test_hparam_candidate_budget_is_deterministic() -> None:
     assert rows_a == rows_b
 
 
-def test_random_search_can_explore_outside_grid() -> None:
+def test_random_search_candidates_stay_on_grid() -> None:
     adaptive_space = {
         "short_max_words": [96, 120],
         "ratio_threshold": [20, 24],
@@ -187,10 +201,11 @@ def test_random_search_can_explore_outside_grid() -> None:
     )
     grid_signatures = {run_mod._candidate_signature(row) for row in grid_rows[1:]}
     random_signatures = [run_mod._candidate_signature(row) for row in random_rows[1:]]
-    assert any(sig not in grid_signatures for sig in random_signatures)
+    assert random_signatures
+    assert all(sig in grid_signatures for sig in random_signatures)
 
 
-def test_grid_plus_random_adds_candidates_beyond_grid_when_space_allows() -> None:
+def test_grid_plus_random_collapses_to_grid_without_budget_cap() -> None:
     adaptive_space = {
         "short_max_words": [96, 120],
         "ratio_threshold": [20, 24],
@@ -213,56 +228,69 @@ def test_grid_plus_random_adds_candidates_beyond_grid_when_space_allows() -> Non
         max_trials=None,
         seed=42,
     )
-    grid_signatures = {run_mod._candidate_signature(row) for row in grid_rows[1:]}
-    extra_signatures = [run_mod._candidate_signature(row) for row in grid_plus_random_rows[1:]]
-    assert len(grid_plus_random_rows) > len(grid_rows)
-    assert any(sig not in grid_signatures for sig in extra_signatures)
+    assert len(grid_plus_random_rows) == len(grid_rows)
+    assert grid_plus_random_rows == grid_rows
 
 
 def test_resolve_hparam_tune_size_prefers_new_flag() -> None:
-    args = SimpleNamespace(
-        hparam_tune_size=88,
-    )
+    args = SimpleNamespace(hparam_tune_size=88)
     assert run_mod._resolve_hparam_tune_size(args) == 88
 
 
-def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_grid() -> None:
-    args = SimpleNamespace(
-        hparam_max_trials=None,
-    )
-    assert run_mod._resolve_hparam_max_trials(args, method="grid", random_trials=8) is None
+def test_resolve_hparam_max_trials_defaults_to_low_budget_for_default_space() -> None:
+    args = SimpleNamespace(hparam_max_trials=None)
+    assert run_mod._resolve_hparam_max_trials(
+        args,
+        method="grid+random",
+        random_trials=8,
+        using_default_space=True,
+    ) == 16
 
 
-def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_random() -> None:
-    args = SimpleNamespace(
-        hparam_max_trials=None,
-    )
-    assert run_mod._resolve_hparam_max_trials(args, method="random", random_trials=8) is None
+def test_resolve_hparam_max_trials_preserves_full_grid_for_custom_space() -> None:
+    args = SimpleNamespace(hparam_max_trials=None)
+    assert run_mod._resolve_hparam_max_trials(
+        args,
+        method="grid",
+        random_trials=8,
+        using_default_space=False,
+    ) is None
 
 
-def test_resolve_hparam_max_trials_defaults_to_method_native_budget_for_grid_plus_random() -> None:
-    args = SimpleNamespace(
-        hparam_max_trials=None,
-    )
-    assert run_mod._resolve_hparam_max_trials(args, method="grid+random", random_trials=8) is None
+def test_resolve_hparam_max_trials_preserves_random_trial_budget_for_custom_space() -> None:
+    args = SimpleNamespace(hparam_max_trials=None)
+    assert run_mod._resolve_hparam_max_trials(
+        args,
+        method="random",
+        random_trials=8,
+        using_default_space=False,
+    ) is None
+
+
+def test_resolve_hparam_max_trials_preserves_grid_plus_random_budget_for_custom_space() -> None:
+    args = SimpleNamespace(hparam_max_trials=None)
+    assert run_mod._resolve_hparam_max_trials(
+        args,
+        method="grid+random",
+        random_trials=8,
+        using_default_space=False,
+    ) is None
 
 
 def test_resolve_hparam_max_trials_prefers_explicit_value() -> None:
-    args = SimpleNamespace(
-        hparam_max_trials=12,
-    )
-    assert run_mod._resolve_hparam_max_trials(args, method="grid", random_trials=8) == 12
+    args = SimpleNamespace(hparam_max_trials=12)
+    assert run_mod._resolve_hparam_max_trials(
+        args,
+        method="grid",
+        random_trials=8,
+        using_default_space=True,
+    ) == 12
 
 
 def test_parser_requires_save_dir() -> None:
     parser = run_mod.build_parser()
     try:
-        _ = parser.parse_args(
-            [
-                "--dataset",
-                "sst2",
-            ]
-        )
+        _ = parser.parse_args(["--dataset", "sst2"])
     except SystemExit as exc:
         assert int(exc.code) == 2
     else:
@@ -291,7 +319,6 @@ def test_parser_rejects_removed_legacy_args() -> None:
 
 def test_parser_rejects_balanced_v2_profile() -> None:
     parser = run_mod.build_parser()
-    # argparse exits with code 2 for invalid choice.
     try:
         _ = parser.parse_args(
             [

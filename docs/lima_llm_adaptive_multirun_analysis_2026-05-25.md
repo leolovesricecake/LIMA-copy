@@ -85,7 +85,9 @@
 主流程（推荐）：
 - 使用 `python -m lima_llm` 单数据集内联搜索（`--hparam-search-split`）。
 - 一个命令只处理一个数据集，数据集之间互不影响。
-- 搜索候选始终包含 baseline；只有显式传 `--hparam-max-trials` 时才会做统一预算截断（超预算时确定性下采样）。
+- 搜索候选始终包含 baseline。
+- 使用内置默认搜索空间且未显式传 `--hparam-max-trials` 时，默认 trial 预算为 `16`。
+- 显式传 `--hparam-space-file` 时，不做隐式 trial 截断；`random / grid+random` 的随机部分仍只从 grid 行中抽样。
 - `lambda` 搜索默认关闭；仅在显式传入 `--hparam-enable-lambda-search` 时启用。
 
 辅助工具（可选）：

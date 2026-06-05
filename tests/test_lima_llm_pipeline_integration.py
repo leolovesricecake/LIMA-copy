@@ -401,6 +401,49 @@ def test_pipeline_hparam_search_same_split_requires_eval_remainder(tmp_path: Pat
         main(argv)
 
 
+def test_pipeline_hparam_search_default_space_uses_implicit_budget_16(tmp_path: Path) -> None:
+    eraser_root = tmp_path / "eraser_default_budget"
+    _build_tiny_eraser_three(eraser_root)
+
+    out = tmp_path / "results_hparam_default_budget"
+    argv = [
+        "--dataset",
+        "eraser_movie_reviews",
+        "--split",
+        "validation",
+        "--eraser-root",
+        str(eraser_root),
+        "--mock-backbone",
+        "--chunker",
+        "adaptive",
+        "--adaptive-profile",
+        "balanced",
+        "--hparam-search-split",
+        "validation",
+        "--hparam-tune-size",
+        "2",
+        "--hparam-search-method",
+        "grid+random",
+        "--hparam-random-trials",
+        "4",
+        *_save_args(out),
+        "--run-eval",
+    ]
+    main(argv)
+
+    run_cfg_path = next(out.glob("**/run_config.json"))
+    run_cfg = json.loads(run_cfg_path.read_text(encoding="utf-8"))
+    summary_path = Path(str(run_cfg.get("hparam_search_summary_path")))
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert int(summary.get("hparam_max_trials", 0)) == 16
+    assert int(summary.get("effective_trial_budget", 0)) == 16
+    assert len(summary.get("trials", [])) == 16
+    assert len(summary.get("candidate_adaptive_overrides", [])) == 16
+    trial_dirs = [p for p in summary_path.parent.glob("trials/trial_*") if p.is_dir()]
+    assert len(trial_dirs) == 16
+
+
 def test_pipeline_hparam_search_with_lambda_enabled(tmp_path: Path) -> None:
     eraser_root = tmp_path / "eraser_three_lambda"
     _build_tiny_eraser_three(eraser_root)
