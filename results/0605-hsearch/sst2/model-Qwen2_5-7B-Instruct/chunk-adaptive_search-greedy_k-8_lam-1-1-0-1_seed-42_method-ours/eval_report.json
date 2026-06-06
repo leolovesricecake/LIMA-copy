@@ -42,21 +42,21 @@
     "selected_all_ratio": 1.0,
     "plausibility_available": false,
     "plausibility_coverage_ratio": 0.0,
-    "runtime_seconds": 534.460009098053,
+    "runtime_seconds": 321.41380882263184,
     "forward_counters_delta": {
+      "batch_pack_seconds": 3.516558519564569,
       "batch_tokenize_calls": 6691,
+      "embed_calls": 0,
+      "batch_forward_calls": 13382,
       "oom_shrink_events": 0,
       "predict_calls": 25553,
-      "batch_forward_seconds": 317.604801040492,
-      "model_forward_calls": 13382,
-      "gradient_calls": 0,
       "batch_pack_calls": 13382,
-      "batch_pack_seconds": 46.84439495357219,
-      "batch_tokenize_seconds": 2.9820819832384586,
-      "batch_rows": 25553,
-      "batch_forward_calls": 13382,
+      "model_forward_calls": 13382,
+      "batch_tokenize_seconds": 2.8715447813738137,
+      "batch_forward_seconds": 286.1148132290691,
+      "gradient_calls": 0,
       "batch_calls": 872,
-      "embed_calls": 0
+      "batch_rows": 25553
     },
     "method_diagnostics": {
       "evaluated_samples": 872,
@@ -65,10 +65,10 @@
       "error_examples": []
     },
     "timing_breakdown": {
-      "unit_build_seconds": 0.48015642166137695,
-      "text_build_seconds": 0.4241650104522705,
-      "prefetch_seconds": 530.2057366371155,
-      "metric_compute_seconds": 0.1867830753326416
+      "unit_build_seconds": 0.44664883613586426,
+      "text_build_seconds": 0.4157681465148926,
+      "prefetch_seconds": 318.1704173088074,
+      "metric_compute_seconds": 0.18457555770874023
     },
     "cache_stats": {
       "required_text_count": 32049,
@@ -97,9 +97,9 @@
       "batch_tokenize_calls": 6691,
       "batch_pack_calls": 13382,
       "batch_forward_calls": 13382,
-      "batch_tokenize_seconds": 2.9820819832384586,
-      "batch_pack_seconds": 46.84439495357219,
-      "batch_forward_seconds": 317.604801040492
+      "batch_tokenize_seconds": 2.8715447813738137,
+      "batch_pack_seconds": 3.516558519564569,
+      "batch_forward_seconds": 286.1148132290691
     }
   },
   "metrics_by_target": {
@@ -200,10 +200,10 @@
     50
   ],
   "timing_breakdown": {
-    "unit_build_seconds": 0.48015642166137695,
-    "text_build_seconds": 0.4241650104522705,
-    "prefetch_seconds": 530.2057366371155,
-    "metric_compute_seconds": 0.1867830753326416
+    "unit_build_seconds": 0.44664883613586426,
+    "text_build_seconds": 0.4157681465148926,
+    "prefetch_seconds": 318.1704173088074,
+    "metric_compute_seconds": 0.18457555770874023
   },
   "cache_stats": {
     "required_text_count": 32049,
@@ -232,27 +232,27 @@
     "batch_tokenize_calls": 6691,
     "batch_pack_calls": 13382,
     "batch_forward_calls": 13382,
-    "batch_tokenize_seconds": 2.9820819832384586,
-    "batch_pack_seconds": 46.84439495357219,
-    "batch_forward_seconds": 317.604801040492
+    "batch_tokenize_seconds": 2.8715447813738137,
+    "batch_pack_seconds": 3.516558519564569,
+    "batch_forward_seconds": 286.1148132290691
   },
   "provenance": {
     "schema_version": 1,
     "stage": "eval_report",
-    "captured_at_utc": "2026-06-01T16:11:41Z",
+    "captured_at_utc": "2026-06-06T13:35:59Z",
     "timing": {
-      "start_utc": "2026-06-01T16:02:46Z",
-      "end_utc": "2026-06-01T16:11:41Z",
-      "elapsed_seconds": 534.5420596599579
+      "start_utc": "2026-06-06T13:30:38Z",
+      "end_utc": "2026-06-06T13:35:59Z",
+      "elapsed_seconds": 321.42249274253845
     },
     "git": {
       "available": true,
       "root": "/mnt/huawei/nsq/LIMA-copy",
-      "commit": "fbe696b8d1c70043d404a55e5de82622f5996dac",
-      "commit_short": "fbe696b",
+      "commit": "80b71f2210a1fba5de8f496c1abfe3332bb99e2d",
+      "commit_short": "80b71f2",
       "branch": "feat/lima-llm-transfer-v1",
-      "describe": "best-0516-19-gfbe696b",
-      "dirty": false
+      "describe": "best-0516-26-g80b71f2-dirty",
+      "dirty": true
     },
     "command": {
       "argv": [
@@ -263,7 +263,7 @@
         "--model-path",
         "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
         "--device",
-        "cuda:1",
+        "cuda:3",
         "--dtype",
         "bfloat16",
         "--max-length",
@@ -281,15 +281,17 @@
         "--adaptive-profile",
         "balanced",
         "--adaptive-overrides-json",
-        "{\"fragmentation_target_words\":32,\"guard_mode\":\"hard_cap\",\"long_max_words\":1152,\"medium_max_words\":384,\"min_effective_chunks\":6,\"ratio_threshold\":28,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"always\",\"short_max_words\":96}",
+        "{\"long_max_words\":1152,\"medium_max_words\":384,\"min_effective_chunks\":6,\"short_floor_min_words\":12}",
         "--search",
         "greedy",
         "--seed",
         "42",
         "--sample-ids-file",
-        "lima_llm_results-0601-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
-        "--output-dir",
-        "lima_llm_results-0601-hsearch",
+        "results/0605-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "--base-save-dir",
+        "results",
+        "--save-dir",
+        "0605-hsearch",
         "--resume-check",
         "strict",
         "--explain-method",
@@ -309,7 +311,7 @@
         "sst2_source": null,
         "dataset_cache_dir": "/mnt/huawei/nsq/LIMA-copy/datasets",
         "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
-        "device": "cuda:1",
+        "device": "cuda:3",
         "dtype": "bfloat16",
         "max_length": 2048,
         "embedding_layer_ratio": 0.7,
@@ -319,16 +321,14 @@
         "chunker": "adaptive",
         "fixed_token_size": 64,
         "adaptive_profile": "balanced",
-        "adaptive_overrides_json": "{\"fragmentation_target_words\":32,\"guard_mode\":\"hard_cap\",\"long_max_words\":1152,\"medium_max_words\":384,\"min_effective_chunks\":6,\"ratio_threshold\":28,\"short_floor_min_words\":12,\"short_floor_signal_mode\":\"always\",\"short_max_words\":96}",
-        "sample_ids_file": "lima_llm_results-0601-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
+        "adaptive_overrides_json": "{\"long_max_words\":1152,\"medium_max_words\":384,\"min_effective_chunks\":6,\"short_floor_min_words\":12}",
+        "sample_ids_file": "results/0605-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/eval_ids.json",
         "hparam_search_split": "",
         "hparam_tune_size": 100,
-        "hparam_train_size": null,
-        "hparam_dev_size": null,
         "hparam_search_method": "grid+random",
         "hparam_space_file": null,
         "hparam_random_trials": 8,
-        "hparam_max_trials": 16,
+        "hparam_max_trials": null,
         "hparam_enable_lambda_search": false,
         "search": "greedy",
         "seed": 42,
@@ -336,7 +336,8 @@
         "max_samples": null,
         "dry_run": 0,
         "verbose_chunks": false,
-        "output_dir": "lima_llm_results-0601-hsearch",
+        "base_save_dir": "results",
+        "save_dir": "0605-hsearch",
         "resume_check": "strict",
         "run_eval": true,
         "eval_q_values": "1,5,10,20,50",
@@ -348,7 +349,7 @@
       "python_version": "3.8.0",
       "platform": "Linux-5.15.0-179-generic-x86_64-with-glibc2.10",
       "cwd": "/mnt/huawei/nsq/LIMA-copy",
-      "pid": 3885244,
+      "pid": 2255978,
       "deterministic": {
         "enabled": false,
         "applied": false
@@ -362,17 +363,12 @@
   "hparam_search_split": "train",
   "hparam_tune_size": 40,
   "best_adaptive_overrides": {
-    "fragmentation_target_words": 32,
-    "guard_mode": "hard_cap",
     "long_max_words": 1152,
     "medium_max_words": 384,
     "min_effective_chunks": 6,
-    "ratio_threshold": 28,
-    "short_floor_min_words": 12,
-    "short_floor_signal_mode": "always",
-    "short_max_words": 96
+    "short_floor_min_words": 12
   },
   "best_lambdas": "1,1,0,1",
   "lambda_search_enabled": false,
-  "hparam_search_summary_path": "lima_llm_results-0601-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/search_summary.json"
+  "hparam_search_summary_path": "results/0605-hsearch/sst2/model-Qwen2_5-7B-Instruct/chunk-adaptive_search-greedy_k-8_lam-1-1-0-1_seed-42_method-ours/hparam_search/search_summary.json"
 }

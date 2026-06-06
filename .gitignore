@@ -8,7 +8,8 @@ submodular_results
 lima_origin/explanation_results
 lima_origin/explanation_insertion_results
 lima_origin/submodular_results
-lima_llm_results*
+results*
+**/OUT/
 *samples*
 **/OUT**
 

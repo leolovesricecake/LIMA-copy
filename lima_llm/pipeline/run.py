@@ -266,15 +266,15 @@ def _load_json_if_possible(path: Path) -> Dict | None:
 
 def _default_hparam_space() -> Dict[str, List[Any]]:
     return {
-        "short_max_words": [96, 120],
+        # "short_max_words": [96, 120],
         "medium_max_words": [384, 448],
         "long_max_words": [960, 1152],
-        "min_effective_chunks": [4, 5],
+        "min_effective_chunks": [4, 6],
         "short_floor_min_words": [12, 15],
-        "short_floor_signal_mode": ["always", "structural"],
-        "guard_mode": ["hard_cap", "soft_band"],
-        "ratio_threshold": [20, 24, 28],
-        "fragmentation_target_words": [28, 32],
+        # "short_floor_signal_mode": ["always", "structural"],
+        # "guard_mode": ["hard_cap", "soft_band"],
+        # "ratio_threshold": [20, 24, 28],
+        # "fragmentation_target_words": [28, 32],
     }
 
 

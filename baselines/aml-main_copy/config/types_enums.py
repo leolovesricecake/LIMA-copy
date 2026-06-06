@@ -5,7 +5,7 @@ class ModelBackboneTypes(Enum):
     BERT = 'BERT'
     ROBERTA = 'ROBERTA'
     DISTILBERT = 'DISTILBERT'
-    LLAMA = 'LLAMA'
+    LLAMA = 'LLAMA'  # Llama-2-7b-hf
     MISTRAL = 'MISTRAL'
 
 

@@ -22,10 +22,13 @@ def get_device():
 def is_model_encoder_only(model = None):
     if model is None:
         model = ExpArgs.explained_model_backbone
-    if model in [ModelBackboneTypes.LLAMA.value, ModelBackboneTypes.MISTRAL.value]:
-        return False
-    if model in [ModelBackboneTypes.ROBERTA.value, ModelBackboneTypes.BERT.value, ModelBackboneTypes.DISTILBERT.value]:
+    elif model in [ModelBackboneTypes.ROBERTA.value, ModelBackboneTypes.BERT.value, ModelBackboneTypes.DISTILBERT.value]:
         return True
+    elif model in [
+        ModelBackboneTypes.LLAMA.value,
+        ModelBackboneTypes.MISTRAL.value
+    ]:
+        return False
 
     raise ValueError(f"unsupported model: {model}")
 
