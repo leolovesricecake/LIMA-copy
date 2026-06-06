@@ -6,7 +6,8 @@ import torch
 from lightning_fabric.utilities.optimizer import _optimizers_to_device
 from peft import PeftModel
 from torch import Tensor, nn
-from transformers import BertTokenizer, RobertaTokenizer, DistilBertTokenizer, AutoTokenizer, AutoConfig
+from transformers import (BertTokenizer, RobertaTokenizer, DistilBertTokenizer, AutoTokenizer, AutoConfig,
+                          AutoModelForCausalLM)
 
 from config.config import ExpArgs, BackbonesMetaData
 from config.constants import HF_CACHE, NEW_ADDED_TRAINABLE_PARAMS
@@ -18,25 +19,78 @@ from utils.dataclasses import Task
 from utils.utils_functions import is_model_encoder_only
 
 
+def is_local_model_path(model_path: str) -> bool:
+    return Path(str(model_path)).expanduser().exists()
+
+
+def get_local_files_only(model_path: str) -> bool:
+    return is_local_model_path(model_path)
+
+
+def normalize_token_id(token_id):
+    if isinstance(token_id, (list, tuple)):
+        if len(token_id) == 0:
+            return None
+        return token_id[0]
+    return token_id
+
+
+def resolve_explained_model_path(task: Task) -> str:
+    if ExpArgs.explained_model_path is not None:
+        return ExpArgs.explained_model_path
+    if ExpArgs.explained_model_backbone == ModelBackboneTypes.BERT.value:
+        return task.bert_fine_tuned_model
+    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.ROBERTA.value:
+        return task.roberta_fine_tuned_model
+    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.DISTILBERT.value:
+        return task.distilbert_fine_tuned_model
+    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.LLAMA.value:
+        return task.llama_model
+    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.MISTRAL.value:
+        return task.mistral_model
+    raise ValueError("unsupported model backbone explained model selected")
+
+
+def ensure_llm_pad_token(tokenizer_or_config):
+    pad_token_id = normalize_token_id(getattr(tokenizer_or_config, "pad_token_id", None))
+    if pad_token_id is None:
+        eos_token_id = normalize_token_id(getattr(tokenizer_or_config, "eos_token_id", None))
+        unk_token_id = normalize_token_id(getattr(tokenizer_or_config, "unk_token_id", None))
+        if eos_token_id is not None:
+            tokenizer_or_config.pad_token_id = eos_token_id
+        elif unk_token_id is not None:
+            tokenizer_or_config.pad_token_id = unk_token_id
+        else:
+            raise ValueError("LLM tokenizer/config must expose eos_token_id or unk_token_id to derive pad_token_id")
+    return tokenizer_or_config
+
+
 def load_explained_model():
     task = ExpArgs.task
+    explained_model_path = resolve_explained_model_path(task)
     if ExpArgs.explained_model_backbone == ModelBackboneTypes.BERT.value:
         from transformers import BertForSequenceClassification
-        model = BertForSequenceClassification.from_pretrained(task.bert_fine_tuned_model, cache_dir = HF_CACHE)
+        model = BertForSequenceClassification.from_pretrained(explained_model_path, cache_dir = HF_CACHE,
+                                                              local_files_only = get_local_files_only(explained_model_path))
         model.cuda()
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.ROBERTA.value:
         from transformers import RobertaForSequenceClassification
-        model = RobertaForSequenceClassification.from_pretrained(task.roberta_fine_tuned_model, cache_dir = HF_CACHE)
+        model = RobertaForSequenceClassification.from_pretrained(explained_model_path, cache_dir = HF_CACHE,
+                                                                 local_files_only = get_local_files_only(explained_model_path))
         model.cuda()
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.DISTILBERT.value:
         from transformers import DistilBertForSequenceClassification
-        model = DistilBertForSequenceClassification.from_pretrained(task.distilbert_fine_tuned_model,
-                                                                    cache_dir = HF_CACHE)
+        model = DistilBertForSequenceClassification.from_pretrained(explained_model_path,
+                                                                    cache_dir = HF_CACHE,
+                                                                    local_files_only = get_local_files_only(explained_model_path))
         model.cuda()
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.LLAMA.value:
         from transformers import LlamaForCausalLM, LlamaForSequenceClassification
-        model_path = task.llama_model
+        model_path = explained_model_path
         if task.is_llm_use_lora:
+            if ExpArgs.explained_model_path is not None:
+                raise ValueError("--explained_model_path is not supported for LoRA-based AML tasks. "
+                                 "This task expects task-specific sequence-classification adapters.")
             model = LlamaForSequenceClassification.from_pretrained(model_path, torch_dtype = torch.bfloat16,
                                                                    cache_dir = HF_CACHE,
                                                                    num_labels = len(task.labels_int_str_maps.keys()),
@@ -45,29 +99,41 @@ def load_explained_model():
             model = model.merge_and_unload()
 
         else:
-            model = LlamaForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16, cache_dir = HF_CACHE,
-                                                     local_files_only = True, device_map = "auto")
+            if ExpArgs.explained_model_path is not None:
+                model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16,
+                                                             cache_dir = HF_CACHE,
+                                                             local_files_only = get_local_files_only(model_path),
+                                                             device_map = "auto",
+                                                             trust_remote_code = True)
+            else:
+                model = LlamaForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16, cache_dir = HF_CACHE,
+                                                         local_files_only = True, device_map = "auto")
 
-        if ExpArgs.ref_token_name == RefTokenNameTypes.UNK.value:
-            model.config.pad_token_id = model.config.eos_token_id
-        else:
-            raise ValueError("support eos_token_id only for LLMs")
+        ensure_llm_pad_token(model.config)
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.MISTRAL.value:
         from transformers import MistralForCausalLM, MistralForSequenceClassification
-        model_path = task.mistral_model
+        model_path = explained_model_path
         if task.is_llm_use_lora:
+            if ExpArgs.explained_model_path is not None:
+                raise ValueError("--explained_model_path is not supported for LoRA-based AML tasks. "
+                                 "This task expects task-specific sequence-classification adapters.")
             model = MistralForSequenceClassification.from_pretrained(model_path, torch_dtype = torch.bfloat16,
                                                                      cache_dir = HF_CACHE,
                                                                      num_labels = len(task.labels_int_str_maps.keys()))
             model = PeftModel.from_pretrained(model, task.mistral_adapter)
             model = model.merge_and_unload()
         else:
-            model = MistralForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16, cache_dir = HF_CACHE)
+            if ExpArgs.explained_model_path is not None:
+                model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16,
+                                                             cache_dir = HF_CACHE,
+                                                             local_files_only = get_local_files_only(model_path),
+                                                             device_map = "auto",
+                                                             trust_remote_code = True)
+            else:
+                model = MistralForCausalLM.from_pretrained(model_path, torch_dtype = torch.bfloat16,
+                                                           cache_dir = HF_CACHE)
 
-        if ExpArgs.ref_token_name == RefTokenNameTypes.UNK.value:
-            model.config.pad_token_id = model.config.eos_token_id
-        else:
-            raise ValueError("support eos_token_id only for LLMs")
+        ensure_llm_pad_token(model.config)
 
     else:
         raise ValueError("unsupported model backbone explained model selected")
@@ -118,27 +184,33 @@ def get_interpreter_config():
     return AutoConfig.from_pretrained(model_path)
 
 
-def get_models_tokenizer(model_backbone):
+def get_models_tokenizer(model_backbone, is_explained_model: bool = False):
     task = ExpArgs.task
     if model_backbone == ModelBackboneTypes.BERT.value:
-        return BertTokenizer.from_pretrained(task.bert_fine_tuned_model, cache_dir = HF_CACHE)
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.bert_fine_tuned_model
+        return BertTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
+                                             local_files_only = get_local_files_only(tokenizer_path))
     elif model_backbone == ModelBackboneTypes.ROBERTA.value:
-        return RobertaTokenizer.from_pretrained(task.roberta_fine_tuned_model, cache_dir = HF_CACHE)
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.roberta_fine_tuned_model
+        return RobertaTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
+                                                local_files_only = get_local_files_only(tokenizer_path))
     elif model_backbone == ModelBackboneTypes.DISTILBERT.value:
-        return DistilBertTokenizer.from_pretrained(task.distilbert_fine_tuned_model, cache_dir = HF_CACHE)
-    elif model_backbone == ModelBackboneTypes.LLAMA.value:
-        new_tokenizer = AutoTokenizer.from_pretrained(task.llama_model, cache_dir = HF_CACHE, padding_side = 'left')
-        if ExpArgs.ref_token_name == RefTokenNameTypes.UNK.value:
-            new_tokenizer.pad_token_id = new_tokenizer.eos_token_id
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.distilbert_fine_tuned_model
+        return DistilBertTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
+                                                   local_files_only = get_local_files_only(tokenizer_path))
+    elif model_backbone in [ModelBackboneTypes.LLAMA.value, ModelBackboneTypes.MISTRAL.value]:
+        if is_explained_model:
+            tokenizer_path = resolve_explained_model_path(task)
+        elif model_backbone == ModelBackboneTypes.LLAMA.value:
+            tokenizer_path = task.llama_model
         else:
-            raise ValueError("support eos_token_id only for LLMs")
-        return new_tokenizer
-    elif model_backbone == ModelBackboneTypes.MISTRAL.value:
-        new_tokenizer = AutoTokenizer.from_pretrained(task.mistral_model, cache_dir = HF_CACHE, padding_side = 'left')
-        if ExpArgs.ref_token_name == RefTokenNameTypes.UNK.value:
-            new_tokenizer.pad_token_id = new_tokenizer.eos_token_id
-        else:
-            raise ValueError("support eos_token_id only for LLMs")
+            tokenizer_path = task.mistral_model
+        new_tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
+                                                      cache_dir = HF_CACHE,
+                                                      padding_side = 'left',
+                                                      local_files_only = get_local_files_only(tokenizer_path),
+                                                      trust_remote_code = True)
+        ensure_llm_pad_token(new_tokenizer)
         return new_tokenizer
     else:
         raise ValueError("unsupported model type selected")

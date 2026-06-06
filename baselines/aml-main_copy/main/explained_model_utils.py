@@ -67,7 +67,9 @@ def save_running_time(end, begin, experiment_name, file_type):
     with open(f"{running_times_conf}/{experiment_name}_{file_type}.pkl", 'wb') as file:
         pickle.dump({"time": exec_time, "experiment_name": experiment_name, "eval_metric": ExpArgs.eval_metric,
                      "explained_model_backbone": ExpArgs.explained_model_backbone,
-                     "interpreter_model_backbone": ExpArgs.interpreter_model_backbone, "run_type": ExpArgs.run_type}, file)
+                     "interpreter_model_backbone": ExpArgs.interpreter_model_backbone,
+                     "explained_model_path": ExpArgs.explained_model_path,
+                     "run_type": ExpArgs.run_type}, file)
 
 
 def init_exp():

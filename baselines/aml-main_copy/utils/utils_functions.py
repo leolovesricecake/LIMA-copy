@@ -1,4 +1,7 @@
+import hashlib
+import re
 import time
+from pathlib import Path
 from typing import Tuple
 
 import torch
@@ -35,17 +38,21 @@ def is_model_encoder_only(model = None):
 
 def get_model_special_tokens(model, tokenizer):
     if is_model_encoder_only(model):
-        return [  #
+        special_tokens = [  #
             getattr(tokenizer, "cls_token_id"),  #
             getattr(tokenizer, "pad_token_id"),  #
             getattr(tokenizer, "sep_token_id")  #
         ]
     else:
-        return [  #
+        special_tokens = [  #
             getattr(tokenizer, "bos_token_id"),  #
             getattr(tokenizer, "pad_token_id"),  #
             getattr(tokenizer, "eos_token_id")  #
         ]
+    special_tokens = [token_id for token_id in special_tokens if token_id is not None]
+    if len(special_tokens) == 0:
+        raise ValueError("Tokenizer does not expose any usable special token ids")
+    return special_tokens
 
 
 def is_use_prompt():
@@ -70,7 +77,17 @@ def print_number_of_trainable_and_not_trainable_params(model) -> None:
 
 
 def get_current_time():
-    return int(round(time.time()))
+    return int(time.time() * 1000)
+
+
+def build_path_run_tag(raw_path: str) -> str:
+    normalized_path = str(Path(str(raw_path)).expanduser())
+    base_name = Path(normalized_path.rstrip("/")).name or "model"
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", base_name).strip("-").lower()
+    if not slug:
+        slug = "model"
+    digest = hashlib.sha1(normalized_path.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}_{digest}"
 
 
 def run_model(model, model_backbone, input_ids: Tensor = None, attention_mask: Tensor = None,

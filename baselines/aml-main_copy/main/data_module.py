@@ -37,7 +37,8 @@ class DataModule(pl.LightningDataModule):
             self.explained_tokenizer = explained_tokenizer
         else:
             self.interpreter_tokenizer = get_models_tokenizer(ExpArgs.interpreter_model_backbone)
-            self.explained_tokenizer = get_models_tokenizer(ExpArgs.explained_model_backbone)
+            self.explained_tokenizer = get_models_tokenizer(ExpArgs.explained_model_backbone,
+                                                            is_explained_model = True)
             self.set_label_vocab_tokens()
 
         self.interpreter_tokenizer_special_token_ids = torch.tensor(
@@ -112,7 +113,8 @@ class DataModule(pl.LightningDataModule):
                              for l in list(ExpArgs.task.labels_int_str_maps.keys())]
             ExpArgs.label_vocab_tokens = torch.stack(labels_tokens).squeeze()
             if ExpArgs.label_vocab_tokens.ndim != 1:
-                raise ValueError("label_vocab_tokens must work with one token only")
+                raise ValueError("label_vocab_tokens must work with one token only. "
+                                 "The current explained tokenizer does not map all label symbols to single tokens.")
 
     def tokenize(self, example):
         inputs_txt = example[self.dataset_column_text]

@@ -28,6 +28,7 @@ class ExpArgs:
     is_save_support_results = False
     task: Task = None
     explained_model_backbone = None
+    explained_model_path = None
     interpreter_model_backbone = None
     fine_tuned_interpreter_model_path = None
     run_type = None

@@ -16,7 +16,7 @@ import argparse
 
 from config.config import ExpArgs
 from config.types_enums import RefTokenNameTypes, ModelBackboneTypes
-from utils.utils_functions import get_current_time, is_model_encoder_only
+from utils.utils_functions import build_path_run_tag, get_current_time, is_model_encoder_only
 from models.train_models_utils import load_explained_model
 from main.run_infrence_pre_train import InferencePretrain
 
@@ -26,6 +26,7 @@ parser.add_argument('task', type = str, help = '')
 parser.add_argument('explained_model_backbone', type = str, help = '')
 parser.add_argument('interpreter_model_backbone', type = str, help = '')
 parser.add_argument('metric', type = str, help = '')
+parser.add_argument('--explained_model_path', type = str, default = None, help = '')
 
 args = parser.parse_args()
 
@@ -33,9 +34,11 @@ arg_task = args.task
 arg_explained_model_backbone = args.explained_model_backbone
 arg_interpreter_model_backbone = args.interpreter_model_backbone
 arg_metric = args.metric
+arg_explained_model_path = args.explained_model_path
 
 ExpArgs.task = get_task(arg_task)
 ExpArgs.explained_model_backbone = arg_explained_model_backbone
+ExpArgs.explained_model_path = arg_explained_model_path
 ExpArgs.interpreter_model_backbone = arg_interpreter_model_backbone
 ExpArgs.eval_metric = arg_metric
 ExpArgs.target_eval_metric = arg_metric
@@ -51,9 +54,15 @@ if is_llm:
 
 print("*" * 20, arg_task, arg_explained_model_backbone, arg_interpreter_model_backbone, arg_metric, "*" * 20,
       flush = True)
+if ExpArgs.explained_model_path is not None:
+    print(f"Explained model override path: {ExpArgs.explained_model_path}", flush = True)
 
 time_str = get_current_time()
 experiment_name_prefix = f"{ExpArgs.task.name}_{ExpArgs.explained_model_backbone}_{ExpArgs.interpreter_model_backbone}_{ExpArgs.eval_metric}"
+if ExpArgs.explained_model_path is not None:
+    experiment_name_prefix = (
+        f"{experiment_name_prefix}_PATH_{build_path_run_tag(ExpArgs.explained_model_path)}"
+    )
 
 # ------------------------------------------------
 
