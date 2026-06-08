@@ -49,37 +49,55 @@ class MetricsFunctions:
 
     def sufficiency(self, item_args: DataForEvaluation):
         topk_indices, required_tokens = self.get_indices(item_args)
-        prob_original = torch.softmax(item_args.explained_model_predicted_logits, dim = 0)
 
-        # if len(topk_indices) == 0:
+        device = next(self.model.parameters()).device
+
+        prob_original = torch.softmax(
+            item_args.explained_model_predicted_logits.to(device),
+            dim=0
+        )
+
         if topk_indices.shape[-1] == 0:
-            # topk% is too less to select even word - so no masking will happen.
             return 0
 
         inputs = copy.deepcopy(item_args.input)
-        mask = torch.zeros_like(inputs.input_ids[0]).bool()
-        mask[topk_indices] = 1
+        # print('\n- ', inputs.input_ids)
+        # print('- ', inputs.attention_mask, '\n')
+
+        input_ids = torch.stack(inputs.input_ids).to(device)
+        attention_mask = torch.stack(inputs.attention_mask).to(device)
+
+        mask = torch.zeros_like(input_ids[0]).bool()
+        mask[topk_indices.to(device)] = 1
+
         if required_tokens is not None:
-            mask[required_tokens] = 1
-        masked_input_ids = inputs.input_ids[0][mask].unsqueeze(0)
-        masked_attention_mask = inputs.attention_mask[0][mask].unsqueeze(0)
+            mask[required_tokens.to(device)] = 1
 
-        # print(f"EVAL - before merge: {masked_input_ids}")
-        masked_input_ids, masked_attention_mask = merge_prompts(  #
-            inputs = masked_input_ids, attention_mask = masked_attention_mask,
-            task_prompt = inputs.task_prompt_input_ids,
-            label_prompt = inputs.label_prompt_input_ids,
-            task_prompt_attention_mask = inputs.task_prompt_attention_mask,
-            label_prompt_attention_mask = inputs.label_prompt_attention_mask  #
+        masked_input_ids = input_ids[0][mask].unsqueeze(0)
+        masked_attention_mask = attention_mask[0][mask].unsqueeze(0)
+
+        masked_input_ids, masked_attention_mask = merge_prompts(
+            inputs=masked_input_ids,
+            attention_mask=masked_attention_mask,
+            task_prompt=inputs.task_prompt_input_ids,
+            label_prompt=inputs.label_prompt_input_ids,
+            task_prompt_attention_mask=inputs.task_prompt_attention_mask,
+            label_prompt_attention_mask=inputs.label_prompt_attention_mask
         )
-        # print(f"EVAL - before merge: {masked_input_ids}")
 
-        logits_perturbed = run_model(model = self.model, model_backbone = ExpArgs.explained_model_backbone,
-                                     input_ids = masked_input_ids.cuda(), attention_mask = masked_attention_mask.cuda(),
-                                     is_return_logits = True).squeeze()
-        prob_perturbed = torch.softmax(logits_perturbed, dim = 0)
+        logits_perturbed = run_model(
+            model=self.model,
+            model_backbone=ExpArgs.explained_model_backbone,
+            input_ids=masked_input_ids.to(device),
+            attention_mask=masked_attention_mask.to(device),
+            is_return_logits=True
+        ).squeeze()
 
-        result = (prob_original[item_args.explained_model_predicted_class] - prob_perturbed[item_args.explained_model_predicted_class]).item()
+        prob_perturbed = torch.softmax(logits_perturbed, dim=0)
+
+        cls = item_args.explained_model_predicted_class
+        result = (prob_original[cls] - prob_perturbed[cls]).item()
+
         return result
 
     def comprehensiveness(self, item_args: DataForEvaluation):

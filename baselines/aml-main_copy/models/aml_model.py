@@ -51,6 +51,20 @@ class AmlModel(pl.LightningModule):
             get_model_special_tokens(ExpArgs.explained_model_backbone, self.explained_tokenizer))
 
         self.ref_token_id = ref_token_id
+        if self.ref_token_id is None:
+            self.ref_token_id = (
+                self.explained_tokenizer.mask_token_id
+                if self.explained_tokenizer.mask_token_id is not None
+                else self.explained_tokenizer.pad_token_id
+                if self.explained_tokenizer.pad_token_id is not None
+                else self.explained_tokenizer.unk_token_id
+            )
+
+            if self.ref_token_id is None:
+                raise ValueError(
+                    "ref_token_id is None. The tokenizer has no mask/pad/eos token. "
+                    "Please set a valid reference token id manually."
+                )
         self.n_training_steps = total_training_steps
         self.experiment_path = experiment_path
         self.checkpoints_path = checkpoints_path
@@ -115,7 +129,11 @@ class AmlModel(pl.LightningModule):
 
     def forwad_paml_inference(self, batch, is_evaluate):
         with torch.no_grad():
-            batch = {k: v.to(get_device()) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            batch = {
+                k: v.to(get_device()) if isinstance(v, torch.Tensor)
+                else torch.stack([torch.tensor(item) if not isinstance(item, torch.Tensor) else item for item in v]).to(get_device())
+                for k, v in batch.items()
+            }
 
             begin = time.time()
             duration, item_data = None, None

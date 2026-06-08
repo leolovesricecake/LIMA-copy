@@ -182,15 +182,15 @@ You can keep the existing `LLAMA` or `MISTRAL` explained backbone path and overr
 Examples:
 
 ```bash
-python runs/run.py sst LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/meta-llama/Llama-3.1-8B-Instruct
+CUDA_VISIBLE_DEVICES=1 python runs/run.py sst LLAMA BERT SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/meta-llama/Llama-3.1-8B-Instruct
 ```
 
 ```bash
-python runs/run.py sst LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+python runs/run.py sst LLAMA BERT SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
 ```
 
 ```bash
-python runs/run.py sst LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen3-8B
+python runs/run.py sst LLAMA BERT SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen3-8B
 ```
 
 Notes:

@@ -130,4 +130,4 @@ def merge_prompts(inputs, attention_mask, task_prompt: Tensor = None, label_prom
             torch.cat([task_prompt_attention_mask[i], attention_mask[i], label_prompt_attention_mask], dim = 0))
     merged_inputs = torch.stack(merged_inputs)
     merged_attention_mask = torch.stack(merged_attention_mask)
-    return merged_inputs.cuda(), merged_attention_mask.cuda()
+    return merged_inputs, merged_attention_mask
