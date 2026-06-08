@@ -16,7 +16,7 @@ from models.interpreter_models.bert_interpreter import BertInterpreter
 from models.interpreter_models.distilbert_interpreter import DistilBertInterpreter
 from models.interpreter_models.roberta_interpreter import RobertaInterpreter
 from utils.dataclasses import Task
-from utils.utils_functions import is_model_encoder_only
+from utils.utils_functions import get_device, is_model_encoder_only
 
 
 def is_local_model_path(model_path: str) -> bool:
@@ -72,18 +72,18 @@ def load_explained_model():
         from transformers import BertForSequenceClassification
         model = BertForSequenceClassification.from_pretrained(explained_model_path, cache_dir = HF_CACHE,
                                                               local_files_only = get_local_files_only(explained_model_path))
-        model.cuda()
+        model.to(get_device())
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.ROBERTA.value:
         from transformers import RobertaForSequenceClassification
         model = RobertaForSequenceClassification.from_pretrained(explained_model_path, cache_dir = HF_CACHE,
                                                                  local_files_only = get_local_files_only(explained_model_path))
-        model.cuda()
+        model.to(get_device())
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.DISTILBERT.value:
         from transformers import DistilBertForSequenceClassification
         model = DistilBertForSequenceClassification.from_pretrained(explained_model_path,
                                                                     cache_dir = HF_CACHE,
                                                                     local_files_only = get_local_files_only(explained_model_path))
-        model.cuda()
+        model.to(get_device())
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.LLAMA.value:
         from transformers import LlamaForCausalLM, LlamaForSequenceClassification
         model_path = explained_model_path

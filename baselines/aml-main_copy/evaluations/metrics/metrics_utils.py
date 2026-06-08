@@ -19,17 +19,34 @@ class MetricsFunctions:
         self.ref_token_id = ref_token_id
         self.special_tokens = special_tokens
         self.perturbation_steps = torch.arange(10, 100, 10)
-        self.device = get_device()
+        try:
+            self.device = next(self.model.parameters()).device
+        except StopIteration:
+            self.device = torch.device(get_device())
 
         self.labels_tokens = None
 
+    @staticmethod
+    def _get_single_item_tensor(value):
+        if isinstance(value, torch.Tensor):
+            if value.dim() == 0:
+                raise ValueError("evaluation expects sequence tensors, but received a scalar tensor")
+            if value.dim() == 1:
+                return value
+            return value[0]
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise ValueError("evaluation expects batch_size=1 inputs")
+            return MetricsFunctions._get_single_item_tensor(value[0])
+        raise TypeError(f"unsupported input type for evaluation: {type(value)}")
+
     def log_odds(self, item_args: DataForEvaluation):
         topk_indices, required_tokens = self.get_indices(item_args)
-        prob_original = torch.softmax(item_args.explained_model_predicted_logits, dim = 0)
+        prob_original = torch.softmax(item_args.explained_model_predicted_logits.to(self.device), dim = 0)
 
         inputs = copy.deepcopy(item_args.input)
-
-        inputs.input_ids[0][topk_indices] = self.ref_token_id
+        sequence_input_ids = self._get_single_item_tensor(inputs.input_ids)
+        sequence_input_ids[topk_indices.to(sequence_input_ids.device)] = self.ref_token_id
 
         inputs_ids, attention_mask = merge_prompts(  #
             inputs = inputs.input_ids, attention_mask = inputs.attention_mask,
@@ -39,7 +56,7 @@ class MetricsFunctions:
             label_prompt_attention_mask = inputs.label_prompt_attention_mask  #
         )
         logits_perturbed = run_model(model = self.model, model_backbone = ExpArgs.explained_model_backbone,
-                                     input_ids = inputs_ids.cuda(), attention_mask = attention_mask.cuda(),
+                                     input_ids = inputs_ids.to(self.device), attention_mask = attention_mask.to(self.device),
                                      is_return_logits = True).squeeze()
         prob_perturbed = torch.softmax(logits_perturbed, dim = 0)
         result = (torch.log(prob_perturbed[item_args.explained_model_predicted_class]) - torch.log(
@@ -64,17 +81,17 @@ class MetricsFunctions:
         # print('\n- ', inputs.input_ids)
         # print('- ', inputs.attention_mask, '\n')
 
-        input_ids = torch.stack(inputs.input_ids).to(device)
-        attention_mask = torch.stack(inputs.attention_mask).to(device)
+        input_ids = self._get_single_item_tensor(inputs.input_ids).to(device)
+        attention_mask = self._get_single_item_tensor(inputs.attention_mask).to(device)
 
-        mask = torch.zeros_like(input_ids[0]).bool()
+        mask = torch.zeros_like(input_ids).bool()
         mask[topk_indices.to(device)] = 1
 
         if required_tokens is not None:
             mask[required_tokens.to(device)] = 1
 
-        masked_input_ids = input_ids[0][mask].unsqueeze(0)
-        masked_attention_mask = attention_mask[0][mask].unsqueeze(0)
+        masked_input_ids = input_ids[mask].unsqueeze(0)
+        masked_attention_mask = attention_mask[mask].unsqueeze(0)
 
         masked_input_ids, masked_attention_mask = merge_prompts(
             inputs=masked_input_ids,
@@ -102,16 +119,18 @@ class MetricsFunctions:
 
     def comprehensiveness(self, item_args: DataForEvaluation):
         topk_indices, required_tokens = self.get_indices(item_args)
-        prob_original = torch.softmax(item_args.explained_model_predicted_logits, dim = 0)
+        prob_original = torch.softmax(item_args.explained_model_predicted_logits.to(self.device), dim = 0)
 
         inputs = copy.deepcopy(item_args.input)
-        mask = torch.ones_like(inputs.input_ids[0]).bool()
-        mask[topk_indices] = 0
+        input_ids = self._get_single_item_tensor(inputs.input_ids)
+        attention_mask = self._get_single_item_tensor(inputs.attention_mask)
+        mask = torch.ones_like(input_ids).bool()
+        mask[topk_indices.to(mask.device)] = 0
         if required_tokens is not None:
-            mask[required_tokens] = 1
+            mask[required_tokens.to(mask.device)] = 1
 
-        masked_input_ids = inputs.input_ids[0][mask].unsqueeze(0)
-        masked_attention_mask = inputs.attention_mask[0][mask].unsqueeze(0)
+        masked_input_ids = input_ids[mask].unsqueeze(0)
+        masked_attention_mask = attention_mask[mask].unsqueeze(0)
 
         masked_input_ids, masked_attention_mask = merge_prompts(inputs = masked_input_ids,
                                                                 attention_mask = masked_attention_mask,
@@ -120,7 +139,8 @@ class MetricsFunctions:
                                                                 task_prompt_attention_mask = inputs.task_prompt_attention_mask,
                                                                 label_prompt_attention_mask = inputs.label_prompt_attention_mask)
         logits_perturbed = run_model(model = self.model, model_backbone = ExpArgs.explained_model_backbone,
-                                     input_ids = masked_input_ids.cuda(), attention_mask = masked_attention_mask.cuda(),
+                                     input_ids = masked_input_ids.to(self.device),
+                                     attention_mask = masked_attention_mask.to(self.device),
                                      is_return_logits = True).squeeze()
         prob_perturbed = torch.softmax(logits_perturbed, dim = 0)
 
@@ -141,11 +161,7 @@ class MetricsFunctions:
     def eval_tokens_handler(self, item_args: DataForEvaluation) -> Tuple[Tensor, Tensor, Union[Tensor, None]]:
         val = float('-inf')
         tokens_attr: Tensor = copy.deepcopy(item_args.tokens_attr)
-        input_ids: Tensor = item_args.input.input_ids
-        if is_model_encoder_only(ExpArgs.explained_model_backbone):
-            input_ids = input_ids.squeeze()
-        else:
-            input_ids = input_ids[0]
+        input_ids = self._get_single_item_tensor(item_args.input.input_ids)
         n_attr = tokens_attr.shape[-1]
         required_tokens = None
 

@@ -20,7 +20,10 @@ class Metrics:
         self.model = model
         self.explained_tokenizer = explained_tokenizer
         self.ref_token_id = ref_token_id
-        self.device = get_device()
+        try:
+            self.device = next(self.model.parameters()).device
+        except StopIteration:
+            self.device = torch.device(get_device())
         self.special_tokens = torch.tensor(
             get_model_special_tokens(ExpArgs.explained_model_backbone, self.explained_tokenizer)).to(self.device)
         self.data: DataForEvaluation = data

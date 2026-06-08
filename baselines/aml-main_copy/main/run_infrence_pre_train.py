@@ -109,7 +109,7 @@ class InferencePretrain:
                                 selected_hyperparameters = self.hp,
                                 extra_metadata = dict(selection_mode = "pretrained_interpreter_single_pass"))
 
-        save_running_time(end, begin, self.experiment_name, file_type = "FineTune")
+        save_running_time(end, begin, self.experiment_name, file_type = "InferencePretrain")
 
     def freeze_model(self, _model):
         for param in _model.trainable_embeddings.parameters():

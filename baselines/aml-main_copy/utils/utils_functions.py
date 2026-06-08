@@ -1,6 +1,7 @@
 import hashlib
 import re
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Tuple
 
@@ -25,15 +26,27 @@ def get_device():
 def is_model_encoder_only(model = None):
     if model is None:
         model = ExpArgs.explained_model_backbone
-    elif model in [ModelBackboneTypes.ROBERTA.value, ModelBackboneTypes.BERT.value, ModelBackboneTypes.DISTILBERT.value]:
+    if model in [ModelBackboneTypes.ROBERTA.value, ModelBackboneTypes.BERT.value, ModelBackboneTypes.DISTILBERT.value]:
         return True
-    elif model in [
+    if model in [
         ModelBackboneTypes.LLAMA.value,
         ModelBackboneTypes.MISTRAL.value
     ]:
         return False
 
     raise ValueError(f"unsupported model: {model}")
+
+
+def move_to_device(item, device):
+    if isinstance(item, torch.Tensor):
+        return item.to(device)
+    if isinstance(item, Mapping):
+        return {key: move_to_device(value, device) for key, value in item.items()}
+    if isinstance(item, list):
+        return [move_to_device(value, device) for value in item]
+    if isinstance(item, tuple):
+        return tuple(move_to_device(value, device) for value in item)
+    return item
 
 
 def get_model_special_tokens(model, tokenizer):

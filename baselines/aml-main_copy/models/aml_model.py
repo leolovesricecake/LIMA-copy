@@ -26,7 +26,7 @@ from models.train_models_utils import construct_word_embedding, is_add_label_emb
 from utils.dataclasses import AmlOutput, LossOutput, StepOutput
 from utils.dataclasses.evaluations import DataForEvaluation, DataForEvaluationInputs
 from utils.utils_functions import (conv_class_to_dict, get_current_time, run_model, merge_prompts,
-                                   is_model_encoder_only, is_use_prompt, get_model_special_tokens, get_device)
+                                   is_model_encoder_only, is_use_prompt, get_model_special_tokens, move_to_device)
 
 
 class AmlModel(pl.LightningModule):
@@ -129,20 +129,10 @@ class AmlModel(pl.LightningModule):
 
     def forwad_paml_inference(self, batch, is_evaluate):
         with torch.no_grad():
-            batch = {
-                k: v.to(get_device()) if isinstance(v, torch.Tensor)
-                else torch.stack([torch.tensor(item) if not isinstance(item, torch.Tensor) else item for item in v]).to(get_device())
-                for k, v in batch.items()
-            }
+            batch = move_to_device(batch, self.device)
 
             begin = time.time()
             duration, item_data = None, None
-
-            if is_use_prompt():
-                for k in [TASK_PROMPT_INPUT_IDS, TASK_PROMPT_ATTENTION_MASK, EXPLAINED_INPUT_IDS_NAME,
-                    EXPLAINED_ATTENTION_MASK_NAME]:
-                    batch[k] = [item.to(get_device()) for item in batch[k]]
-
 
             explained_model_inputs, explained_model_attention_mask = merge_prompts(  #
                 inputs = batch[EXPLAINED_INPUT_IDS_NAME],  #
@@ -267,7 +257,7 @@ class AmlModel(pl.LightningModule):
             new_tokens_attr_lst = []
             for indices in batch[MAP_TOKENS][batch_idx]:
                 if -1 in indices: # padding
-                    new_tokens_attr_lst.append(torch.tensor(0).cuda())
+                    new_tokens_attr_lst.append(tokens_attr[batch_idx].new_tensor(0.0))
                     continue
 
                 scores = tokens_attr[batch_idx][indices]
@@ -703,4 +693,3 @@ class AmlModel(pl.LightningModule):
         #     print(log_dict)
         #
         #     self.log_dict(log_dict, on_step = True, on_epoch = False)
-

@@ -298,8 +298,8 @@ class DataModule(pl.LightningDataModule):
 
             a2b = self.fill_empty_items(a2b)
 
-            if not explained_tokens[-1]:
-                explained_tokens[-1] = len(interpreter_tokens) - 2
+            if not a2b[-1]:
+                a2b[-1] = [len(interpreter_tokens) - 2]
 
             special_token_indices = torch.nonzero(
                 torch.isin(item[INTERPRETER_INPUT_IDS_NAME], self.interpreter_tokenizer_special_token_ids),
