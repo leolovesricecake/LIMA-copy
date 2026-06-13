@@ -186,7 +186,7 @@ CUDA_VISIBLE_DEVICES=1 python runs/run.py sst LLAMA BERT SUFFICIENCY --explained
 ```
 
 ```bash
-python runs/run.py sst LLAMA BERT SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+CUDA_VISIBLE_DEVICES=0 python runs/run.py imdb LLAMA BERT SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
 ```
 
 ```bash

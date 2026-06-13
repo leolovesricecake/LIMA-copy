@@ -136,6 +136,19 @@ def merge_prompts(inputs, attention_mask, task_prompt: Tensor = None, label_prom
 
     if any(item is None for item in [task_prompt, inputs, label_prompt]):
         raise ValueError("can not be None")
+
+    device = inputs[0].device if isinstance(inputs, list) else inputs.device
+    def move_to_device(tensor_or_list):
+        if isinstance(tensor_or_list, list):
+            return [t.to(device) for t in tensor_or_list]
+        else:
+            return tensor_or_list.to(device)
+
+    task_prompt = move_to_device(task_prompt)
+    label_prompt = move_to_device(label_prompt)
+    task_prompt_attention_mask = move_to_device(task_prompt_attention_mask)
+    label_prompt_attention_mask = move_to_device(label_prompt_attention_mask)
+
     merged_inputs, merged_attention_mask = [], []
     for i in range(len(inputs)):
         merged_inputs.append(torch.cat([task_prompt[i], inputs[i], label_prompt], dim = 0))

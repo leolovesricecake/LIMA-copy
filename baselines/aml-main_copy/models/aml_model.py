@@ -252,17 +252,31 @@ class AmlModel(pl.LightningModule):
     def transform_tokens_attr_handler(self, tokens_attr, batch):
         if is_model_encoder_only(ExpArgs.explained_model_backbone):
             return tokens_attr
+
         new_tokens_attr = []
         for batch_idx in range(len(batch[EXPLAINED_INPUT_IDS_NAME])):
             new_tokens_attr_lst = []
+            cur_attr = tokens_attr[batch_idx]
+            cur_len = cur_attr.shape[0]
+
             for indices in batch[MAP_TOKENS][batch_idx]:
-                if -1 in indices: # padding
-                    new_tokens_attr_lst.append(tokens_attr[batch_idx].new_tensor(0.0))
+                # padding
+                if -1 in indices:
+                    new_tokens_attr_lst.append(cur_attr.new_tensor(0.0))
                     continue
 
-                scores = tokens_attr[batch_idx][indices]
+                # 过滤掉越界 index
+                indices = [int(i) for i in indices if 0 <= int(i) < cur_len]
+
+                # 过滤后为空，说明这个 explained token 没有可用 interpreter token 对齐
+                if len(indices) == 0:
+                    new_tokens_attr_lst.append(cur_attr.new_tensor(NAN_FLOAT))
+                    continue
+
+                scores = cur_attr[indices]
                 scores = [v for v in scores if not math.isnan(v)]
-                pooled_score = torch.tensor(NAN_FLOAT).to(self.device)
+
+                pooled_score = cur_attr.new_tensor(NAN_FLOAT)
                 if len(scores) > 0:
                     scores = torch.stack(scores)
                     if ExpArgs.cross_tokenizers_pooling == CrossTokenizersPooling.MEAN.value:
@@ -272,10 +286,12 @@ class AmlModel(pl.LightningModule):
                     elif ExpArgs.cross_tokenizers_pooling == CrossTokenizersPooling.MIN.value:
                         pooled_score = scores.min()
                     else:
-                        raise ValueError(f"cross_tokenizers_pooling is not supported")
+                        raise ValueError("cross_tokenizers_pooling is not supported")
 
                 new_tokens_attr_lst.append(pooled_score)
+
             new_tokens_attr.append(torch.stack(new_tokens_attr_lst))
+
         return new_tokens_attr
 
     def re_swap_last_tokens(self, attribution_scores, long_vectors):

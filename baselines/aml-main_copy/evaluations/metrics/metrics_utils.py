@@ -161,7 +161,7 @@ class MetricsFunctions:
     def eval_tokens_handler(self, item_args: DataForEvaluation) -> Tuple[Tensor, Tensor, Union[Tensor, None]]:
         val = float('-inf')
         tokens_attr: Tensor = copy.deepcopy(item_args.tokens_attr)
-        input_ids = self._get_single_item_tensor(item_args.input.input_ids)
+        input_ids = self._get_single_item_tensor(item_args.input.input_ids).to(self.device)
         n_attr = tokens_attr.shape[-1]
         required_tokens = None
 

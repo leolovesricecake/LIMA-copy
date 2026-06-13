@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-06-08T09:54:09.599177+00:00",
+  "experiment_name": "INFERENCE_PRETRAIN_sst_LLAMA_BERT_SUFFICIENCY_PATH_qwen2-5-7b-instruct_29ba13a8_1780906402305",
+  "report_stage": "INFERENCE_PRETRAIN",
+  "target_evaluation_metric": "SUFFICIENCY",
+  "evaluated_metrics": [
+    "SUFFICIENCY",
+    "COMPREHENSIVENESS",
+    "EVAL_LOG_ODDS",
+    "AOPC_SUFFICIENCY",
+    "AOPC_COMPREHENSIVENESS",
+    "AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY",
+    "COMPREHENSIVENESS_SUFFICIENCY"
+  ],
+  "num_primary_results": 1821,
+  "num_all_metric_rows": 12747,
+  "selected_hyperparameters": {
+    "prediction_loss_weight": 0.5986584841970366,
+    "regularization_loss_weight": 0.15601864044243652,
+    "inverse_loss_weight": 0.15599452033620265
+  },
+  "loss_coefficients": {
+    "prediction_loss_weight": 0.5986584841970366,
+    "regularization_loss_weight": 0.15601864044243652,
+    "inverse_loss_weight": 0.15599452033620265
+  },
+  "experiment_arguments": {
+    "seed": 42,
+    "num_epochs_for_pre_train": 10,
+    "num_epochs_for_fine_tune": 10,
+    "warmup_ratio": 0,
+    "enable_checkpointing": false,
+    "default_root_dir": "OUT",
+    "tokens_attr_with_ref_token_function_type": "BLEND",
+    "regularization_type": "BCE",
+    "ref_token_name": "unk",
+    "lr": 8e-05,
+    "start_epoch_to_evaluate": 0,
+    "batch_size": 4,
+    "accumulate_grad_batches": 5,
+    "eval_batch_size": 1,
+    "val_check_interval": 0.32,
+    "is_save_model": false,
+    "log_every_n_steps": 40,
+    "inverse_token_attr_function": "NEGATIVE_PROB_LOSS",
+    "eval_metric": "SUFFICIENCY",
+    "target_eval_metric": "SUFFICIENCY",
+    "is_save_results": true,
+    "is_save_support_results": true,
+    "explained_model_backbone": "LLAMA",
+    "explained_model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+    "interpreter_model_backbone": "BERT",
+    "fine_tuned_interpreter_model_path": "OUT/PRE_TRAIN/CHECKPOINTS/PRETRAIN_sst_LLAMA_BERT_SUFFICIENCY_PATH_qwen2-5-7b-instruct_29ba13a8_1780906402305",
+    "run_type": null,
+    "scheduler_type": "LINEAR_SCHEDULE_WITH_WARMUP",
+    "fine_tune_scheduler_type": "LINEAR_SCHEDULE_WITH_WARMUP",
+    "interpreter_model_n_first_layers_to_freeze": null,
+    "is_interpreter_model_train_mode_in_fine_tune": false,
+    "interpreter_label_token_position": "after_last_sep",
+    "interpreter_classifier_size": 2,
+    "interpreter_classifier_activation_function": "tanh",
+    "is_include_general_label_token": true,
+    "llm_prompt_type": "few_shot",
+    "cross_tokenizers_pooling": "max",
+    "eval_tokens": "NO_SPECIAL_TOKENS",
+    "is_inference": false,
+    "hp_search_max_epochs": 2
+  },
+  "task": {
+    "dataset_name": "sst2",
+    "dataset_train": "train",
+    "dataset_val": "validation",
+    "dataset_test": "test",
+    "dataset_column_text": "sentence",
+    "dataset_column_label": "label",
+    "bert_fine_tuned_model": "textattack/bert-base-uncased-SST-2",
+    "roberta_fine_tuned_model": "textattack/roberta-base-SST-2",
+    "distilbert_fine_tuned_model": "distilbert-base-uncased-finetuned-sst-2-english",
+    "roberta_base_model": "FacebookAI/roberta-base",
+    "distilbert_base_model": "distilbert/distilbert-base-uncased",
+    "bert_base_model": "bert-base-uncased",
+    "llama_model": "/mnt/huawei/nsq/models/meta-llama/Llama-2-7b-hf",
+    "mistral_model": "/mnt/huawei/nsq/models/mistralai/Mistral-7B-v0.1",
+    "llama_adapter": null,
+    "mistral_adapter": null,
+    "is_llm_use_lora": false,
+    "labels_str_int_maps": {
+      "negative": "N",
+      "positive": "P"
+    },
+    "labels_int_str_maps": {
+      "N": "negative",
+      "P": "positive"
+    },
+    "default_lr": 4e-05,
+    "llm_lr": 8e-05,
+    "test_sample": null,
+    "train_sample": 1000,
+    "val_sample": 200,
+    "hp_search_train_sample": 450,
+    "hp_search_n_trials": 30,
+    "name": "sst",
+    "paper_name": "SST2",
+    "is_llm_set_max_len": false,
+    "llm_explained_tokenizer_max_length": 0,
+    "llm_interpreter_tokenizer_max_length": -1,
+    "llm_task_prompt": "Classify the sentiment of sentences. For each sentence the label is positive (P) or negative (N)",
+    "llm_few_shots_prompt": "Text:hide new secretions from the parental units\nLabel:N\n\nText:the greatest musicians\nLabel:P\n\nText:are more deeply thought through than in most ` right-thinking ' films\nLabel:P\n\nText:on the worst revenge-of-the-nerds clichés the filmmakers could dredge up\nLabel:N"
+  },
+  "artifacts": {
+    "primary_results": "results.csv",
+    "target_metric_support_results": "support_results_df.csv",
+    "all_metrics_results_long": "all_metrics_results_long.csv",
+    "all_metrics_results_wide": "all_metrics_results_wide.csv",
+    "all_metrics_summary": "all_metrics_summary.csv"
+  },
+  "summary_by_metric": [
+    {
+      "evaluation_metric": "SUFFICIENCY",
+      "count": 1821,
+      "mean": 0.419189319055464,
+      "median": 0.07421875,
+      "min": -0.49609375,
+      "max": 1.0,
+      "std": 0.4694465728460999
+    },
+    {
+      "evaluation_metric": "COMPREHENSIVENESS",
+      "count": 1821,
+      "mean": 0.06334410179846238,
+      "median": 0.0,
+      "min": -0.44140625,
+      "max": 1.0,
+      "std": 0.2148566121150138
+    },
+    {
+      "evaluation_metric": "EVAL_LOG_ODDS",
+      "count": 1821,
+      "mean": -0.46060185691670097,
+      "median": 0.0,
+      "min": -9.9375,
+      "max": 0.55078125,
+      "std": 1.339123294203891
+    },
+    {
+      "evaluation_metric": "AOPC_SUFFICIENCY",
+      "count": 1821,
+      "mean": 0.22511580032720116,
+      "median": 0.158203125,
+      "min": -0.298828125,
+      "max": 0.6647135416666666,
+      "std": 0.23605343934616657
+    },
+    {
+      "evaluation_metric": "AOPC_COMPREHENSIVENESS",
+      "count": 1821,
+      "mean": 0.05139278584340106,
+      "median": 0.0032552083333333335,
+      "min": -0.193359375,
+      "max": 0.6666666666666666,
+      "std": 0.09569210155950056
+    },
+    {
+      "evaluation_metric": "AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY",
+      "count": 1821,
+      "mean": -0.17372301448380012,
+      "median": -0.09114583333333334,
+      "min": -0.6647135416666666,
+      "max": 0.60546875,
+      "std": 0.23218729461345564
+    },
+    {
+      "evaluation_metric": "COMPREHENSIVENESS_SUFFICIENCY",
+      "count": 1821,
+      "mean": -0.35584521725700163,
+      "median": -0.05078125,
+      "min": -1.0,
+      "max": 1.0,
+      "std": 0.508478341081596
+    }
+  ],
+  "extra_metadata": {
+    "selection_mode": "pretrained_interpreter_single_pass"
+  }
+}

@@ -138,20 +138,27 @@
    - 特点：提供 token-level 人类解释标注、可用于评估解释质量与人类一致性
    - 任务：解释性评估（explainability evaluation），衡量模型解释与 human rationales 的一致性
 
+6. ag_news
+
 
 ## Baselines
 1. 梯度方法
    1. Integrated Gradients (IG)(Sundararajan et al., 2017, ICML)：Axiomatic Attribution for Deep Networks
-   2. Sequential Integrated Gradients (SIG)(Enguehard, 2023, ACL) ：Sequential Integrated Gradients: A Simple but Effective Method for Explaining Language Models
+   2. **Sequential Integrated Gradients (SIG)(Enguehard, 2023, ACL)** ：Sequential Integrated Gradients: A Simple but Effective Method for Explaining Language Models
 
 2. 相关性分解方法：将模型的表示分解为向量，每个向量对应不同词对预测的贡献。
-   1. GlobEnc (Modarressi et al., 2022)：Globenc: Quantifying global token attribution by incorporating the whole encoder layer in transformers
-   2. DecompX (Modarressi et al., 2023)：Decompx: Explaining transformers decisions by propagating token decomposition
+   1. **GlobEnc (Modarressi et al., 2022)**：Globenc: Quantifying global token attribution by incorporating the whole encoder layer in transformers
+   2. DecompX (Modarressi et al., 2023)：Decompx: Explaining transformers decisions by propagating token decomposition【针对编码器】
 
 3. 基于扰动的方法：通过对输入或神经元施加扰动，观察对后续预测的影响。
    1. LIME (Ribeiro et al., 2016, SIGKDD)：Why Should I Trust You?”: Explaining the Predictions of Any Classifier
-   2. SHAP (Lundberg & Lee, 2017, NeurlIPS)：A Unified Approach to Interpreting Model Predictions
-   3. Attributive Masking Learning（Barkan et al., 2024, EMNLP）：LLM Explainability via Attributive Masking Learning
+   2. **SHAP (Lundberg & Lee, 2017, NeurlIPS)**：A Unified Approach to Interpreting Model Predictions
+   3. **Attributive Masking Learning（Barkan et al., 2024, EMNLP）**：LLM Explainability via Attributive Masking Learning
+
+4. https://github.com/AntonioLiu97/JacobianScopes.git
+5. https://github.com/wbopan/flashtrace.git
+6. https://github.com/basics-lab/spectral-explain
+
 
 
 ### 数据加载协议（已支持本地 + 远程）
