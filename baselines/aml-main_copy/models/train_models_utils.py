@@ -1,6 +1,6 @@
 import gc
 from pathlib import Path
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from lightning_fabric.utilities.optimizer import _optimizers_to_device
@@ -35,15 +35,67 @@ def normalize_token_id(token_id):
     return token_id
 
 
+def get_task_fine_tuned_model_path(task: Task, model_backbone: str) -> Optional[str]:
+    if model_backbone == ModelBackboneTypes.BERT.value:
+        return task.bert_fine_tuned_model
+    if model_backbone == ModelBackboneTypes.ROBERTA.value:
+        return task.roberta_fine_tuned_model
+    if model_backbone == ModelBackboneTypes.DISTILBERT.value:
+        return task.distilbert_fine_tuned_model
+    return None
+
+
+def get_task_base_model_path(task: Task, model_backbone: str) -> Optional[str]:
+    if model_backbone == ModelBackboneTypes.BERT.value:
+        return task.bert_base_model
+    if model_backbone == ModelBackboneTypes.ROBERTA.value:
+        return task.roberta_base_model
+    if model_backbone == ModelBackboneTypes.DISTILBERT.value:
+        return task.distilbert_base_model
+    if model_backbone == ModelBackboneTypes.LLAMA.value:
+        return task.llama_model
+    if model_backbone == ModelBackboneTypes.MISTRAL.value:
+        return task.mistral_model
+    return None
+
+
+def get_default_encoder_training_model_path(task: Task, model_backbone: str) -> str:
+    model_path = get_task_base_model_path(task, model_backbone)
+    if model_path is None:
+        raise ValueError(f"Task '{task.name}' does not define a base model for backbone '{model_backbone}'")
+    return model_path
+
+
+def build_prompt_label_vocab_tokens(task: Task, tokenizer, explained_model_path: str) -> torch.Tensor:
+    invalid_labels: List[str] = []
+    label_vocab_tokens: List[int] = []
+    for label_symbol in list(task.labels_int_str_maps.keys()):
+        token_ids = tokenizer.encode(str(label_symbol), add_special_tokens = False)
+        if len(token_ids) != 1:
+            invalid_labels.append(f"{label_symbol} -> {token_ids}")
+            continue
+        label_vocab_tokens.append(int(token_ids[0]))
+
+    if invalid_labels:
+        raise ValueError(
+            "Prompt-based AML requires each label verbalizer to map to exactly one tokenizer token. "
+            f"task={task.name}, explained_model_path={explained_model_path}, invalid_labels={invalid_labels}"
+        )
+
+    return torch.tensor(label_vocab_tokens, dtype = torch.long)
+
+
 def resolve_explained_model_path(task: Task) -> str:
     if ExpArgs.explained_model_path is not None:
         return ExpArgs.explained_model_path
-    if ExpArgs.explained_model_backbone == ModelBackboneTypes.BERT.value:
-        return task.bert_fine_tuned_model
-    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.ROBERTA.value:
-        return task.roberta_fine_tuned_model
-    elif ExpArgs.explained_model_backbone == ModelBackboneTypes.DISTILBERT.value:
-        return task.distilbert_fine_tuned_model
+    if is_model_encoder_only(ExpArgs.explained_model_backbone):
+        explained_model_path = get_task_fine_tuned_model_path(task, ExpArgs.explained_model_backbone)
+        if explained_model_path is None:
+            raise ValueError(
+                f"Task '{task.name}' does not define a default {ExpArgs.explained_model_backbone} explained-model checkpoint. "
+                "Train one with runs/train_explained_model.py or pass --explained_model_path."
+            )
+        return explained_model_path
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.LLAMA.value:
         return task.llama_model
     elif ExpArgs.explained_model_backbone == ModelBackboneTypes.MISTRAL.value:
@@ -150,15 +202,15 @@ def get_interpreter_model_path(task: Task):
         return ExpArgs.fine_tuned_interpreter_model_path
     elif ExpArgs.interpreter_model_backbone == ModelBackboneTypes.BERT.value:
         if is_model_encoder_only(ExpArgs.explained_model_backbone):
-            return task.bert_fine_tuned_model
+            return task.bert_fine_tuned_model or task.bert_base_model
         return task.bert_base_model
     elif ExpArgs.interpreter_model_backbone == ModelBackboneTypes.ROBERTA.value:
         if is_model_encoder_only(ExpArgs.explained_model_backbone):
-            return task.roberta_fine_tuned_model
+            return task.roberta_fine_tuned_model or task.roberta_base_model
         return task.roberta_base_model
     elif ExpArgs.interpreter_model_backbone == ModelBackboneTypes.DISTILBERT.value:
         if is_model_encoder_only(ExpArgs.explained_model_backbone):
-            return task.distilbert_fine_tuned_model
+            return task.distilbert_fine_tuned_model or task.distilbert_base_model
         return task.distilbert_base_model
     else:
         raise ValueError("unsupported model backbone selected - interpreter model")
@@ -187,15 +239,15 @@ def get_interpreter_config():
 def get_models_tokenizer(model_backbone, is_explained_model: bool = False):
     task = ExpArgs.task
     if model_backbone == ModelBackboneTypes.BERT.value:
-        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.bert_fine_tuned_model
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else get_interpreter_model_path(task)
         return BertTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
                                              local_files_only = get_local_files_only(tokenizer_path))
     elif model_backbone == ModelBackboneTypes.ROBERTA.value:
-        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.roberta_fine_tuned_model
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else get_interpreter_model_path(task)
         return RobertaTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
                                                 local_files_only = get_local_files_only(tokenizer_path))
     elif model_backbone == ModelBackboneTypes.DISTILBERT.value:
-        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else task.distilbert_fine_tuned_model
+        tokenizer_path = resolve_explained_model_path(task) if is_explained_model else get_interpreter_model_path(task)
         return DistilBertTokenizer.from_pretrained(tokenizer_path, cache_dir = HF_CACHE,
                                                    local_files_only = get_local_files_only(tokenizer_path))
     elif model_backbone in [ModelBackboneTypes.LLAMA.value, ModelBackboneTypes.MISTRAL.value]:

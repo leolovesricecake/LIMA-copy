@@ -10,7 +10,8 @@ from config.constants import (LABELS_NAME, EXPLAINED_INPUT_IDS_NAME, EXPLAINED_A
                               TASK_PROMPT_INPUT_IDS, LABEL_PROMPT_INPUT_IDS, LABEL_PROMPT_ATTENTION_MASK,
                               TASK_PROMPT_ATTENTION_MASK, LABEL_PROMPT_NEW_LINE, INPUT_TXT)
 from config.types_enums import ValidationType
-from models.train_models_utils import get_models_tokenizer
+from main.shared_task_data import load_task_split_dataset, uses_shared_lima_loader
+from models.train_models_utils import build_prompt_label_vocab_tokens, get_models_tokenizer, resolve_explained_model_path
 from utils.utils_functions import is_model_encoder_only, is_use_prompt, get_model_special_tokens
 
 
@@ -22,9 +23,11 @@ class DataModule(pl.LightningDataModule):
         self.task = ExpArgs.task
         self.seed = ExpArgs.seed
         self.train_dataset, self.val_dataset = None, None
+        self.dataset = None
         self.val_type = val_type.value
         self.train_sample = train_sample
         self.test_sample = test_sample
+        self.use_shared_loader = uses_shared_lima_loader(self.task)
         self.task_prompt = None
         self.input_prompt = None
         self.pre_label_prompt = None
@@ -60,14 +63,15 @@ class DataModule(pl.LightningDataModule):
             self.train_dataset.set_format(type = 'torch', columns = list(self.train_dataset.features))
             self.val_dataset.set_format(type = 'torch', columns = list(self.val_dataset.features))
         else:
-            self.dataset = load_dataset(self.task.dataset_name)
+            if not self.use_shared_loader:
+                self.dataset = load_dataset(self.task.dataset_name)
             self.dataset_column_text = self.task.dataset_column_text
             self.dataset_column_label = self.task.dataset_column_label
             self.setup()
 
     def setup(self, stage = None):
 
-        if not self.train_dataset:
+        if self.train_dataset is None:
             if is_use_prompt():
                 self.set_prompt()
 
@@ -75,28 +79,38 @@ class DataModule(pl.LightningDataModule):
             self.setup_test_ds()
 
     def setup_train_ds(self):
-        tmp_train_ds = self.dataset[self.task.dataset_train].shuffle(seed = self.seed)
-        if self.train_sample:
-            tmp_train_ds = tmp_train_ds.train_test_split(train_size = self.train_sample, seed = self.seed,
-                                                         stratify_by_column = self.dataset_column_label)
-            tmp_train_ds = tmp_train_ds["train"]
+        tmp_train_ds = self._load_split_dataset(self.task.dataset_train).shuffle(seed = self.seed)
+        tmp_train_ds = self._sample_dataset(tmp_train_ds, self.train_sample, train_size_mode = True)
         self.train_dataset = self.handle_ds(tmp_train_ds)
 
     def setup_test_ds(self):
         if self.val_type == ValidationType.VAL.value:
-            tmp_test_ds = self.dataset[self.task.dataset_val].shuffle(seed = self.seed)
-            if self.test_sample:
-                tmp_test_ds = tmp_test_ds.train_test_split(test_size = self.test_sample, seed = self.seed,
-                                                           stratify_by_column = self.dataset_column_label)
-                tmp_test_ds = tmp_test_ds["test"]
+            tmp_test_ds = self._load_split_dataset(self.task.dataset_val).shuffle(seed = self.seed)
+            tmp_test_ds = self._sample_dataset(tmp_test_ds, self.test_sample, train_size_mode = False)
         else:
-            tmp_test_ds = self.dataset[self.task.dataset_test].shuffle(seed = self.seed)
-            if self.test_sample:
-                tmp_test_ds = tmp_test_ds.train_test_split(train_size = self.test_sample, seed = self.seed,
-                                                           stratify_by_column = self.dataset_column_label)
-                tmp_test_ds = tmp_test_ds["train"]
+            tmp_test_ds = self._load_split_dataset(self.task.dataset_test).shuffle(seed = self.seed)
+            tmp_test_ds = self._sample_dataset(tmp_test_ds, self.test_sample, train_size_mode = True)
 
         self.val_dataset = self.handle_ds(tmp_test_ds)
+
+    def _load_split_dataset(self, split_name: str):
+        if self.use_shared_loader:
+            return load_task_split_dataset(self.task, split_name)
+        return self.dataset[split_name]
+
+    def _sample_dataset(self, dataset, sample_size, train_size_mode: bool):
+        if sample_size is None or sample_size <= 0 or sample_size >= len(dataset):
+            return dataset
+        split_kwargs = dict(seed = self.seed, stratify_by_column = self.dataset_column_label)
+        try:
+            if train_size_mode:
+                return dataset.train_test_split(train_size = sample_size, **split_kwargs)["train"]
+            return dataset.train_test_split(test_size = sample_size, **split_kwargs)["test"]
+        except ValueError:
+            split_kwargs.pop("stratify_by_column", None)
+            if train_size_mode:
+                return dataset.train_test_split(train_size = sample_size, **split_kwargs)["train"]
+            return dataset.train_test_split(test_size = sample_size, **split_kwargs)["test"]
 
     def handle_ds(self, ds):
         ds = ds.map(self.tokenize, batched = False)
@@ -109,12 +123,12 @@ class DataModule(pl.LightningDataModule):
 
     def set_label_vocab_tokens(self):
         if is_use_prompt():
-            labels_tokens = [self.explained_tokenizer.encode(str(l), return_tensors = "pt", add_special_tokens = False)
-                             for l in list(ExpArgs.task.labels_int_str_maps.keys())]
-            ExpArgs.label_vocab_tokens = torch.stack(labels_tokens).squeeze()
-            if ExpArgs.label_vocab_tokens.ndim != 1:
-                raise ValueError("label_vocab_tokens must work with one token only. "
-                                 "The current explained tokenizer does not map all label symbols to single tokens.")
+            explained_model_path = resolve_explained_model_path(ExpArgs.task)
+            ExpArgs.label_vocab_tokens = build_prompt_label_vocab_tokens(
+                task = ExpArgs.task,
+                tokenizer = self.explained_tokenizer,
+                explained_model_path = explained_model_path,
+            )
 
     def tokenize(self, example):
         inputs_txt = example[self.dataset_column_text]

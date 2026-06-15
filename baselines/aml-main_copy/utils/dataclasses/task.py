@@ -1,19 +1,20 @@
-from typing import Union, Dict, List, Tuple
+from typing import Optional, Union, Dict, List, Tuple
 
 from config.constants import TEXT_PROMPT, LABEL_PROMPT
 
 
 class Task:
     def __init__(self, dataset_name: str, dataset_train: str, dataset_val: str, dataset_test: str,
-                 dataset_column_text: str, dataset_column_label: str, bert_fine_tuned_model: str,
-                 roberta_fine_tuned_model: str, distilbert_fine_tuned_model: str, roberta_base_model: str,
+                 dataset_column_text: str, dataset_column_label: str, bert_fine_tuned_model: Optional[str],
+                 roberta_fine_tuned_model: Optional[str], distilbert_fine_tuned_model: Optional[str], roberta_base_model: str,
                  distilbert_base_model: str, bert_base_model: str, llama_model: str, mistral_model: str,
                  labels_str_int_maps: Union[Dict, None], default_lr: float, llm_lr: float,
                  test_sample: Union[int, None], train_sample: Union[int, None], hp_search_test_sample: Union[int, None],
                  hp_search_train_sample: Union[int, None], name: str, paper_name: str, is_finetuned_with_lora: bool,
                  hp_search_n_trials: int, llm_task_prompt: str, llm_few_shots_prompt: List[Tuple[str, str]],
                  is_llm_set_max_len = False, llama_adapter: str = None, mistral_adapter: str = None,
-                 llm_explained_tokenizer_max_length: int = 0, llm_interpreter_tokenizer_max_length: int = -1):
+                 llm_explained_tokenizer_max_length: int = 0, llm_interpreter_tokenizer_max_length: int = -1,
+                 is_legacy_task: bool = False):
         self.dataset_name = dataset_name
         self.dataset_train = dataset_train
         self.dataset_val = dataset_val
@@ -53,3 +54,4 @@ class Task:
         # self.llm_few_shots_prompt = llm_few_shots_prompt  # for test only
         self.llm_few_shots_prompt = "\n\n".join(
             ["\n".join([TEXT_PROMPT + i[0], LABEL_PROMPT + str(i[1])]) for i in llm_few_shots_prompt])
+        self.is_legacy_task = is_legacy_task

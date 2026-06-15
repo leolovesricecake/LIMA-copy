@@ -27,10 +27,14 @@ class ExpArgs:
     is_save_results = False
     is_save_support_results = False
     task: Task = None
+    requested_task_name = None
     explained_model_backbone = None
     explained_model_path = None
     interpreter_model_backbone = None
     fine_tuned_interpreter_model_path = None
+    eraser_root = None
+    sst2_source = None
+    dataset_cache_dir = None
     run_type = None
     label_vocab_tokens = None
     scheduler_type = SchedulerTypes.LINEAR_SCHEDULE_WITH_WARMUP.value
