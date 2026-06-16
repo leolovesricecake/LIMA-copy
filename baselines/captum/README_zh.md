@@ -115,7 +115,7 @@ python baselines/captum/run_captum_llm_baselines.py \
   --methods feature_ablation,layer_integrated_gradients,kernel_shap,lime \
   --k 8 \
   --target-mode gold \
-  --eval-q-values 1,5,10,20 \
+  --eval-q-values 1,5,10,20,50 \
   --eval-granularity token \
   --base-save-dir results \
   --save-dir baselines/captum \

@@ -158,9 +158,10 @@
 4. https://github.com/AntonioLiu97/JacobianScopes.git
 5. https://github.com/wbopan/flashtrace.git
 6. https://github.com/basics-lab/spectral-explain
-7. DeepLift: http://goo.gl/RM8jvH
+7. DeepLift（不直接适用）: http://goo.gl/RM8jvH
 8. SHAP: https://github.com/slundberg/shap
 9. LIME: https://github.com/marcotcr/lime-experiments
+10. TransformerLens（2022）：https://github.com/TransformerLensOrg/TransformerLens.git
 
 
 

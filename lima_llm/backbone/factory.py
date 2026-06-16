@@ -12,6 +12,7 @@ def build_backbone(
     max_length: int,
     embedding_layer_ratio: float,
     dtype: str,
+    trust_remote_code: bool = False,
 ) -> BaseBackbone:
     if use_mock_backbone:
         return MockBackbone()
@@ -21,4 +22,5 @@ def build_backbone(
         max_length=max_length,
         embedding_layer_ratio=embedding_layer_ratio,
         dtype=dtype,
+        trust_remote_code=trust_remote_code,
     )

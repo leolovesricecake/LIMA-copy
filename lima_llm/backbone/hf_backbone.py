@@ -18,11 +18,13 @@ class HFBackbone(BaseBackbone):
         max_length: int = 2048,
         embedding_layer_ratio: float = 0.7,
         dtype: str = "bfloat16",
+        trust_remote_code: bool = False,
     ) -> None:
         super().__init__()
         self.model_path = model_path
         self.max_length = int(max_length)
         self.embedding_layer_ratio = float(embedding_layer_ratio)
+        self.trust_remote_code = bool(trust_remote_code)
 
         try:
             import torch
@@ -46,7 +48,11 @@ class HFBackbone(BaseBackbone):
         }
         torch_dtype = dtype_map.get(dtype.lower(), torch.bfloat16)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            use_fast=True,
+            trust_remote_code=self.trust_remote_code,
+        )
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -55,6 +61,7 @@ class HFBackbone(BaseBackbone):
             torch_dtype=torch_dtype,
             low_cpu_mem_usage=True,
             device_map=None,
+            trust_remote_code=self.trust_remote_code,
         )
         self.model.to(self.device)
         self.model.eval()
