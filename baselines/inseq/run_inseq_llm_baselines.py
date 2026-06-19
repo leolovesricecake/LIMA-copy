@@ -461,24 +461,23 @@ def _sequence_output(inseq_output):
     return inseq_output[0]
 
 
-def _scores_from_source_attributions(
+def _as_float_tensor(attr):
+    if hasattr(attr, "detach"):
+        return attr.detach().float().cpu()
+    return torch.tensor(np.asarray(attr), dtype=torch.float32)
+
+
+def _aggregate_inseq_attr_tensor(
+    attr,
     *,
-    inseq_output,
     target_token_count: int,
     score_mode: str,
 ) -> List[float]:
-    seq = _sequence_output(inseq_output)
-    if not hasattr(seq, "source_attributions") or seq.source_attributions is None:
-        raise RuntimeError("Inseq output does not contain source_attributions")
-    attr = seq.source_attributions
-    if hasattr(attr, "detach"):
-        attr = attr.detach().float().cpu()
-    else:
-        attr = torch.tensor(np.asarray(attr), dtype=torch.float32)
+    attr = _as_float_tensor(attr)
 
-    # Raw gradient methods often return [source_len, target_len, hidden_dim].
-    # Inseq visualization defaults to vector-norm aggregation over hidden dimensions;
-    # reproduce the same idea before aggregating over target tokens.
+    # Raw gradient methods often return [attributed_len, generated_len, hidden_dim].
+    # Inseq's default visualization first reduces hidden dimensions by vector norm;
+    # we reproduce that before aggregating over the generated label tokens.
     while attr.dim() > 2:
         attr = torch.linalg.vector_norm(attr, ord=2, dim=-1)
     if attr.dim() == 0:
@@ -497,6 +496,58 @@ def _scores_from_source_attributions(
         else:
             raise ValueError(f"Unsupported score_mode: {score_mode}")
     return [float(x) for x in vec.reshape(-1).tolist()]
+
+
+def _scores_from_inseq_attributions(
+    *,
+    inseq_output,
+    target_token_count: int,
+    score_mode: str,
+) -> Tuple[List[float], str]:
+    """Return token scores and the attribution side used.
+
+    Encoder-decoder models usually populate ``source_attributions``. Decoder-only
+    LMs have no separate source sequence in Inseq, so input/prefix scores are
+    stored in ``target_attributions`` instead. Supporting both is necessary for
+    LLaMA/Qwen/GPT-style models.
+    """
+    seq = _sequence_output(inseq_output)
+
+    source_attr = getattr(seq, "source_attributions", None)
+    if source_attr is not None:
+        return (
+            _aggregate_inseq_attr_tensor(
+                source_attr,
+                target_token_count=target_token_count,
+                score_mode=score_mode,
+            ),
+            "source",
+        )
+
+    target_attr = getattr(seq, "target_attributions", None)
+    if target_attr is not None:
+        return (
+            _aggregate_inseq_attr_tensor(
+                target_attr,
+                target_token_count=target_token_count,
+                score_mode=score_mode,
+            ),
+            "target",
+        )
+
+    details = {
+        "seq_type": type(seq).__name__,
+        "has_source": hasattr(seq, "source"),
+        "has_target": hasattr(seq, "target"),
+        "source_len": len(getattr(seq, "source", []) or []),
+        "target_len": len(getattr(seq, "target", []) or []),
+        "has_sequence_scores": getattr(seq, "sequence_scores", None) is not None,
+        "has_step_scores": getattr(seq, "step_scores", None) is not None,
+    }
+    raise RuntimeError(
+        "Inseq output contains neither source_attributions nor target_attributions. "
+        f"Output summary: {details}"
+    )
 
 
 def _offset_mapping_candidates(tokenizer, text: str) -> List[List[Tuple[int, int]]]:
@@ -588,6 +639,15 @@ def _summarize_inseq_output(inseq_output) -> Dict[str, Any]:
     attr = getattr(seq, "source_attributions", None)
     if attr is not None and hasattr(attr, "shape"):
         payload["source_attributions_shape"] = [int(x) for x in list(attr.shape)]
+    tgt_attr = getattr(seq, "target_attributions", None)
+    if tgt_attr is not None and hasattr(tgt_attr, "shape"):
+        payload["target_attributions_shape"] = [int(x) for x in list(tgt_attr.shape)]
+    seq_scores = getattr(seq, "sequence_scores", None)
+    if isinstance(seq_scores, dict):
+        payload["sequence_score_keys"] = sorted(str(k) for k in seq_scores.keys())
+    step_scores = getattr(seq, "step_scores", None)
+    if isinstance(step_scores, dict):
+        payload["step_score_keys"] = sorted(str(k) for k in step_scores.keys())
     payload["attr_pos_start"] = int(getattr(seq, "attr_pos_start", 0) or 0)
     payload["attr_pos_end"] = int(getattr(seq, "attr_pos_end", 0) or 0)
     try:
@@ -634,12 +694,18 @@ def _explain_sample(
         args=args,
     )
 
-    source_scores = _scores_from_source_attributions(
+    source_scores, attribution_side = _scores_from_inseq_attributions(
         inseq_output=inseq_output,
         target_token_count=len(target_token_ids),
         score_mode=str(args.score_mode),
     )
-    prompt_offsets = _choose_offsets_for_scores(tokenizer, prompt_text, score_len=len(source_scores))
+
+    # Encoder-decoder outputs align scores to input_texts/source tokens. Decoder-only
+    # outputs align scores to the single causal target stream, i.e. prompt + label.
+    # We therefore choose offset mappings on the same string that the attribution
+    # tensor is indexed over, then project only the review/text span back to chunks.
+    score_text = prompt_text if attribution_side == "source" else prompt_text + target_text
+    prompt_offsets = _choose_offsets_for_scores(tokenizer, score_text, score_len=len(source_scores))
     prompt_text_start = len(PROMPT_PREFIX)
     prompt_text_end = prompt_text_start + len(kept_text)
     full_scores = _project_prompt_scores_to_text_chunks(
@@ -684,6 +750,8 @@ def _explain_sample(
         "raw_seq_attr": list(float(x) for x in full_scores),
         "source_score_count": int(len(source_scores)),
         "prompt_offset_count": int(len(prompt_offsets)),
+        "attribution_side": attribution_side,
+        "score_text_length": int(len(score_text)),
         "inseq_summary": inseq_summary,
         "reagent_settings": _reagent_load_kwargs(args) if method_name == "reagent" else None,
     }
