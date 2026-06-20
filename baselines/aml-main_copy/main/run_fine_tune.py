@@ -132,6 +132,17 @@ class FineTune:
 
         end = time.time()
 
+        if not primary_results:
+            raise ValueError(
+                f"No primary fine-tune results were produced for task={ExpArgs.task.name} "
+                f"during experiment={self.experiment_name}."
+            )
+        if not all_metrics_results:
+            raise ValueError(
+                f"No all-metrics fine-tune results were produced for task={ExpArgs.task.name} "
+                f"during experiment={self.experiment_name}."
+            )
+
         save_all_metrics_report(all_metrics_results = pd.concat(all_metrics_results, ignore_index = True),
                                 experiment_path = fine_tuned_results_path,
                                 experiment_name = self.experiment_name,

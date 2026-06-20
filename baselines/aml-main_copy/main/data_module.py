@@ -81,16 +81,20 @@ class DataModule(pl.LightningDataModule):
     def setup_train_ds(self):
         tmp_train_ds = self._load_split_dataset(self.task.dataset_train).shuffle(seed = self.seed)
         tmp_train_ds = self._sample_dataset(tmp_train_ds, self.train_sample, train_size_mode = True)
+        self._ensure_non_empty_dataset(tmp_train_ds, split_name = self.task.dataset_train, stage = "train")
         self.train_dataset = self.handle_ds(tmp_train_ds)
 
     def setup_test_ds(self):
         if self.val_type == ValidationType.VAL.value:
-            tmp_test_ds = self._load_split_dataset(self.task.dataset_val).shuffle(seed = self.seed)
+            split_name = self.task.dataset_val
+            tmp_test_ds = self._load_split_dataset(split_name).shuffle(seed = self.seed)
             tmp_test_ds = self._sample_dataset(tmp_test_ds, self.test_sample, train_size_mode = False)
         else:
-            tmp_test_ds = self._load_split_dataset(self.task.dataset_test).shuffle(seed = self.seed)
+            split_name = self.task.dataset_test
+            tmp_test_ds = self._load_split_dataset(split_name).shuffle(seed = self.seed)
             tmp_test_ds = self._sample_dataset(tmp_test_ds, self.test_sample, train_size_mode = True)
 
+        self._ensure_non_empty_dataset(tmp_test_ds, split_name = split_name, stage = "evaluation")
         self.val_dataset = self.handle_ds(tmp_test_ds)
 
     def _load_split_dataset(self, split_name: str):
@@ -111,6 +115,17 @@ class DataModule(pl.LightningDataModule):
             if train_size_mode:
                 return dataset.train_test_split(train_size = sample_size, **split_kwargs)["train"]
             return dataset.train_test_split(test_size = sample_size, **split_kwargs)["test"]
+
+    def _ensure_non_empty_dataset(self, dataset, split_name: str, stage: str):
+        if len(dataset) > 0:
+            return
+        hint = ""
+        if self.task.name == "sst2" and split_name == "test":
+            hint = " The GLUE SST-2 test split is unlabeled, so AML evaluation must use the validation split instead."
+        raise ValueError(
+            f"Loaded an empty AML dataset split: task={self.task.name}, split={split_name}, stage={stage}, "
+            f"validation_mode={self.val_type}.{hint}"
+        )
 
     def handle_ds(self, ds):
         ds = ds.map(self.tokenize, batched = False)

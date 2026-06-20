@@ -101,6 +101,17 @@ class InferencePretrain:
 
         del aml_model
 
+        if not primary_results:
+            raise ValueError(
+                f"No primary inference results were produced for task={ExpArgs.task.name} "
+                f"during experiment={self.experiment_name}."
+            )
+        if not all_metrics_results:
+            raise ValueError(
+                f"No all-metrics inference results were produced for task={ExpArgs.task.name} "
+                f"during experiment={self.experiment_name}."
+            )
+
         save_all_metrics_report(all_metrics_results = pd.concat(all_metrics_results, ignore_index = True),
                                 experiment_path = inference__results_path,
                                 experiment_name = self.experiment_name,

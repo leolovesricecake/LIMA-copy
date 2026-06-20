@@ -76,6 +76,8 @@ def evaluate_all_metrics(
     finally:
         ExpArgs.is_save_support_results = original_save_support_results
 
+    if not all_metrics_results:
+        return pd.DataFrame()
     return pd.concat(all_metrics_results, ignore_index = True)
 
 

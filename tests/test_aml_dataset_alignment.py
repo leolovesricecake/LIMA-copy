@@ -51,6 +51,12 @@ def test_aml_task_aliases_and_ambiguous_emr() -> None:
         get_task("emr")
 
 
+def test_sst2_aml_test_split_uses_validation() -> None:
+    from runs.runs_utils import get_task
+
+    assert get_task("sst2").dataset_test == "validation"
+
+
 def test_shared_loader_passes_dataset_source_args(monkeypatch) -> None:
     from config.config import ExpArgs
     from main import shared_task_data
@@ -138,6 +144,55 @@ def test_data_module_uses_shared_loader_for_mainline_tasks(monkeypatch) -> None:
 
     assert calls == [("sst2", "train", None), ("sst2", "validation", None)]
     assert len(data_module.train_dataset) == 2
+    assert len(data_module.val_dataset) == 2
+
+
+def test_data_module_uses_validation_for_sst2_test_mode(monkeypatch) -> None:
+    pytest.importorskip("pytorch_lightning")
+    pytest.importorskip("datasets")
+    pytest.importorskip("tokenizations")
+
+    from datasets import ClassLabel, Dataset, Features, Value
+
+    from config.config import ExpArgs
+    from config.types_enums import ModelBackboneTypes, ValidationType
+    import main.data_module as data_module_mod
+    from runs.runs_utils import get_task
+
+    calls = []
+
+    def _fake_load_task_split_dataset(task, split, max_samples = None):
+        calls.append((task.name, split, max_samples))
+        return Dataset.from_dict(
+            {
+                task.dataset_column_text: ["good", "bad"],
+                task.dataset_column_label: [1, 0],
+                "id": [0, 1],
+            },
+            features = Features(
+                {
+                    task.dataset_column_text: Value("string"),
+                    task.dataset_column_label: ClassLabel(names = ["negative", "positive"]),
+                    "id": Value("int64"),
+                }
+            ),
+        )
+
+    monkeypatch.setattr(data_module_mod, "load_task_split_dataset", _fake_load_task_split_dataset)
+
+    ExpArgs.task = get_task("sst2")
+    ExpArgs.explained_model_backbone = ModelBackboneTypes.BERT.value
+    ExpArgs.interpreter_model_backbone = ModelBackboneTypes.BERT.value
+
+    data_module = data_module_mod.DataModule(
+        val_type = ValidationType.TEST,
+        train_sample = 0,
+        test_sample = 0,
+        explained_tokenizer = _DummyTokenizer(),
+        interpreter_tokenizer = _DummyTokenizer(),
+    )
+
+    assert calls == [("sst2", "train", None), ("sst2", "validation", None)]
     assert len(data_module.val_dataset) == 2
 
 
