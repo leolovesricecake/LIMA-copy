@@ -7,7 +7,8 @@ from utils.dataclasses.evaluations import DataForEvaluation
 
 
 def evaluate_tokens_attributions(model, explained_tokenizer: AutoTokenizer, ref_token_id, data: DataForEvaluation,
-                                 experiment_path: str, step: int, epoch: int, item_index: str, eval_metric: str = None):
+                                 experiment_path: str, step: int, epoch: int, item_index: str, eval_metric: str = None,
+                                 trajectory_payload = None):
     original_metric = ExpArgs.eval_metric
     if eval_metric is not None:
         ExpArgs.eval_metric = eval_metric
@@ -28,21 +29,23 @@ def evaluate_tokens_attributions(model, explained_tokenizer: AutoTokenizer, ref_
         else:
             return evaluate_tokens_attr_handler(model = model, explained_tokenizer = explained_tokenizer,
                                                 ref_token_id = ref_token_id, data = data, experiment_path = experiment_path,
-                                                step = step, epoch = epoch, item_index = item_index)
+                                                step = step, epoch = epoch, item_index = item_index,
+                                                trajectory_payload = trajectory_payload)
     finally:
         if eval_metric is not None:
             ExpArgs.eval_metric = original_metric
 
 
 def evaluate_tokens_attr_handler(model, explained_tokenizer: AutoTokenizer, ref_token_id, data: DataForEvaluation,
-                                 experiment_path: str, step: int, epoch: int, item_index: str):
+                                 experiment_path: str, step: int, epoch: int, item_index: str, trajectory_payload = None):
     with torch.no_grad():
         if ExpArgs.eval_metric in [EvalMetric.SUFFICIENCY.value, EvalMetric.COMPREHENSIVENESS.value,
-                                   EvalMetric.EVAL_LOG_ODDS.value, EvalMetric.AOPC_SUFFICIENCY.value,
+                                   EvalMetric.EVAL_LOG_ODDS.value, EvalMetric.AOPC.value,
+                                   EvalMetric.AOPC_SUFFICIENCY.value,
                                    EvalMetric.AOPC_COMPREHENSIVENESS.value]:
             eval_class = Metrics(model = model, explained_tokenizer = explained_tokenizer, ref_token_id = ref_token_id,
                                  data = data, experiment_path = experiment_path, item_index = item_index, step = step,
-                                 epoch = epoch)
+                                 epoch = epoch, trajectory_payload = trajectory_payload)
             return eval_class.run_perturbation_test()
         else:
             raise ValueError("unsupported ExpArgs.eval_metric selected")

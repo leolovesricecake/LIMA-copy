@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from config.config import ExpArgs
 from config.constants import INPUT_TXT
 from config.types_enums import ValidationType
-from evaluations.results_reporting import evaluate_all_metrics, save_all_metrics_report
+from evaluations.results_reporting import evaluate_all_metrics, normalize_model_name, save_all_metrics_report
 from main.data_module import DataModule
 from main.explained_model_utils import init_exp, set_hp, save_running_time
 from models.aml_model_fine_tune import \
@@ -19,7 +19,7 @@ from models.aml_model_fine_tune import \
 from models.train_models_utils import (load_interpreter_model, init_trainable_embeddings,
                                        load_trainable_embeddings,
                                        get_warmup_steps_and_total_training_steps, get_explained_ref_token_name,
-                                       run_trainer)
+                                       resolve_explained_model_path, run_trainer)
 from utils.utils_functions import is_model_encoder_only
 
 
@@ -47,6 +47,25 @@ class FineTune:
         self.trainable_embeddings, self.label_embedding_index = init_trainable_embeddings()
         load_trainable_embeddings(self.trainable_embeddings)
 
+    @staticmethod
+    def _build_result_row_id(item, idx: int) -> str:
+        for key in ("idx", "id"):
+            if key in item:
+                value = item[key]
+                if hasattr(value, "item"):
+                    value = value.item()
+                return f"{idx}_{value}"
+        return str(idx)
+
+    @staticmethod
+    def _resolve_reference_token_text(tokenizer, ref_token_id) -> str:
+        if ref_token_id is None:
+            return ""
+        try:
+            return str(tokenizer.convert_ids_to_tokens(int(ref_token_id)))
+        except Exception:
+            return str(ref_token_id)
+
     def run(self):
 
         begin = time.time()
@@ -66,7 +85,10 @@ class FineTune:
         fine_tuned_results_path = str(Path(self.pretrain_path, "RESULTS_DF", self.experiment_name))
         os.makedirs(fine_tuned_results_path, exist_ok = True)
         tb_logger = TensorBoardLogger(Path(self.pretrain_path, "TB_LOGS", self.experiment_name))
-        primary_results, all_metrics_results = [], []
+        primary_results, all_metrics_results, trajectory_points = [], [], []
+        model_name = normalize_model_name(resolve_explained_model_path(ExpArgs.task))
+        split_name = str(ExpArgs.task.dataset_test)
+        log_odds_reference_token = self._resolve_reference_token_text(data_module.explained_tokenizer, ref_token_id)
 
         device = "gpu" if torch.cuda.is_available() else "cpu"
 
@@ -91,8 +113,8 @@ class FineTune:
                                      label_prompt_attention_mask = data_module.label_prompt_attention_mask,
                                      val_type = ValidationType.TEST)
 
-            item_id = f"{idx}_{item['idx'].item()}" if "idx" in item else f"{idx}_{item['id'].item()}"
-            current_model.set_index(item_idx = f"{idx}_{item_id}")
+            item_id = self._build_result_row_id(item, idx)
+            current_model.set_index(item_idx = item_id)
             trainer = pl.Trainer(accelerator = device, max_epochs = ExpArgs.num_epochs_for_fine_tune, logger = tb_logger,
                                  num_sanity_val_steps = -1, enable_progress_bar = False,
                                  #
@@ -110,7 +132,7 @@ class FineTune:
                 with open(save_to, 'a', newline = '', encoding = 'utf-8-sig') as f:
                     evaluation_item.to_csv(f, header = f.tell() == 0, index = False)
 
-            all_metrics_results.append(evaluate_all_metrics(
+            metrics_frame, sample_trajectory_points = evaluate_all_metrics(
                 model = self.explained_model,
                 explained_tokenizer = current_model.explained_tokenizer,
                 ref_token_id = current_model.ref_token_id,
@@ -126,7 +148,18 @@ class FineTune:
                 result_row_id = item_id,
                 selection_metric = ExpArgs.target_eval_metric,
                 selection_metric_result = float(current_model.best_metric_result),
-                selection_mode = "best_by_target_metric"))
+                selection_mode = "best_by_target_metric",
+                return_trajectory = True,
+                trajectory_context = dict(
+                    run_id = self.experiment_name,
+                    report_stage = "FINE_TUNE",
+                    dataset = ExpArgs.task.name,
+                    split = split_name,
+                    model_name = model_name,
+                    method_name = "aml",
+                    sample_id = item_id))
+            all_metrics_results.append(metrics_frame)
+            trajectory_points.extend(sample_trajectory_points)
 
             del current_model
 
@@ -149,6 +182,11 @@ class FineTune:
                                 report_stage = "FINE_TUNE",
                                 primary_results = pd.concat(primary_results, ignore_index = True),
                                 selected_hyperparameters = self.hp,
-                                extra_metadata = dict(selection_mode = "best_by_target_metric"))
+                                extra_metadata = dict(selection_mode = "best_by_target_metric"),
+                                trajectory_points = trajectory_points,
+                                dataset_name = ExpArgs.task.name,
+                                split_name = split_name,
+                                model_name = model_name,
+                                log_odds_reference_token = log_odds_reference_token)
 
         save_running_time(end, begin, self.experiment_name, file_type = "FineTune")

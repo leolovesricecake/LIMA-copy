@@ -8,6 +8,7 @@ from lima_llm.eval.metrics import (
     aopc_metrics,
     aml_faithfulness_metrics,
     build_perturbation_plan,
+    deletion_trajectory,
     top_percent_chunk_count,
 )
 from lima_llm.eval.evaluate import (
@@ -231,3 +232,34 @@ def test_perturbation_plan_matches_non_plan_metric_results() -> None:
         assert math.isclose(float(metrics_plan[key]), float(metrics_raw[key]), rel_tol=1e-9, abs_tol=1e-9)
     assert per_q_plan == per_q_raw
     assert math.isclose(float(aopc_plan["aopc"]), float(aopc_raw["aopc"]), rel_tol=1e-9, abs_tol=1e-9)
+
+
+def test_deletion_trajectory_returns_plain_aopc_with_full_step_included() -> None:
+    chunks = [
+        TextChunk(chunk_id=0, start_char=0, end_char=1, text="a"),
+        TextChunk(chunk_id=1, start_char=1, end_char=2, text="b"),
+        TextChunk(chunk_id=2, start_char=2, end_char=3, text="c"),
+    ]
+    probs_by_text = {
+        "abc": np.asarray([0.1, 0.9], dtype=np.float32),
+        "bc": np.asarray([0.2, 0.8], dtype=np.float32),
+        "c": np.asarray([0.4, 0.6], dtype=np.float32),
+        "<EMPTY>": np.asarray([0.5, 0.5], dtype=np.float32),
+    }
+
+    def prob_fn(text, verbalizers):
+        return probs_by_text[text]
+
+    payload = deletion_trajectory(
+        chunks = chunks,
+        ranking = [0, 1, 2],
+        target_label = 1,
+        verbalizers = ["NEG", "POS"],
+        prob_fn = prob_fn,
+    )
+
+    assert [point["step_index"] for point in payload["points"]] == [0, 1, 2, 3]
+    assert payload["points"][0]["is_full_text_step"] is True
+    assert payload["points"][-1]["deleted_ids"] == [0, 1, 2]
+    expected = np.mean([0.0, 0.1, 0.3, 0.4])
+    assert math.isclose(float(payload["aopc"]), float(expected), rel_tol=1e-9, abs_tol=1e-9)

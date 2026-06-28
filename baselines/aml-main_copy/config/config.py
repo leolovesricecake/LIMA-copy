@@ -62,13 +62,15 @@ class MetricsMetaData:
     directions = {EvalMetric.SUFFICIENCY.value: DirectionTypes.MIN.value,
                   EvalMetric.COMPREHENSIVENESS.value: DirectionTypes.MAX.value,
                   EvalMetric.EVAL_LOG_ODDS.value: DirectionTypes.MIN.value,
+                  EvalMetric.AOPC.value: DirectionTypes.MAX.value,
                   EvalMetric.AOPC_SUFFICIENCY.value: DirectionTypes.MIN.value,
                   EvalMetric.AOPC_COMPREHENSIVENESS.value: DirectionTypes.MAX.value,
                   EvalMetric.AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY.value: DirectionTypes.MAX.value,
                   EvalMetric.COMPREHENSIVENESS_SUFFICIENCY.value: DirectionTypes.MAX.value}
 
     top_k = {EvalMetric.SUFFICIENCY.value: [20], EvalMetric.COMPREHENSIVENESS.value: [20],
-             EvalMetric.EVAL_LOG_ODDS.value: [20], EvalMetric.AOPC_SUFFICIENCY.value: [1, 5, 10, 20, 50],
+             EvalMetric.EVAL_LOG_ODDS.value: [20], EvalMetric.AOPC.value: [],
+             EvalMetric.AOPC_SUFFICIENCY.value: [1, 5, 10, 20, 50],
              EvalMetric.AOPC_COMPREHENSIVENESS.value: [1, 5, 10, 20, 50]}
 
 

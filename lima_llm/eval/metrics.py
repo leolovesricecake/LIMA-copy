@@ -333,6 +333,71 @@ def aopc_metrics(
     return {"aopc": aopc}
 
 
+def deletion_trajectory(
+    chunks: Sequence[TextChunk],
+    ranking: Sequence[int],
+    target_label: int,
+    verbalizers: Sequence[str],
+    prob_fn,
+    perturbation_plan: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    if perturbation_plan is None:
+        perturbation_plan = build_perturbation_plan(
+            chunks=chunks,
+            ranking=ranking,
+            q_values=(),
+            primary_q_percent=AML_PRIMARY_Q_PERCENT,
+        )
+
+    all_ids = [int(x) for x in (perturbation_plan.get("all_ids") or _all_chunk_ids(chunks))]
+    deletion_texts = perturbation_plan.get("aopc_deletion_texts")
+    m = len(all_ids)
+
+    full_text = str(
+        perturbation_plan.get("full_text")
+        if perturbation_plan.get("full_text") is not None
+        else _nonempty_text(compose_text_from_chunk_ids(chunks, all_ids))
+    )
+    p_full = float(prob_fn(full_text, verbalizers)[target_label])
+
+    if not isinstance(deletion_texts, list) or len(deletion_texts) != (m + 1):
+        deletion_texts = []
+        for step in range(0, m + 1):
+            deleted_ids = [int(x) for x in ranking[:step]]
+            keep_after_delete = [i for i in all_ids if i not in set(deleted_ids)]
+            deletion_texts.append(_nonempty_text(compose_text_from_chunk_ids(chunks, keep_after_delete)))
+
+    points: List[Dict[str, Any]] = []
+    for step_index, text_after_delete in enumerate(deletion_texts):
+        deleted_ids = [int(x) for x in ranking[:step_index]]
+        if step_index == 0:
+            p_step = p_full
+        else:
+            p_step = float(prob_fn(str(text_after_delete), verbalizers)[target_label])
+        delete_fraction = float(step_index / m) if m > 0 else 0.0
+        remaining_fraction = float((m - step_index) / m) if m > 0 else 1.0
+        points.append(
+            {
+                "step_index": int(step_index),
+                "total_steps": int(m),
+                "delete_count": int(step_index),
+                "delete_fraction": delete_fraction,
+                "remaining_fraction": remaining_fraction,
+                "target_probability": float(p_step),
+                "prob_drop_from_full": float(p_full - p_step),
+                "is_full_text_step": bool(step_index == 0),
+                "deleted_ids": list(deleted_ids),
+            }
+        )
+
+    aopc = float(np.mean([point["prob_drop_from_full"] for point in points])) if points else 0.0
+    return {
+        "aopc": aopc,
+        "full_probability": p_full,
+        "points": points,
+    }
+
+
 def aml_faithfulness_metrics(
     chunks: Sequence[TextChunk],
     ranking: Sequence[int],

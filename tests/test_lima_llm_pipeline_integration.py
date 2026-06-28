@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from lima_llm.pipeline.run import main
@@ -151,8 +152,14 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
 
     summary = list(out.glob("**/summary.csv"))
     report = list(out.glob("**/eval_report.json"))
+    trajectory_points_csv = list(out.glob("**/trajectory_points.csv"))
+    trajectory_points_jsonl = list(out.glob("**/trajectory_points.jsonl"))
+    trajectory_summary_csv = list(out.glob("**/trajectory_summary.csv"))
     assert summary
     assert report
+    assert trajectory_points_csv
+    assert trajectory_points_jsonl
+    assert trajectory_summary_csv
 
     run_cfg_paths = list(out.glob("**/run_config.json"))
     eval_cfg_paths = list(out.glob("**/eval_config.json"))
@@ -174,6 +181,21 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "prefetch_stats" in eval_report["metrics_secondary"]
     assert "backbone_batch_stats" in eval_report["metrics_secondary"]
     assert eval_report["prefetch_stats"]["batch_fallback_count"] == 0
+    assert eval_report["artifacts"]["trajectory_points_csv"] == "trajectory_points.csv"
+    assert eval_report["artifacts"]["trajectory_points_jsonl"] == "trajectory_points.jsonl"
+    assert eval_report["artifacts"]["trajectory_summary_csv"] == "trajectory_summary.csv"
+
+    predicted_aopc = float(eval_report["metrics_by_target"]["predicted"]["metrics_primary"]["aopc"])
+    trajectory_rows = pd.read_csv(trajectory_points_csv[0])
+    recomputed_aopc = float(trajectory_rows.groupby("sample_id")["prob_drop_from_full"].mean().mean())
+    assert predicted_aopc == pytest.approx(recomputed_aopc)
+
+    for sample_json in sample_jsons:
+        sample_payload = json.loads(sample_json.read_text(encoding="utf-8"))
+        assert "trajectory_step_count" in sample_payload
+        assert "trajectory_row_range" in sample_payload
+        assert "trajectory_target" not in sample_payload
+        assert "trajectory_artifact" not in sample_payload
 
     for payload in (run_cfg, eval_cfg, eval_report):
         assert "provenance" in payload

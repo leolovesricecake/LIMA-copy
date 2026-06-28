@@ -1,21 +1,23 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 import numpy as np
 from tqdm import tqdm
 
 from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
-from ..utils import f1_iou_from_masks, spans_to_char_mask
+from ..utils import atomic_write_json, f1_iou_from_masks, spans_to_char_mask
 from .metrics import (
     AML_AOPC_Q_VALUES,
     AML_PRIMARY_Q_PERCENT,
     EMPTY_PERTURBATION_TEXT,
+    deletion_trajectory,
     aml_faithfulness_metrics,
     aopc_metrics,
     build_perturbation_plan,
@@ -37,6 +39,10 @@ _FLOAT_FORWARD_COUNTER_KEYS = {
     "batch_pack_seconds",
     "batch_forward_seconds",
 }
+
+TRAJECTORY_POINTS_CSV = "trajectory_points.csv"
+TRAJECTORY_POINTS_JSONL = "trajectory_points.jsonl"
+TRAJECTORY_SUMMARY_CSV = "trajectory_summary.csv"
 
 
 def _safe_mean(xs: Sequence[float]) -> float:
@@ -172,6 +178,123 @@ def _normalize_prefetch_fallback_policy(raw: str | None) -> str:
     return policy
 
 
+def _model_name_from_output_root(output_root: Path) -> str:
+    text = output_root.parent.name
+    if text.startswith("model-"):
+        return text[len("model-") :]
+    return text
+
+
+def _write_jsonl(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
+    with open(path, "w", encoding = "utf-8") as file:
+        for row in rows:
+            file.write(json.dumps(row, ensure_ascii = False) + "\n")
+
+
+def _write_csv(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
+    if not rows:
+        with open(path, "w", encoding = "utf-8", newline = "") as file:
+            file.write("")
+        return
+
+    normalized_rows = []
+    fieldnames = list(rows[0].keys())
+    for row in rows:
+        normalized = {}
+        for field in fieldnames:
+            value = row.get(field)
+            if isinstance(value, (list, dict)):
+                normalized[field] = json.dumps(value, ensure_ascii = False)
+            else:
+                normalized[field] = value
+        normalized_rows.append(normalized)
+
+    with open(path, "w", encoding = "utf-8", newline = "") as file:
+        writer = csv.DictWriter(file, fieldnames = fieldnames)
+        writer.writeheader()
+        writer.writerows(normalized_rows)
+
+
+def _trajectory_summary_rows(points: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[tuple, Dict[str, Any]] = {}
+    for point in points:
+        key = (
+            point["source_family"],
+            point["run_id"],
+            point["report_stage"],
+            point["dataset"],
+            point["split"],
+            point["model_name"],
+            point["method_name"],
+            point["step_index"],
+            point["total_steps"],
+            point["delete_count"],
+            point["delete_fraction"],
+            point["remaining_fraction"],
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "source_family": point["source_family"],
+                "run_id": point["run_id"],
+                "report_stage": point["report_stage"],
+                "dataset": point["dataset"],
+                "split": point["split"],
+                "model_name": point["model_name"],
+                "method_name": point["method_name"],
+                "step_index": point["step_index"],
+                "total_steps": point["total_steps"],
+                "delete_count": point["delete_count"],
+                "delete_fraction": point["delete_fraction"],
+                "remaining_fraction": point["remaining_fraction"],
+                "target_probabilities": [],
+                "prob_drops": [],
+                "sample_ids": set(),
+            },
+        )
+        group["target_probabilities"].append(float(point["target_probability"]))
+        group["prob_drops"].append(float(point["prob_drop_from_full"]))
+        group["sample_ids"].add(str(point["sample_id"]))
+
+    rows = []
+    for group in grouped.values():
+        target_probabilities = np.asarray(group.pop("target_probabilities"), dtype = np.float64)
+        prob_drops = np.asarray(group.pop("prob_drops"), dtype = np.float64)
+        sample_ids = group.pop("sample_ids")
+        group["mean_target_probability"] = float(np.mean(target_probabilities)) if len(target_probabilities) else 0.0
+        group["std_target_probability"] = float(np.std(target_probabilities)) if len(target_probabilities) else 0.0
+        group["mean_prob_drop_from_full"] = float(np.mean(prob_drops)) if len(prob_drops) else 0.0
+        group["std_prob_drop_from_full"] = float(np.std(prob_drops)) if len(prob_drops) else 0.0
+        group["sample_count"] = int(len(sample_ids))
+        rows.append(group)
+
+    rows.sort(
+        key = lambda row: (
+            str(row["dataset"]),
+            str(row["model_name"]),
+            str(row["method_name"]),
+            int(row["step_index"]),
+        )
+    )
+    return rows
+
+
+def _write_trajectory_artifacts(output_root: Path, points: Sequence[Dict[str, Any]]) -> Dict[str, str]:
+    points_csv = output_root / TRAJECTORY_POINTS_CSV
+    points_jsonl = output_root / TRAJECTORY_POINTS_JSONL
+    summary_csv = output_root / TRAJECTORY_SUMMARY_CSV
+
+    _write_csv(points_csv, points)
+    _write_jsonl(points_jsonl, points)
+    _write_csv(summary_csv, _trajectory_summary_rows(points))
+
+    return {
+        "trajectory_points_csv": TRAJECTORY_POINTS_CSV,
+        "trajectory_points_jsonl": TRAJECTORY_POINTS_JSONL,
+        "trajectory_summary_csv": TRAJECTORY_SUMMARY_CSV,
+    }
+
+
 def _prefetch_prob_cache(
     *,
     backbone,
@@ -266,6 +389,7 @@ def evaluate_saved_explanations(
             "Evaluation keeps original perturbation text order."
         )
     tokenizer = getattr(backbone, "tokenizer", None)
+    model_name = _model_name_from_output_root(output_root)
 
     sample_map = {s.sample_id: s for s in bundle.samples}
     mode_states = {
@@ -315,6 +439,8 @@ def evaluate_saved_explanations(
         "missing_text_count": 0,
         "fallback_error_examples": [],
     }
+    trajectory_points: List[Dict[str, Any]] = []
+    sample_trajectory_ranges: Dict[str, Dict[str, int]] = {}
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -472,14 +598,60 @@ def evaluate_saved_explanations(
                     reference_token_text=reference_token_text,
                     perturbation_plan=perturbation_plan,
                 )
-                aopc_payload = aopc_metrics(
-                    chunks=eval_units,
-                    ranking=ranking_units,
-                    target_label=target_label,
-                    verbalizers=verbalizers,
-                    prob_fn=_prob_fn,
-                    perturbation_plan=perturbation_plan,
-                )
+                if mode_name == "predicted":
+                    trajectory_payload = deletion_trajectory(
+                        chunks = eval_units,
+                        ranking = ranking_units,
+                        target_label = target_label,
+                        verbalizers = verbalizers,
+                        prob_fn = _prob_fn,
+                        perturbation_plan = perturbation_plan,
+                    )
+                    trajectory_start = len(trajectory_points)
+                    target_label_text = None
+                    if 0 <= int(target_label) < len(getattr(bundle, "label_names", [])):
+                        target_label_text = str(bundle.label_names[int(target_label)])
+                    elif 0 <= int(target_label) < len(verbalizers):
+                        target_label_text = str(verbalizers[int(target_label)])
+                    for point in trajectory_payload["points"]:
+                        trajectory_points.append(
+                            {
+                                "source_family": "lima_llm",
+                                "run_id": str(output_root.name),
+                                "report_stage": "EVAL",
+                                "dataset": str(bundle.dataset_name),
+                                "split": str(bundle.split),
+                                "model_name": str(model_name),
+                                "method_name": str(method),
+                                "sample_id": str(sample_id),
+                                "target_label_id": int(target_label),
+                                "target_label_text": target_label_text,
+                                "step_index": int(point["step_index"]),
+                                "total_steps": int(point["total_steps"]),
+                                "delete_count": int(point["delete_count"]),
+                                "delete_fraction": float(point["delete_fraction"]),
+                                "remaining_fraction": float(point["remaining_fraction"]),
+                                "target_probability": float(point["target_probability"]),
+                                "prob_drop_from_full": float(point["prob_drop_from_full"]),
+                                "is_full_text_step": bool(point["is_full_text_step"]),
+                                "deleted_ids": list(point["deleted_ids"]),
+                            }
+                        )
+                    sample_trajectory_ranges[str(sample_id)] = {
+                        "start_row": int(trajectory_start),
+                        "end_row_exclusive": int(len(trajectory_points)),
+                        "step_count": int(len(trajectory_payload["points"])),
+                    }
+                    aopc_payload = {"aopc": float(trajectory_payload["aopc"])}
+                else:
+                    aopc_payload = aopc_metrics(
+                        chunks = eval_units,
+                        ranking = ranking_units,
+                        target_label = target_label,
+                        verbalizers = verbalizers,
+                        prob_fn = _prob_fn,
+                        perturbation_plan = perturbation_plan,
+                    )
                 _append_mode_metrics(mode_state, metrics, aopc_payload, per_q, tracked_q_values)
             except Exception as exc:
                 err = f"{type(exc).__name__}: {exc}"
@@ -536,6 +708,20 @@ def evaluate_saved_explanations(
         "gold": _mode_report(mode_states["gold"], total, method),
         "predicted": _mode_report(mode_states["predicted"], total, method),
     }
+    trajectory_artifacts = _write_trajectory_artifacts(output_root, trajectory_points)
+
+    for sample_json in sample_jsons:
+        payload = json.loads(sample_json.read_text(encoding = "utf-8"))
+        sample_id = str(payload.get("sample_id", ""))
+        if sample_id not in sample_trajectory_ranges:
+            continue
+        row_range = sample_trajectory_ranges[sample_id]
+        payload["trajectory_step_count"] = int(row_range["step_count"])
+        payload["trajectory_row_range"] = {
+            "start_row": int(row_range["start_row"]),
+            "end_row_exclusive": int(row_range["end_row_exclusive"]),
+        }
+        atomic_write_json(sample_json, payload)
 
     report = {
         "report_method": method,
@@ -547,6 +733,8 @@ def evaluate_saved_explanations(
             "primary_top_k_percent": int(AML_PRIMARY_Q_PERCENT),
             "aopc_top_k_percentages": [int(q) for q in aopc_q_values],
             "aopc_average_denominator": "len(top_k_percentages)+1",
+            "morf_average_denominator": "num_deletion_steps",
+            "perturbation_target": "predicted",
             "log_odds_reference_token": reference_token_text,
             "perturbation_unit": granularity,
             "unit_segmentation": (
@@ -606,5 +794,9 @@ def evaluate_saved_explanations(
         "cache_stats": cache_stats,
         "prefetch_stats": prefetch_stats,
         "backbone_batch_stats": backbone_batch_stats,
+        "artifacts": {
+            "eval_report_json": "eval_report.json",
+            **trajectory_artifacts,
+        },
     }
     return report
