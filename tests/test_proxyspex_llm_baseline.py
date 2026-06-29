@@ -110,6 +110,23 @@ def test_project_interactions_to_chunk_scores_uses_signed_equal_share() -> None:
     assert scores == pytest.approx([0.0, 0.0, 0.8, 0.0, 0.05, -0.15])
 
 
+def test_stable_uniform_coalition_sampling_weights_do_not_overflow_for_large_n() -> None:
+    weights = RUNNER._sampling_weights(2048, "uniform_coalition")
+    assert weights.shape == (2049,)
+    assert weights.dtype.kind == "f"
+    assert weights[0] > 0
+    assert weights[-1] > 0
+    assert weights[1024] == pytest.approx(1.0)
+    assert weights[7] == pytest.approx(weights[-8])
+    assert all(float(x) > 0.0 for x in weights)
+    assert all(float(x) < float("inf") for x in weights)
+
+
+def test_uniform_size_sampling_weights_are_available_for_ablation() -> None:
+    weights = RUNNER._sampling_weights(4, "uniform_size")
+    assert weights.tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
+
+
 def test_rank_desc_scores_uses_raw_scores_and_chunk_id_tiebreak() -> None:
     ranking, selected = RUNNER._rank_desc_scores([0.0, 0.5, 0.5, -0.2], k=3)
     assert ranking == [1, 2, 0, 3]
@@ -138,6 +155,7 @@ def test_write_configs_emits_provenance(tmp_path: Path) -> None:
         max_order=2,
         index="FBII",
         proxy_model="tree",
+        sampling_weight_mode="uniform_coalition",
         hpo=False,
         pairing_trick=False,
         top_order=False,

@@ -104,6 +104,7 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --max-order 2 \
   --budget 512 \
   --proxy-model lightgbm \
+  --sampling-weight-mode uniform_coalition \
   --k 8 \
   --eval-q-values 1,5,10,20,50 \
   --base-save-dir results \
@@ -199,6 +200,7 @@ results/baselines/proxyspex/<dataset>/model-<model>/index-<index>_order-<order>_
 - `proxyspex_requested_max_order`
 - `proxyspex_effective_max_order`
 - `proxyspex_proxy_model`
+- `proxyspex_sampling_weight_mode`
 - `projection_strategy`
 - `interaction_summary`
 - `player_to_chunk_id`
@@ -243,3 +245,39 @@ samples/<sample_id>.json -> metadata.interaction_summary.top_by_abs_value
 ```
 
 其中 `players` 是 active player id，可通过 `metadata.player_to_chunk_id` 映射回输出 chunks。
+
+### 6) `OverflowError: int too large to convert to float`
+
+原版 ProxySPEX 在未显式传 `sampling_weights` 时，会用 `math.comb(n, k)` 构造 coalition-size 权重。长文本下 active token/word 数 `n` 可能接近模型上下文长度，`comb(n, k)` 在中间阶数会极大，转成 float 时可能溢出。
+
+本 runner 默认使用：
+
+```bash
+--sampling-weight-mode uniform_coalition
+```
+
+它用 log-comb 方式稳定构造与 `comb(n, k)` 同语义的大小分布，避免这个溢出。另一个可选模式是：
+
+```bash
+--sampling-weight-mode uniform_size
+```
+
+它让每个 coalition size 近似等概率被采样，适合做消融，但和 ProxySPEX 原始默认分布不同。
+
+### 7) `--base-save-dir: command not found`
+
+这是 shell 命令续行问题，不是 Python 脚本问题。每一行如果还要继续传参数，行尾都要有 `\`。例如 `--model-path /path/to/model` 这一行后面也要加反斜杠。
+
+### 8) NVIDIA driver too old
+
+如果报错类似：
+
+```text
+RuntimeError: The NVIDIA driver on your system is too old
+```
+
+说明当前安装的 PyTorch CUDA build 比服务器 NVIDIA driver 新。解决方式有三种：
+
+- 更新服务器 NVIDIA driver。
+- 安装和服务器 driver 匹配的 PyTorch CUDA 版本。
+- 先用 `--device cpu` 跑小样本 smoke，确认脚本逻辑和数据路径没问题。

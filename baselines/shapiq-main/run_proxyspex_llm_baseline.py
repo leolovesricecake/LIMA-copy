@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
@@ -69,6 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-order", type=int, default=2)
     parser.add_argument("--index", type=str, default="FBII")
     parser.add_argument("--proxy-model", type=str, default="lightgbm", choices=["lightgbm", "xgboost", "tree"])
+    parser.add_argument(
+        "--sampling-weight-mode",
+        type=str,
+        default="uniform_coalition",
+        choices=["uniform_coalition", "uniform_size"],
+        help=(
+            "Coalition-size sampling weights. uniform_coalition is a stable log-comb version of "
+            "ProxySPEX's default comb(n, k) weights."
+        ),
+    )
     parser.add_argument("--hpo", dest="hpo", action="store_true", default=True)
     parser.add_argument("--no-hpo", dest="hpo", action="store_false")
     parser.add_argument("--pairing-trick", action="store_true")
@@ -147,6 +158,37 @@ def _target_label_ids(tokenizer, label_text: str, max_length: int) -> List[int]:
     if not ids:
         raise ValueError(f"Label text is not tokenizable: {label_text!r}")
     return ids
+
+
+def _stable_uniform_coalition_sampling_weights(n_players: int) -> np.ndarray:
+    n = int(n_players)
+    if n < 0:
+        raise ValueError("n_players must be non-negative")
+    if n == 0:
+        return np.ones(1, dtype=np.float64)
+
+    log_weights = np.asarray(
+        [
+            math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+            for k in range(n + 1)
+        ],
+        dtype=np.float64,
+    )
+    log_weights = log_weights - float(np.max(log_weights))
+    weights = np.exp(log_weights)
+    tiny = np.finfo(np.float64).tiny
+    weights[~np.isfinite(weights)] = 0.0
+    weights = np.maximum(weights, tiny)
+    return weights.astype(np.float64)
+
+
+def _sampling_weights(n_players: int, mode: str) -> np.ndarray:
+    value = str(mode).strip().lower()
+    if value == "uniform_size":
+        return np.ones(int(n_players) + 1, dtype=np.float64)
+    if value == "uniform_coalition":
+        return _stable_uniform_coalition_sampling_weights(int(n_players))
+    raise ValueError(f"Unsupported sampling weight mode: {mode!r}")
 
 
 def _prompt_visible_text_span_after_left_truncation(
@@ -462,12 +504,17 @@ def _explain_sample(
             target_label=target_label,
         )
         effective_max_order = min(int(args.max_order), len(player_to_chunk_id))
+        sampling_weights = _sampling_weights(
+            n_players=len(player_to_chunk_id),
+            mode=str(args.sampling_weight_mode),
+        )
         approximator = ProxySPEX(
             n=len(player_to_chunk_id),
             max_order=effective_max_order,
             index=str(args.index),
             proxy_model=str(args.proxy_model),
             hpo=bool(args.hpo),
+            sampling_weights=sampling_weights,
             pairing_trick=bool(args.pairing_trick),
             top_order=bool(args.top_order),
             random_state=int(args.seed),
@@ -504,6 +551,7 @@ def _explain_sample(
         if player_to_chunk_id
         else 0,
         "proxyspex_proxy_model": str(args.proxy_model),
+        "proxyspex_sampling_weight_mode": str(args.sampling_weight_mode),
         "proxyspex_hpo": bool(args.hpo),
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
@@ -621,6 +669,7 @@ def _validate_args(args) -> None:
         raise ValueError("--k must be non-negative")
     if int(args.interaction_metadata_limit) < 0:
         raise ValueError("--interaction-metadata-limit must be non-negative")
+    _sampling_weights(1, str(args.sampling_weight_mode))
     if bool(args.hpo) and int(args.budget) < 5 and args.proxy_model in {"lightgbm", "xgboost"}:
         raise ValueError("HPO-backed boosting proxies need at least 5 sampled coalitions for GridSearchCV.")
 

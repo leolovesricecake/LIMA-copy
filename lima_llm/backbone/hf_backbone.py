@@ -75,7 +75,15 @@ class HFBackbone(BaseBackbone):
     def _prepare_device(torch_module, device: str):
         resolved = torch_module.device(device)
         if resolved.type == "cuda":
-            torch_module.cuda.set_device(0 if resolved.index is None else resolved.index)
+            try:
+                torch_module.cuda.set_device(0 if resolved.index is None else resolved.index)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to initialize the requested CUDA device. This is usually an environment "
+                    "issue, for example an NVIDIA driver that is too old for the installed PyTorch CUDA "
+                    "build. Use `--device cpu` for a CPU-only smoke test, or install a PyTorch build "
+                    "compatible with your server driver / update the NVIDIA driver."
+                ) from exc
         return resolved
 
     @staticmethod
