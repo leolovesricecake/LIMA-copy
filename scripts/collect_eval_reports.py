@@ -8,15 +8,115 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 
+_FLOAT_FORWARD_COUNTER_KEYS = {
+    "batch_tokenize_seconds",
+    "batch_pack_seconds",
+    "batch_forward_seconds",
+}
+
+
+def _get_nested(payload: Dict[str, Any], path: str) -> Any:
+    current: Any = payload
+    for key in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _flatten_dict(prefix: str, payload: Dict[str, Any], out: Dict[str, Any]) -> None:
+    for key, value in payload.items():
+        child_prefix = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            _flatten_dict(child_prefix, value, out)
+        else:
+            out[child_prefix] = value
+
+
+def _accumulate_numeric_dict(
+    totals: Dict[str, float | int],
+    values: Dict[str, Any] | None,
+    *,
+    float_keys = (),
+) -> Dict[str, float | int]:
+    float_key_set = {str(key) for key in float_keys}
+    payload = values or {}
+    for key, value in payload.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if key in float_key_set or isinstance(value, float):
+            totals[key] = float(totals.get(key, 0.0)) + float(value)
+        else:
+            totals[key] = int(totals.get(key, 0)) + int(value)
+    return totals
+
+
+def _divide_numeric_dict(values: Dict[str, float | int], denominator: int) -> Dict[str, float]:
+    if denominator <= 0:
+        return {}
+    return {key: float(value) / float(denominator) for key, value in values.items()}
+
+
+def _aggregate_explain_stats_from_samples(method_dir: Path) -> Dict[str, Any]:
+    sample_dir = method_dir / "samples"
+    if not sample_dir.exists():
+        return {}
+
+    sample_jsons = sorted(sample_dir.glob("*.json"))
+    if not sample_jsons:
+        return {}
+
+    explain_forward_counters_total: Dict[str, float | int] = {}
+    explain_timing_totals: Dict[str, float | int] = {}
+    explain_elapsed_seconds_total = 0.0
+    explain_sample_count = 0
+
+    for sample_json in sample_jsons:
+        try:
+            payload = json.loads(sample_json.read_text(encoding = "utf-8"))
+        except Exception:
+            continue
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        explain_sample_count += 1
+        _accumulate_numeric_dict(
+            explain_forward_counters_total,
+            metadata.get("forward_counters_delta"),
+            float_keys = _FLOAT_FORWARD_COUNTER_KEYS,
+        )
+        timing = metadata.get("explain_timing_breakdown")
+        if isinstance(timing, dict):
+            _accumulate_numeric_dict(explain_timing_totals, timing, float_keys = tuple(timing.keys()))
+        if isinstance(metadata.get("elapsed_seconds"), (int, float)):
+            explain_elapsed_seconds_total += float(metadata["elapsed_seconds"])
+
+    if explain_sample_count == 0:
+        return {}
+
+    return {
+        "sample_count": int(explain_sample_count),
+        "forward_counters_total": explain_forward_counters_total,
+        "forward_counters_mean_per_sample": _divide_numeric_dict(
+            explain_forward_counters_total,
+            explain_sample_count,
+        ),
+        "timing_totals": explain_timing_totals,
+        "timing_mean_per_sample": _divide_numeric_dict(explain_timing_totals, explain_sample_count),
+        "elapsed_seconds_total": float(explain_elapsed_seconds_total),
+        "elapsed_seconds_mean_per_sample": float(explain_elapsed_seconds_total) / float(explain_sample_count),
+    }
+
+
 def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
     """
     收集形如 dataset/model/method/eval_report.json 的实验结果。
 
     每一行包含：
-    - dataset: 第一级目录名
-    - model: 第二级目录名
-    - method: 第三级目录名
+    - dataset / model / method
+    - report_method / split / sample_count
     - metrics_primary 中的所有指标
+    - 关键调用次数与耗时统计
     """
     rows: List[Dict[str, Any]] = []
 
@@ -56,6 +156,37 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                     print(f"[WARN] Failed to read JSON: {report_path} ({e})")
                     continue
 
+                explain_stats_fallback = _aggregate_explain_stats_from_samples(method_dir)
+                if explain_stats_fallback and not isinstance(report.get("explain_diagnostics"), dict):
+                    report["explain_diagnostics"] = explain_stats_fallback
+                if explain_stats_fallback:
+                    metrics_secondary = report.setdefault("metrics_secondary", {})
+                    if not isinstance(metrics_secondary.get("explain_forward_counters_total"), dict):
+                        metrics_secondary["explain_forward_counters_total"] = explain_stats_fallback.get(
+                            "forward_counters_total",
+                            {},
+                        )
+                    if not isinstance(metrics_secondary.get("explain_forward_counters_mean_per_sample"), dict):
+                        metrics_secondary["explain_forward_counters_mean_per_sample"] = explain_stats_fallback.get(
+                            "forward_counters_mean_per_sample",
+                            {},
+                        )
+                    if not isinstance(metrics_secondary.get("explain_timing_totals"), dict):
+                        metrics_secondary["explain_timing_totals"] = explain_stats_fallback.get("timing_totals", {})
+                    if not isinstance(metrics_secondary.get("explain_timing_mean_per_sample"), dict):
+                        metrics_secondary["explain_timing_mean_per_sample"] = explain_stats_fallback.get(
+                            "timing_mean_per_sample",
+                            {},
+                        )
+                    metrics_secondary.setdefault(
+                        "explain_elapsed_seconds_total",
+                        explain_stats_fallback.get("elapsed_seconds_total"),
+                    )
+                    metrics_secondary.setdefault(
+                        "explain_elapsed_seconds_mean_per_sample",
+                        explain_stats_fallback.get("elapsed_seconds_mean_per_sample"),
+                    )
+
                 metrics = report.get("metrics_primary")
                 if not isinstance(metrics, dict):
                     print(f"[WARN] Missing or invalid metrics_primary: {report_path}")
@@ -65,8 +196,42 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                     "dataset": dataset_dir.name,
                     "model": model_dir.name,
                     "method": method_dir.name,
+                    "report_method": report.get("report_method"),
+                    "split": report.get("split"),
+                    "sample_count": report.get("sample_count"),
                 }
                 row.update(metrics)
+
+                for nested_path in [
+                    "metrics_secondary.forward_counters_delta",
+                    "metrics_secondary.eval_forward_counters_delta",
+                    "metrics_secondary.explain_forward_counters_total",
+                    "metrics_secondary.explain_forward_counters_mean_per_sample",
+                    "metrics_secondary.timing_breakdown",
+                    "metrics_secondary.explain_timing_totals",
+                    "metrics_secondary.explain_timing_mean_per_sample",
+                    "explain_diagnostics.forward_counters_total",
+                    "explain_diagnostics.forward_counters_mean_per_sample",
+                    "explain_diagnostics.timing_totals",
+                    "explain_diagnostics.timing_mean_per_sample",
+                ]:
+                    nested_value = _get_nested(report, nested_path)
+                    if isinstance(nested_value, dict):
+                        _flatten_dict(nested_path, nested_value, row)
+                    elif nested_value is not None:
+                        row[nested_path] = nested_value
+
+                for scalar_path in [
+                    "metrics_secondary.runtime_seconds",
+                    "metrics_secondary.explain_elapsed_seconds_total",
+                    "metrics_secondary.explain_elapsed_seconds_mean_per_sample",
+                    "explain_diagnostics.elapsed_seconds_total",
+                    "explain_diagnostics.elapsed_seconds_mean_per_sample",
+                ]:
+                    scalar_value = _get_nested(report, scalar_path)
+                    if scalar_value is not None:
+                        row[scalar_path] = scalar_value
+
                 rows.append(row)
 
     return rows
@@ -78,7 +243,7 @@ def write_csv(rows: List[Dict[str, Any]], output_csv: Path) -> None:
 
     指标列会自动取所有 JSON 中出现过的 metrics_primary key 的并集。
     """
-    base_columns = ["dataset", "model", "method"]
+    base_columns = ["dataset", "model", "method", "report_method", "split", "sample_count"]
 
     metric_columns = sorted(
         {

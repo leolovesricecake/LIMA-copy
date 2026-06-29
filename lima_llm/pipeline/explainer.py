@@ -13,6 +13,12 @@ from ..objective.submodular import ObjectiveWeights, TextSubmodularObjective
 from ..search import run_bidirectional_search, run_forward_greedy
 from ..types import ExplanationResult, ScoreComponents, ScoreTrace, TextChunk, TextSample
 
+_FLOAT_FORWARD_COUNTER_KEYS = {
+    "batch_tokenize_seconds",
+    "batch_pack_seconds",
+    "batch_forward_seconds",
+}
+
 
 @dataclass(frozen=True)
 class ExplainerConfig:
@@ -32,7 +38,14 @@ def _stable_hash_int(text: str) -> int:
 
 def _counter_delta(before: Dict[str, int], after: Dict[str, int]) -> Dict[str, int]:
     keys = set(before.keys()).union(after.keys())
-    return {k: int(after.get(k, 0) - before.get(k, 0)) for k in sorted(keys)}
+    out = {}
+    for key in sorted(keys):
+        delta = after.get(key, 0) - before.get(key, 0)
+        if key in _FLOAT_FORWARD_COUNTER_KEYS:
+            out[key] = float(delta)
+        else:
+            out[key] = int(delta)
+    return out
 
 
 def _ranking_digest(ids: Sequence[int]) -> str:

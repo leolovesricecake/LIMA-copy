@@ -180,6 +180,11 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "cache_stats" in eval_report["metrics_secondary"]
     assert "prefetch_stats" in eval_report["metrics_secondary"]
     assert "backbone_batch_stats" in eval_report["metrics_secondary"]
+    assert "eval_forward_counters_delta" in eval_report["metrics_secondary"]
+    assert "explain_forward_counters_total" in eval_report["metrics_secondary"]
+    assert "explain_forward_counters_mean_per_sample" in eval_report["metrics_secondary"]
+    assert "explain_diagnostics" in eval_report
+    assert int(eval_report["explain_diagnostics"]["sample_count"]) == len(sample_jsons)
     assert eval_report["prefetch_stats"]["batch_fallback_count"] == 0
     assert eval_report["artifacts"]["trajectory_points_csv"] == "trajectory_points.csv"
     assert eval_report["artifacts"]["trajectory_points_jsonl"] == "trajectory_points.jsonl"

@@ -295,6 +295,36 @@ def _write_trajectory_artifacts(output_root: Path, points: Sequence[Dict[str, An
     }
 
 
+def _accumulate_numeric_dict(
+    totals: Dict[str, float | int],
+    values: Dict[str, Any] | None,
+    *,
+    float_keys: Sequence[str] = (),
+) -> Dict[str, float | int]:
+    float_key_set = {str(key) for key in float_keys}
+    payload = values or {}
+    for key, value in payload.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if key in float_key_set or isinstance(value, float):
+            totals[key] = float(totals.get(key, 0.0)) + float(value)
+        else:
+            totals[key] = int(totals.get(key, 0)) + int(value)
+    return totals
+
+
+def _divide_numeric_dict(values: Dict[str, float | int], denominator: int) -> Dict[str, float | int]:
+    if denominator <= 0:
+        return {}
+    out: Dict[str, float | int] = {}
+    for key, value in values.items():
+        if isinstance(value, float):
+            out[key] = float(value) / float(denominator)
+        else:
+            out[key] = float(value) / float(denominator)
+    return out
+
+
 def _prefetch_prob_cache(
     *,
     backbone,
@@ -439,6 +469,10 @@ def evaluate_saved_explanations(
         "missing_text_count": 0,
         "fallback_error_examples": [],
     }
+    explain_sample_count = 0
+    explain_forward_counters_total: Dict[str, float | int] = {}
+    explain_timing_totals: Dict[str, float | int] = {}
+    explain_elapsed_seconds_total = 0.0
     trajectory_points: List[Dict[str, Any]] = []
     sample_trajectory_ranges: Dict[str, Dict[str, int]] = {}
 
@@ -463,6 +497,21 @@ def evaluate_saved_explanations(
         if sample_id not in sample_map:
             skipped_missing_sample_id += 1
             continue
+
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+        explain_sample_count += 1
+        _accumulate_numeric_dict(
+            explain_forward_counters_total,
+            metadata.get("forward_counters_delta"),
+            float_keys = _FLOAT_FORWARD_COUNTER_KEYS,
+        )
+        _accumulate_numeric_dict(
+            explain_timing_totals,
+            metadata.get("explain_timing_breakdown"),
+            float_keys = tuple((metadata.get("explain_timing_breakdown") or {}).keys()),
+        )
+        if isinstance(metadata.get("elapsed_seconds"), (int, float)):
+            explain_elapsed_seconds_total += float(metadata["elapsed_seconds"])
 
         sample = sample_map[sample_id]
         t_unit = time.time()
@@ -691,6 +740,8 @@ def evaluate_saved_explanations(
         "fallback_error_examples": list(prefetch_runtime["fallback_error_examples"]),
     }
     timing_breakdown_payload = {k: float(v) for k, v in timing_breakdown.items()}
+    explain_forward_counters_mean = _divide_numeric_dict(explain_forward_counters_total, explain_sample_count)
+    explain_timing_mean = _divide_numeric_dict(explain_timing_totals, explain_sample_count)
     backbone_batch_stats = {
         "batch_calls": int(counter_delta.get("batch_calls", 0)),
         "batch_rows": int(counter_delta.get("batch_rows", 0)),
@@ -764,8 +815,19 @@ def evaluate_saved_explanations(
             ),
             "runtime_seconds": elapsed,
             "forward_counters_delta": counter_delta,
+            "eval_forward_counters_delta": counter_delta,
+            "explain_forward_counters_total": explain_forward_counters_total,
+            "explain_forward_counters_mean_per_sample": explain_forward_counters_mean,
             "method_diagnostics": mode_reports["gold"]["method_diagnostics"],
             "timing_breakdown": timing_breakdown_payload,
+            "explain_timing_totals": explain_timing_totals,
+            "explain_timing_mean_per_sample": explain_timing_mean,
+            "explain_elapsed_seconds_total": float(explain_elapsed_seconds_total),
+            "explain_elapsed_seconds_mean_per_sample": (
+                float(explain_elapsed_seconds_total) / float(explain_sample_count)
+                if explain_sample_count > 0
+                else 0.0
+            ),
             "cache_stats": cache_stats,
             "prefetch_stats": prefetch_stats,
             "backbone_batch_stats": backbone_batch_stats,
@@ -787,6 +849,20 @@ def evaluate_saved_explanations(
             ),
             "tokenizer_fallback_samples": int(tokenizer_fallback_samples),
             "tokenizer_fallback_unit_total": int(tokenizer_fallback_unit_total),
+            "explain_sample_count": int(explain_sample_count),
+        },
+        "explain_diagnostics": {
+            "sample_count": int(explain_sample_count),
+            "forward_counters_total": explain_forward_counters_total,
+            "forward_counters_mean_per_sample": explain_forward_counters_mean,
+            "timing_totals": explain_timing_totals,
+            "timing_mean_per_sample": explain_timing_mean,
+            "elapsed_seconds_total": float(explain_elapsed_seconds_total),
+            "elapsed_seconds_mean_per_sample": (
+                float(explain_elapsed_seconds_total) / float(explain_sample_count)
+                if explain_sample_count > 0
+                else 0.0
+            ),
         },
         "q_values": [int(q) for q in aopc_q_values],
         "per_q_values": [int(q) for q in tracked_q_values],
