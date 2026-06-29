@@ -116,8 +116,8 @@ python runs/run.py eraser_movie_reviews BERT BERT SUFFICIENCY --explained_model_
 LLM explained-model runs:
 
 ```bash
-CUDA_VISIBLE_DEVICES=3 python runs/run.py sst2 LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
-CUDA_VISIBLE_DEVICES=4 python runs/run.py rotten_tomatoes LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+CUDA_VISIBLE_DEVICES=0 python runs/run.py sst2 LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+CUDA_VISIBLE_DEVICES=1 python runs/run.py rotten_tomatoes LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
 CUDA_VISIBLE_DEVICES=3 python runs/run.py imdb LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
 CUDA_VISIBLE_DEVICES=4 python runs/run.py emotion LLAMA ROBERTA SUFFICIENCY --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
 CUDA_VISIBLE_DEVICES=3 python runs/run.py eraser_movie_reviews LLAMA ROBERTA SUFFICIENCY --eraser-root hf://eraser-benchmark/movie_rationales --explained_model_path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct

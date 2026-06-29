@@ -17,13 +17,13 @@ class MetricsFunctions:
         self.model = model
         self.explained_tokenizer = explained_tokenizer
         self.ref_token_id = ref_token_id
-        self.special_tokens = special_tokens
         self.perturbation_steps = torch.arange(10, 100, 10)
         try:
             self.device = next(self.model.parameters()).device
         except StopIteration:
             self.device = torch.device(get_device())
 
+        self.special_tokens = special_tokens.to(self.device)
         self.labels_tokens = None
 
     @staticmethod
