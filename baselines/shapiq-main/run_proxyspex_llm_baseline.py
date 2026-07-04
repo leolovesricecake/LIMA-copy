@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
+import warnings
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
@@ -15,6 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _LOCAL_SHAPIQ_SRC = Path(__file__).resolve().parent / "src"
+_PROXY_FALLBACK_WARNED: set[tuple[str, str]] = set()
 
 from lima_llm.backbone.hf_backbone import HFBackbone
 from lima_llm.chunking.utils import compose_text_from_chunk_ids
@@ -70,6 +75,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-order", type=int, default=2)
     parser.add_argument("--index", type=str, default="FBII")
     parser.add_argument("--proxy-model", type=str, default="lightgbm", choices=["lightgbm", "xgboost", "tree"])
+    parser.add_argument(
+        "--proxy-n-jobs",
+        type=int,
+        default=1,
+        help="CPU workers used by LightGBM/XGBoost proxies. Keep 1 for responsive Ctrl+C and stable memory.",
+    )
+    parser.add_argument(
+        "--quiet-proxy",
+        dest="quiet_proxy",
+        action="store_true",
+        default=True,
+        help="Suppress native stdout/stderr emitted by LightGBM/XGBoost while each proxy is fitted.",
+    )
+    parser.add_argument(
+        "--no-quiet-proxy",
+        dest="quiet_proxy",
+        action="store_false",
+        help="Do not suppress native proxy logs. Useful only when debugging the proxy backend itself.",
+    )
     parser.add_argument(
         "--sampling-weight-mode",
         type=str,
@@ -189,6 +213,141 @@ def _sampling_weights(n_players: int, mode: str) -> np.ndarray:
     if value == "uniform_coalition":
         return _stable_uniform_coalition_sampling_weights(int(n_players))
     raise ValueError(f"Unsupported sampling weight mode: {mode!r}")
+
+
+def _warn_proxy_fallback(requested: str, effective: str, reason: str) -> None:
+    key = (str(requested), str(effective))
+    if key in _PROXY_FALLBACK_WARNED:
+        return
+    _PROXY_FALLBACK_WARNED.add(key)
+    warnings.warn(
+        f"Requested ProxySPEX proxy_model={requested!r}, using {effective!r} instead. {reason}",
+        stacklevel=2,
+    )
+
+
+def _build_proxy_model(args):
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.tree import DecisionTreeRegressor
+
+    requested = str(args.proxy_model)
+    seed = int(args.seed)
+    n_jobs = int(args.proxy_n_jobs)
+
+    if requested == "tree":
+        return DecisionTreeRegressor(random_state=seed), "tree"
+
+    if requested == "lightgbm":
+        try:
+            from lightgbm import LGBMRegressor
+
+            estimator = LGBMRegressor(
+                random_state=seed,
+                n_jobs=n_jobs,
+                verbosity=-1,
+                verbose=-1,
+            )
+            if bool(args.hpo):
+                return (
+                    GridSearchCV(
+                        estimator=estimator,
+                        param_grid={
+                            "max_depth": [3, 5],
+                            "max_iter": [500, 1000],
+                            "learning_rate": [0.01, 0.1],
+                        },
+                        scoring="r2",
+                        cv=5,
+                        verbose=0,
+                        n_jobs=1,
+                    ),
+                    "lightgbm_gridsearch_quiet",
+                )
+            return estimator, "lightgbm_quiet"
+        except ImportError:
+            requested = "xgboost"
+            _warn_proxy_fallback("lightgbm", "xgboost/tree", "LightGBM is not installed.")
+
+    if requested == "xgboost":
+        try:
+            from xgboost import XGBRegressor
+
+            estimator = XGBRegressor(
+                random_state=seed,
+                n_jobs=n_jobs,
+                verbosity=0,
+            )
+            if bool(args.hpo):
+                return (
+                    GridSearchCV(
+                        estimator=estimator,
+                        param_grid={
+                            "max_depth": [3, 5],
+                            "n_estimators": [500, 1000],
+                            "learning_rate": [0.01, 0.1],
+                        },
+                        scoring="r2",
+                        cv=5,
+                        verbose=0,
+                        n_jobs=1,
+                    ),
+                    "xgboost_gridsearch_quiet",
+                )
+            return estimator, "xgboost_quiet"
+        except ImportError:
+            _warn_proxy_fallback(str(args.proxy_model), "tree", "Boosting backend is not installed.")
+
+    return DecisionTreeRegressor(random_state=seed), "tree_fallback"
+
+
+class _SuppressNativeOutput:
+    """Temporarily redirects process-level stdout/stderr, including C/C++ library logs."""
+
+    def __init__(self) -> None:
+        self._null_fd: int | None = None
+        self._stdout_fd: int | None = None
+        self._stderr_fd: int | None = None
+
+    def __enter__(self) -> "_SuppressNativeOutput":
+        sys.stdout.flush()
+        sys.stderr.flush()
+        self._null_fd = os.open(os.devnull, os.O_WRONLY)
+        self._stdout_fd = os.dup(1)
+        self._stderr_fd = os.dup(2)
+        os.dup2(self._null_fd, 1)
+        os.dup2(self._null_fd, 2)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            if self._stdout_fd is not None:
+                os.dup2(self._stdout_fd, 1)
+            if self._stderr_fd is not None:
+                os.dup2(self._stderr_fd, 2)
+        finally:
+            for fd in (self._stdout_fd, self._stderr_fd, self._null_fd):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            self._stdout_fd = None
+            self._stderr_fd = None
+            self._null_fd = None
+        return False
+
+
+@contextmanager
+def _maybe_suppress_native_output(enabled: bool):
+    with (_SuppressNativeOutput() if enabled else nullcontext()):
+        yield
 
 
 def _prompt_visible_text_span_after_left_truncation(
@@ -508,19 +667,21 @@ def _explain_sample(
             n_players=len(player_to_chunk_id),
             mode=str(args.sampling_weight_mode),
         )
+        proxy_model, effective_proxy_model = _build_proxy_model(args)
         approximator = ProxySPEX(
             n=len(player_to_chunk_id),
             max_order=effective_max_order,
             index=str(args.index),
-            proxy_model=str(args.proxy_model),
-            hpo=bool(args.hpo),
+            proxy_model=proxy_model,
+            hpo=False,
             sampling_weights=sampling_weights,
             pairing_trick=bool(args.pairing_trick),
             top_order=bool(args.top_order),
             random_state=int(args.seed),
         )
         t_proxy = time.time()
-        interaction_values = approximator.approximate(budget=int(args.budget), game=game)
+        with _maybe_suppress_native_output(bool(args.quiet_proxy)):
+            interaction_values = approximator.approximate(budget=int(args.budget), game=game)
         timing["proxyspex_seconds"] = time.time() - t_proxy
         interaction_items = _interaction_items(interaction_values)
         game_stats = game.stats()
@@ -551,7 +712,10 @@ def _explain_sample(
         if player_to_chunk_id
         else 0,
         "proxyspex_proxy_model": str(args.proxy_model),
+        "proxyspex_effective_proxy_model": str(effective_proxy_model) if player_to_chunk_id else "none",
         "proxyspex_sampling_weight_mode": str(args.sampling_weight_mode),
+        "proxyspex_proxy_n_jobs": int(args.proxy_n_jobs),
+        "proxyspex_quiet_proxy": bool(args.quiet_proxy),
         "proxyspex_hpo": bool(args.hpo),
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
@@ -669,6 +833,8 @@ def _validate_args(args) -> None:
         raise ValueError("--k must be non-negative")
     if int(args.interaction_metadata_limit) < 0:
         raise ValueError("--interaction-metadata-limit must be non-negative")
+    if int(args.proxy_n_jobs) == 0:
+        raise ValueError("--proxy-n-jobs must not be 0")
     _sampling_weights(1, str(args.sampling_weight_mode))
     if bool(args.hpo) and int(args.budget) < 5 and args.proxy_model in {"lightgbm", "xgboost"}:
         raise ValueError("HPO-backed boosting proxies need at least 5 sampled coalitions for GridSearchCV.")

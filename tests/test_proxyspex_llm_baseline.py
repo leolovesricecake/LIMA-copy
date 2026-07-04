@@ -127,6 +127,19 @@ def test_uniform_size_sampling_weights_are_available_for_ablation() -> None:
     assert weights.tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
 
 
+def test_build_proxy_model_tree_is_quiet_fallback_free() -> None:
+    args = argparse.Namespace(
+        proxy_model="tree",
+        seed=7,
+        proxy_n_jobs=1,
+        quiet_proxy=True,
+        hpo=False,
+    )
+    proxy_model, effective = RUNNER._build_proxy_model(args)
+    assert effective == "tree"
+    assert proxy_model.__class__.__name__ == "DecisionTreeRegressor"
+
+
 def test_rank_desc_scores_uses_raw_scores_and_chunk_id_tiebreak() -> None:
     ranking, selected = RUNNER._rank_desc_scores([0.0, 0.5, 0.5, -0.2], k=3)
     assert ranking == [1, 2, 0, 3]
@@ -155,6 +168,8 @@ def test_write_configs_emits_provenance(tmp_path: Path) -> None:
         max_order=2,
         index="FBII",
         proxy_model="tree",
+        proxy_n_jobs=1,
+        quiet_proxy=True,
         sampling_weight_mode="uniform_coalition",
         hpo=False,
         pairing_trick=False,

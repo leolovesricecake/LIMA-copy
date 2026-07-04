@@ -6,7 +6,9 @@ set -euo pipefail
 # Optional environment overrides:
 #   DATASETS="eraser,emotion,imdb,rtn,sst2"
 #   METHODS="saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,reagent"
+#   METHODS="lime"  # Inseq native LIME; slower
 #   MAX_SAMPLES=100
+#   N_SAMPLES=32
 #   SPLIT=validation
 #   DTYPE=bfloat16
 #   MAX_LENGTH=2048
@@ -26,6 +28,7 @@ cmd=(
   --dtype "${DTYPE:-bfloat16}"
   --max-length "${MAX_LENGTH:-2048}"
   --methods "${METHODS:-saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,reagent}"
+  --n-samples "${N_SAMPLES:-32}"
   --k "${K:-8}"
   --base-save-dir "${BASE_SAVE_DIR:-results}"
   --save-dir "${SAVE_DIR:-baselines/inseq}"

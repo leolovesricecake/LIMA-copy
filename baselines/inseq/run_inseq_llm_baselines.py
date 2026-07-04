@@ -8,7 +8,7 @@ Intended location in the repository:
 
 Supported methods:
     saliency, input_x_gradient, integrated_gradients,
-    sequential_integrated_gradients, occlusion, reagent
+    sequential_integrated_gradients, occlusion, reagent, lime
 
 The runner saves one ExplanationResult JSON per sample, rebuilds summary.csv,
 runs the existing LIMA evaluation pipeline, and stores run_config.json,
@@ -64,7 +64,7 @@ from lima_llm.utils import (
 PROMPT_PREFIX = "Text:\n"
 PROMPT_SUFFIX = "\nLabel:"
 
-SUPPORTED_METHODS = (
+DEFAULT_METHODS = (
     "saliency",
     "input_x_gradient",
     "integrated_gradients",
@@ -73,7 +73,12 @@ SUPPORTED_METHODS = (
     "reagent",
 )
 
-DEFAULT_METHODS = SUPPORTED_METHODS
+INSEQ_NATIVE_METHODS = (
+    *DEFAULT_METHODS,
+    "lime",
+)
+
+SUPPORTED_METHODS = INSEQ_NATIVE_METHODS
 
 DATASET_ALIASES = {
     "sst2": "sst2",
@@ -159,6 +164,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-steps", type=int, default=32)
     parser.add_argument("--internal-batch-size", type=int, default=8)
     parser.add_argument(
+        "--n-samples",
+        type=int,
+        default=32,
+        help="Perturbation sample count for Inseq LIME.",
+    )
+    parser.add_argument(
         "--attr-pos-start",
         type=int,
         default=None,
@@ -218,6 +229,17 @@ def _parse_methods(raw: str) -> Tuple[str, ...]:
     if unknown:
         raise ValueError(f"Unsupported Inseq methods requested: {unknown}. Supported: {SUPPORTED_METHODS}")
     return methods
+
+
+def _validate_args(args) -> None:
+    if int(args.k) < 0:
+        raise ValueError("--k must be non-negative")
+    if int(args.n_steps) <= 0:
+        raise ValueError("--n-steps must be positive")
+    if int(args.internal_batch_size) <= 0:
+        raise ValueError("--internal-batch-size must be positive")
+    if int(args.n_samples) <= 0:
+        raise ValueError("--n-samples must be positive")
 
 
 def _parse_datasets(args) -> Tuple[str, ...]:
@@ -431,6 +453,8 @@ def _method_attr_kwargs(args, method_name: str) -> Dict[str, Any]:
     if method_name in {"integrated_gradients", "sequential_integrated_gradients"}:
         kwargs["n_steps"] = int(args.n_steps)
         kwargs["internal_batch_size"] = int(args.internal_batch_size)
+    if method_name == "lime":
+        kwargs["n_samples"] = int(args.n_samples)
     if args.attr_pos_start is not None:
         kwargs["attr_pos_start"] = int(args.attr_pos_start)
     if args.attr_pos_end is not None:
@@ -879,9 +903,10 @@ def _run_method_dataset(
     )
 
     pending_samples = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
-    inseq_model = _build_inseq_model(backbone, method_name, args)
+    inseq_model = None
     try:
         if pending_samples:
+            inseq_model = _build_inseq_model(backbone, method_name, args)
             start = time.time()
             for sample in tqdm(pending_samples, desc=f"inseq-{dataset_name}-{method_name}", dynamic_ncols=True):
                 result = _explain_sample(
@@ -901,11 +926,12 @@ def _run_method_dataset(
         else:
             print(f"[resume] dataset={dataset_name} method={method_name} no pending samples")
     finally:
-        try:
-            inseq_model.unhook()
-        except Exception:
-            pass
-        del inseq_model
+        if inseq_model is not None:
+            try:
+                inseq_model.unhook()
+            except Exception:
+                pass
+            del inseq_model
         gc.collect()
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -996,9 +1022,9 @@ def _write_aggregate_reports(args, rows: Sequence[Mapping[str, Any]]) -> None:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    _require_runtime_dependencies()
-
     methods = _parse_methods(args.methods)
+    _validate_args(args)
+    _require_runtime_dependencies()
     datasets = _parse_datasets(args)
     set_seed(int(args.seed))
 

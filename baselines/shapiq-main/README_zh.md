@@ -104,6 +104,8 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --max-order 2 \
   --budget 512 \
   --proxy-model lightgbm \
+  --proxy-n-jobs 1 \
+  --quiet-proxy \
   --sampling-weight-mode uniform_coalition \
   --k 8 \
   --eval-q-values 1,5,10,20,50 \
@@ -121,7 +123,7 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset sst2 \
   --split validation \
   --sst2-source hf://nyu-mll/glue \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex \
   --device cuda:0
@@ -134,7 +136,7 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset eraser_movie_reviews \
   --split validation \
   --eraser-root hf://eraser-benchmark/movie_rationales \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex \
   --device cuda:0
@@ -146,7 +148,8 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset imdb \
   --split validation \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --base-save-dir results \
   --save-dir baselines/proxyspex \
   --device cuda:0
 ```
@@ -157,7 +160,8 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset rotten_tomatoes \
   --split validation \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --base-save-dir results \
   --save-dir baselines/proxyspex \
   --device cuda:0
 ```
@@ -168,7 +172,8 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset emotion \
   --split validation \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --base-save-dir results \
   --save-dir baselines/proxyspex \
   --device cuda:0
 ```
@@ -200,6 +205,9 @@ results/baselines/proxyspex/<dataset>/model-<model>/index-<index>_order-<order>_
 - `proxyspex_requested_max_order`
 - `proxyspex_effective_max_order`
 - `proxyspex_proxy_model`
+- `proxyspex_effective_proxy_model`
+- `proxyspex_proxy_n_jobs`
+- `proxyspex_quiet_proxy`
 - `proxyspex_sampling_weight_mode`
 - `projection_strategy`
 - `interaction_summary`
@@ -281,3 +289,29 @@ RuntimeError: The NVIDIA driver on your system is too old
 - 更新服务器 NVIDIA driver。
 - 安装和服务器 driver 匹配的 PyTorch CUDA 版本。
 - 先用 `--device cpu` 跑小样本 smoke，确认脚本逻辑和数据路径没问题。
+
+### 9) LightGBM 一直打印 `No further splits with positive gain`
+
+这个 warning 通常表示当前 coalition 样本上的 proxy tree 已经找不到能继续提升目标的分裂。对 ProxySPEX 这种每个样本都重新拟合 proxy 的流程，尤其是 HPO 会多次训练 LightGBM，因此日志会被刷很多行。
+
+新版 runner 不再把字符串 `"lightgbm"` 直接交给 shapiq 默认构造，而是自己构造安静版 proxy：
+
+- LightGBM 使用 `verbosity=-1` 和 `verbose=-1`
+- XGBoost 使用 `verbosity=0`
+- boosting proxy 默认 `--proxy-n-jobs 1`
+- HPO 外层 `GridSearchCV` 固定 `n_jobs=1`
+- 默认开启 `--quiet-proxy`，在每个样本拟合 proxy 时临时屏蔽 native stdout/stderr，避免 LightGBM C++ 层绕过 Python logging 继续刷屏
+
+如果你仍然希望最快速、最容易 Ctrl+C 的 smoke，建议先用：
+
+```bash
+--proxy-model tree --no-hpo --budget 16
+```
+
+如果要用 LightGBM 复现实验，建议保留：
+
+```bash
+--proxy-model lightgbm --proxy-n-jobs 1 --quiet-proxy
+```
+
+`Ctrl+C` 在 LightGBM/XGBoost 的 C++ 训练阶段有时不会立刻响应，这是底层库的信号处理限制。单进程 proxy 会显著改善这个问题；如果只是做脚本 smoke，`--proxy-model tree --no-hpo --budget 16` 最容易中断。
