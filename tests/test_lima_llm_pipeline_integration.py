@@ -155,11 +155,13 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     trajectory_points_csv = list(out.glob("**/trajectory_points.csv"))
     trajectory_points_jsonl = list(out.glob("**/trajectory_points.jsonl"))
     trajectory_summary_csv = list(out.glob("**/trajectory_summary.csv"))
+    curve_summary_csv = list(out.glob("**/curve_summary.csv"))
     assert summary
     assert report
-    assert trajectory_points_csv
-    assert trajectory_points_jsonl
-    assert trajectory_summary_csv
+    assert not trajectory_points_csv
+    assert not trajectory_points_jsonl
+    assert not trajectory_summary_csv
+    assert curve_summary_csv
 
     run_cfg_paths = list(out.glob("**/run_config.json"))
     eval_cfg_paths = list(out.glob("**/eval_config.json"))
@@ -186,19 +188,20 @@ def test_pipeline_mock_backbone_end_to_end(tmp_path: Path) -> None:
     assert "explain_diagnostics" in eval_report
     assert int(eval_report["explain_diagnostics"]["sample_count"]) == len(sample_jsons)
     assert eval_report["prefetch_stats"]["batch_fallback_count"] == 0
-    assert eval_report["artifacts"]["trajectory_points_csv"] == "trajectory_points.csv"
-    assert eval_report["artifacts"]["trajectory_points_jsonl"] == "trajectory_points.jsonl"
-    assert eval_report["artifacts"]["trajectory_summary_csv"] == "trajectory_summary.csv"
+    assert eval_report["artifacts"]["curve_summary_csv"] == "curve_summary.csv"
 
     predicted_aopc = float(eval_report["metrics_by_target"]["predicted"]["metrics_primary"]["aopc"])
-    trajectory_rows = pd.read_csv(trajectory_points_csv[0])
-    recomputed_aopc = float(trajectory_rows.groupby("sample_id")["prob_drop_from_full"].mean().mean())
-    assert predicted_aopc == pytest.approx(recomputed_aopc)
+    assert -1.0 <= predicted_aopc <= 1.0
+    curve_rows = pd.read_csv(curve_summary_csv[0])
+    assert set(curve_rows["curve_type"]) == {"deletion", "retention"}
+    assert {"x_percent", "keep_fraction", "delete_fraction", "remaining_fraction"}.issubset(curve_rows.columns)
+    assert "mean_target_probability" in curve_rows.columns
+    assert "mean_prob_delta_from_full" in curve_rows.columns
 
     for sample_json in sample_jsons:
         sample_payload = json.loads(sample_json.read_text(encoding="utf-8"))
-        assert "trajectory_step_count" in sample_payload
-        assert "trajectory_row_range" in sample_payload
+        assert "trajectory_step_count" not in sample_payload
+        assert "trajectory_row_range" not in sample_payload
         assert "trajectory_target" not in sample_payload
         assert "trajectory_artifact" not in sample_payload
 

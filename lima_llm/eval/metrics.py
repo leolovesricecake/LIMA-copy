@@ -12,6 +12,7 @@ from ..utils import safe_log
 
 AML_PRIMARY_Q_PERCENT = 20
 AML_AOPC_Q_VALUES = (1, 5, 10, 20, 50)
+DEFAULT_CURVE_VALUES = tuple(range(0, 101, 5))
 EMPTY_PERTURBATION_TEXT = "<EMPTY>"
 DEFAULT_REFERENCE_TOKEN_TEXT = "<UNK>"
 
@@ -33,6 +34,13 @@ def _nonempty_text(text: str) -> str:
 
 def _all_chunk_ids(chunks: Sequence[TextChunk]) -> List[int]:
     return [chunk.chunk_id for chunk in chunks]
+
+
+def _curve_top_count(total_units: int, q_percent: int) -> int:
+    if total_units <= 0:
+        return 0
+    q_clamped = min(100, max(0, int(q_percent)))
+    return int(math.floor((q_clamped / 100.0) * total_units))
 
 
 def _compose_text_replacing_chunk_ids(
@@ -135,6 +143,123 @@ def build_perturbation_plan(
         "required_text_count": int(required_text_count),
         "unique_required_text_count": len(required_texts),
     }
+
+
+def build_curve_perturbation_plan(
+    chunks: Sequence[TextChunk],
+    ranking: Sequence[int],
+    curve_values: Sequence[int] = DEFAULT_CURVE_VALUES,
+) -> Dict[str, Any]:
+    all_ids = _all_chunk_ids(chunks)
+    m = len(all_ids)
+    full_text = _nonempty_text(compose_text_from_chunk_ids(chunks, all_ids))
+
+    required_texts: List[str] = []
+    seen = set()
+
+    def _add_required(text: str) -> None:
+        if text in seen:
+            return
+        seen.add(text)
+        required_texts.append(text)
+
+    _add_required(full_text)
+
+    points: List[Dict[str, Any]] = []
+    for q in tuple(sorted(set(int(x) for x in curve_values))):
+        top_count = _curve_top_count(total_units=m, q_percent=q)
+        top_ids = [int(x) for x in ranking[:top_count]]
+        top_set = set(top_ids)
+        keep_after_delete = [int(i) for i in all_ids if int(i) not in top_set]
+
+        retention_text = (
+            full_text
+            if top_count >= m
+            else _nonempty_text(compose_text_from_chunk_ids(chunks, top_ids))
+        )
+        deletion_text = (
+            full_text
+            if top_count <= 0
+            else _nonempty_text(compose_text_from_chunk_ids(chunks, keep_after_delete))
+        )
+        _add_required(retention_text)
+        _add_required(deletion_text)
+
+        x_fraction = float(q / 100.0)
+        points.append(
+            {
+                "curve_type": "retention",
+                "x_percent": int(q),
+                "x_fraction": x_fraction,
+                "keep_fraction": x_fraction,
+                "delete_fraction": float(1.0 - x_fraction),
+                "remaining_fraction": x_fraction,
+                "top_count": int(top_count),
+                "total_units": int(m),
+                "text": retention_text,
+            }
+        )
+        points.append(
+            {
+                "curve_type": "deletion",
+                "x_percent": int(q),
+                "x_fraction": x_fraction,
+                "keep_fraction": float(1.0 - x_fraction),
+                "delete_fraction": x_fraction,
+                "remaining_fraction": float(1.0 - x_fraction),
+                "top_count": int(top_count),
+                "total_units": int(m),
+                "text": deletion_text,
+            }
+        )
+
+    return {
+        "full_text": full_text,
+        "points": points,
+        "required_texts": required_texts,
+        "required_text_count": int(1 + 2 * len(tuple(sorted(set(int(x) for x in curve_values))))),
+        "unique_required_text_count": len(required_texts),
+    }
+
+
+def perturbation_curve_points(
+    *,
+    curve_plan: Dict[str, Any],
+    target_label: int,
+    verbalizers: Sequence[str],
+    prob_fn,
+    full_probability: float | None = None,
+) -> List[Dict[str, Any]]:
+    full_text = str(curve_plan.get("full_text", EMPTY_PERTURBATION_TEXT))
+    p_full = (
+        float(full_probability)
+        if full_probability is not None
+        else float(prob_fn(full_text, verbalizers)[target_label])
+    )
+
+    points: List[Dict[str, Any]] = []
+    for raw_point in curve_plan.get("points", []):
+        text = str(raw_point.get("text", EMPTY_PERTURBATION_TEXT))
+        if text == full_text:
+            p_step = p_full
+        else:
+            p_step = float(prob_fn(text, verbalizers)[target_label])
+
+        points.append(
+            {
+                "curve_type": str(raw_point["curve_type"]),
+                "x_percent": int(raw_point["x_percent"]),
+                "x_fraction": float(raw_point["x_fraction"]),
+                "keep_fraction": float(raw_point["keep_fraction"]),
+                "delete_fraction": float(raw_point["delete_fraction"]),
+                "remaining_fraction": float(raw_point["remaining_fraction"]),
+                "top_count": int(raw_point["top_count"]),
+                "total_units": int(raw_point["total_units"]),
+                "target_probability": float(p_step),
+                "prob_delta_from_full": float(p_full - p_step),
+            }
+        )
+    return points
 
 
 def perturbation_scores_by_q(

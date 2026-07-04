@@ -22,6 +22,7 @@ from ..utils import (
     configure_determinism,
     ensure_dir,
     format_label_distribution,
+    parse_curve_values,
     parse_lambdas,
     parse_q_values,
     set_seed,
@@ -125,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hparam-max-trials", type=int, default=None)
     parser.add_argument("--hparam-enable-lambda-search", action="store_true")
 
-    parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional"])
+    parser.add_argument("--search", type=str, default="greedy", choices=["greedy", "bidirectional", "singleton"])
 
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deterministic", action="store_true")
@@ -139,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--run-eval", action="store_true")
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
+    parser.add_argument(
+        "--eval-curve-values",
+        type=str,
+        default="0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100",
+    )
     parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
     parser.add_argument("--explain-method", type=str, default="ours", choices=["ours", "random", "gradient"])
     return parser
@@ -1099,7 +1105,8 @@ def main(argv: List[str] | None = None) -> None:
         from ..eval.evaluate import evaluate_saved_explanations
 
         q_values = parse_q_values(args.eval_q_values)
-        print(f"[eval] running q_values={q_values} method={args.explain_method}")
+        curve_values = parse_curve_values(args.eval_curve_values)
+        print(f"[eval] running q_values={q_values} curve_values={curve_values} method={args.explain_method}")
         eval_started = time.time()
         eval_report = evaluate_saved_explanations(
             output_root=output_root,
@@ -1109,6 +1116,7 @@ def main(argv: List[str] | None = None) -> None:
             q_values=q_values,
             explain_method=args.explain_method,
             eval_granularity=args.eval_granularity,
+            curve_values=curve_values,
         )
         eval_report["provenance"] = build_provenance(
             stage="eval_report",

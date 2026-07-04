@@ -140,3 +140,91 @@ def test_plot_morf_curves_reads_aml_and_lima_sources(tmp_path: Path) -> None:
 
     manifest = pd.read_csv(manifest_path)
     assert set(manifest["method_name"]) == {"aml", "lime"}
+
+
+def test_plot_morf_curves_reads_curve_summary_retention(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+
+    from scripts.plot_morf_curves import main
+
+    lima_run = tmp_path / "lima" / "sst2" / "model-Qwen3-8B" / "chunk-sentence_search-singleton_method-ours"
+    lima_run.mkdir(parents = True, exist_ok = True)
+    _write_csv(
+        lima_run / "curve_summary.csv",
+        [
+            dict(
+                source_family = "lima_llm",
+                run_id = "ours-singleton-run",
+                report_stage = "EVAL",
+                dataset = "sst2",
+                split = "validation",
+                model_name = "Qwen3-8B",
+                method_name = "ours-singleton",
+                perturbation_unit = "token",
+                curve_type = "retention",
+                x_percent = 0,
+                x_fraction = 0.0,
+                keep_fraction = 0.0,
+                delete_fraction = 1.0,
+                remaining_fraction = 0.0,
+                mean_target_probability = 0.40,
+                std_target_probability = 0.00,
+                mean_prob_delta_from_full = 0.50,
+                std_prob_delta_from_full = 0.00,
+                mean_top_count = 0.0,
+                mean_total_units = 10.0,
+                sample_count = 2,
+            ),
+            dict(
+                source_family = "lima_llm",
+                run_id = "ours-singleton-run",
+                report_stage = "EVAL",
+                dataset = "sst2",
+                split = "validation",
+                model_name = "Qwen3-8B",
+                method_name = "ours-singleton",
+                perturbation_unit = "token",
+                curve_type = "retention",
+                x_percent = 100,
+                x_fraction = 1.0,
+                keep_fraction = 1.0,
+                delete_fraction = 0.0,
+                remaining_fraction = 1.0,
+                mean_target_probability = 0.90,
+                std_target_probability = 0.02,
+                mean_prob_delta_from_full = 0.00,
+                std_prob_delta_from_full = 0.00,
+                mean_top_count = 10.0,
+                mean_total_units = 10.0,
+                sample_count = 2,
+            ),
+        ],
+    )
+    (lima_run / "eval_report.json").write_text(
+        json.dumps({"report_method": "ours", "dataset": "sst2", "model_name": "Qwen3-8B", "report_stage": "EVAL"}),
+        encoding = "utf-8",
+    )
+
+    output_dir = tmp_path / "plots"
+    main(
+        [
+            "--lima-root",
+            str(tmp_path / "lima"),
+            "--output-dir",
+            str(output_dir),
+            "--curve",
+            "retention",
+            "--x",
+            "keep_fraction",
+        ]
+    )
+
+    plot_path = output_dir / "qwen3-8b-sst2.png"
+    manifest_path = output_dir / "curve_plot_manifest.csv"
+    assert plot_path.exists()
+    assert manifest_path.exists()
+
+    manifest = pd.read_csv(manifest_path)
+    assert set(manifest["method_name"]) == {"ours-singleton"}
+    assert set(manifest["curve_type"]) == {"retention"}
+    assert set(manifest["x_axis"]) == {"keep_fraction"}

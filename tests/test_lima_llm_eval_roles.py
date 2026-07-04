@@ -138,3 +138,45 @@ def test_random_method_is_reproducible_with_same_seed(tmp_path: Path) -> None:
     assert set(payloads_a.keys()) == set(payloads_b.keys())
     for sid in payloads_a:
         assert payloads_a[sid]["chunk_ranking"] == payloads_b[sid]["chunk_ranking"]
+
+
+def test_singleton_search_orders_chunks_by_independent_scores(tmp_path: Path) -> None:
+    eraser_root = tmp_path / "eraser"
+    _build_tiny_eraser(eraser_root)
+
+    out = tmp_path / "results_singleton"
+    argv = [
+        "--dataset",
+        "eraser_movie_reviews",
+        "--split",
+        "validation",
+        "--eraser-root",
+        str(eraser_root),
+        "--mock-backbone",
+        "--chunker",
+        "sentence",
+        "--search",
+        "singleton",
+        "--k",
+        "2",
+        *_save_args(out),
+        "--seed",
+        "42",
+        "--explain-method",
+        "ours",
+    ]
+    main(argv)
+
+    mdir = _method_dir(out, "ours")
+    payloads = _sample_payloads(mdir)
+    assert payloads
+    for payload in payloads.values():
+        chunk_ids = [int(chunk["chunk_id"]) for chunk in payload["chunks"]]
+        score_by_id = {
+            int(chunk_id): float(score)
+            for chunk_id, score in zip(chunk_ids, payload["chunk_scores"])
+        }
+        expected = sorted(chunk_ids, key=lambda cid: (-score_by_id[cid], cid))
+        assert payload["chunk_ranking"] == expected
+        assert payload["selected_chunk_ids"] == expected[:2]
+        assert payload["metadata"]["search"] == "singleton"

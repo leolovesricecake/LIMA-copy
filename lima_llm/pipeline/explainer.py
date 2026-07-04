@@ -163,10 +163,18 @@ class TextLIMAExplainer:
                     "total": float(score.total),
                 }
 
-            if self.config.search == "greedy":
+            search_method = str(self.config.search).strip().lower()
+            if search_method == "greedy":
                 selected, trace = run_forward_greedy(objective, candidate_ids=candidate_ids, k=max_k)
-            elif self.config.search == "bidirectional":
+            elif search_method == "bidirectional":
                 selected, trace = run_bidirectional_search(objective, candidate_ids=candidate_ids, k=max_k)
+            elif search_method == "singleton":
+                chunk_ranking = sorted(
+                    candidate_ids,
+                    key=lambda cid: (-float(singleton_gain.get(int(cid), 0.0)), int(cid)),
+                )
+                selected = list(chunk_ranking[:max_k])
+                trace = _build_rank_trace(selected=selected, score_by_chunk=singleton_gain)
             else:
                 raise ValueError(f"Unsupported search method: {self.config.search}")
 
@@ -177,9 +185,10 @@ class TextLIMAExplainer:
                 gain, _, _ = objective.evaluate_gain([], int(cid))
                 singleton_gain[int(cid)] = float(gain)
 
-            remaining = [cid for cid in candidate_ids if cid not in selected_set]
-            remaining_sorted = sorted(remaining, key=lambda cid: (-singleton_gain[cid], cid))
-            chunk_ranking = list(selected) + remaining_sorted
+            if search_method != "singleton":
+                remaining = [cid for cid in candidate_ids if cid not in selected_set]
+                remaining_sorted = sorted(remaining, key=lambda cid: (-singleton_gain[cid], cid))
+                chunk_ranking = list(selected) + remaining_sorted
             chunk_scores = [float(singleton_gain.get(chunk.chunk_id, 0.0)) for chunk in chunks]
 
             final_score = objective.evaluate_subset(selected)

@@ -12,15 +12,17 @@ from tqdm import tqdm
 
 from ..chunking.utils import chunk_char_length
 from ..types import TextChunk
-from ..utils import atomic_write_json, f1_iou_from_masks, spans_to_char_mask
+from ..utils import f1_iou_from_masks, spans_to_char_mask
 from .metrics import (
     AML_AOPC_Q_VALUES,
     AML_PRIMARY_Q_PERCENT,
+    DEFAULT_CURVE_VALUES,
     EMPTY_PERTURBATION_TEXT,
-    deletion_trajectory,
     aml_faithfulness_metrics,
     aopc_metrics,
+    build_curve_perturbation_plan,
     build_perturbation_plan,
+    perturbation_curve_points,
     top_percent_chunk_count,
 )
 from .units import (
@@ -43,6 +45,7 @@ _FLOAT_FORWARD_COUNTER_KEYS = {
 TRAJECTORY_POINTS_CSV = "trajectory_points.csv"
 TRAJECTORY_POINTS_JSONL = "trajectory_points.jsonl"
 TRAJECTORY_SUMMARY_CSV = "trajectory_summary.csv"
+CURVE_SUMMARY_CSV = "curve_summary.csv"
 
 
 def _safe_mean(xs: Sequence[float]) -> float:
@@ -295,6 +298,117 @@ def _write_trajectory_artifacts(output_root: Path, points: Sequence[Dict[str, An
     }
 
 
+def _curve_method_name(method: str, payload: Dict[str, Any]) -> str:
+    method_key = str(method).strip().lower()
+    metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata", {}), dict) else {}
+    search = str(metadata.get("search", "")).strip().lower()
+    if method_key == "ours" and search:
+        return f"{method_key}-{search}"
+    return method_key
+
+
+def _accumulate_curve_points(
+    groups: Dict[tuple, Dict[str, Any]],
+    *,
+    metadata: Dict[str, Any],
+    points: Sequence[Dict[str, Any]],
+) -> None:
+    for point in points:
+        key = (
+            metadata["source_family"],
+            metadata["run_id"],
+            metadata["report_stage"],
+            metadata["dataset"],
+            metadata["split"],
+            metadata["model_name"],
+            metadata["method_name"],
+            metadata["perturbation_unit"],
+            point["curve_type"],
+            int(point["x_percent"]),
+        )
+        group = groups.setdefault(
+            key,
+            {
+                **metadata,
+                "curve_type": str(point["curve_type"]),
+                "x_percent": int(point["x_percent"]),
+                "x_fraction": float(point["x_fraction"]),
+                "keep_fraction": float(point["keep_fraction"]),
+                "delete_fraction": float(point["delete_fraction"]),
+                "remaining_fraction": float(point["remaining_fraction"]),
+                "target_probability_sum": 0.0,
+                "target_probability_sumsq": 0.0,
+                "prob_delta_sum": 0.0,
+                "prob_delta_sumsq": 0.0,
+                "top_count_sum": 0.0,
+                "total_units_sum": 0.0,
+                "sample_count": 0,
+            },
+        )
+        target_probability = float(point["target_probability"])
+        prob_delta = float(point["prob_delta_from_full"])
+        group["target_probability_sum"] += target_probability
+        group["target_probability_sumsq"] += target_probability * target_probability
+        group["prob_delta_sum"] += prob_delta
+        group["prob_delta_sumsq"] += prob_delta * prob_delta
+        group["top_count_sum"] += float(point.get("top_count", 0.0))
+        group["total_units_sum"] += float(point.get("total_units", 0.0))
+        group["sample_count"] += 1
+
+
+def _curve_summary_rows(groups: Dict[tuple, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for group in groups.values():
+        count = int(group.get("sample_count", 0))
+        if count <= 0:
+            continue
+        mean_probability = float(group["target_probability_sum"] / count)
+        mean_delta = float(group["prob_delta_sum"] / count)
+        probability_var = float(group["target_probability_sumsq"] / count - mean_probability * mean_probability)
+        delta_var = float(group["prob_delta_sumsq"] / count - mean_delta * mean_delta)
+        rows.append(
+            {
+                "source_family": group["source_family"],
+                "run_id": group["run_id"],
+                "report_stage": group["report_stage"],
+                "dataset": group["dataset"],
+                "split": group["split"],
+                "model_name": group["model_name"],
+                "method_name": group["method_name"],
+                "perturbation_unit": group["perturbation_unit"],
+                "curve_type": group["curve_type"],
+                "x_percent": int(group["x_percent"]),
+                "x_fraction": float(group["x_fraction"]),
+                "keep_fraction": float(group["keep_fraction"]),
+                "delete_fraction": float(group["delete_fraction"]),
+                "remaining_fraction": float(group["remaining_fraction"]),
+                "mean_target_probability": mean_probability,
+                "std_target_probability": float(np.sqrt(max(probability_var, 0.0))),
+                "mean_prob_delta_from_full": mean_delta,
+                "std_prob_delta_from_full": float(np.sqrt(max(delta_var, 0.0))),
+                "mean_top_count": float(group["top_count_sum"] / count),
+                "mean_total_units": float(group["total_units_sum"] / count),
+                "sample_count": count,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            str(row["dataset"]),
+            str(row["model_name"]),
+            str(row["method_name"]),
+            str(row["curve_type"]),
+            int(row["x_percent"]),
+        )
+    )
+    return rows
+
+
+def _write_curve_summary_artifact(output_root: Path, groups: Dict[tuple, Dict[str, Any]]) -> Dict[str, str]:
+    summary_csv = output_root / CURVE_SUMMARY_CSV
+    _write_csv(summary_csv, _curve_summary_rows(groups))
+    return {"curve_summary_csv": CURVE_SUMMARY_CSV}
+
+
 def _accumulate_numeric_dict(
     totals: Dict[str, float | int],
     values: Dict[str, Any] | None,
@@ -390,6 +504,7 @@ def evaluate_saved_explanations(
     q_values: Sequence[int],
     explain_method: str,
     eval_granularity: str = "token",
+    curve_values: Sequence[int] = DEFAULT_CURVE_VALUES,
 ) -> Dict:
     method = str(explain_method).strip().lower()
     granularity = _normalize_eval_granularity(eval_granularity)
@@ -403,6 +518,9 @@ def evaluate_saved_explanations(
 
     aopc_q_values = tuple(int(q) for q in q_values) if q_values else AML_AOPC_Q_VALUES
     tracked_q_values = tuple(sorted(set((*aopc_q_values, AML_PRIMARY_Q_PERCENT))))
+    curve_q_values = tuple(sorted(set(int(q) for q in curve_values))) if curve_values else DEFAULT_CURVE_VALUES
+    if curve_q_values[0] < 0 or curve_q_values[-1] > 100:
+        raise ValueError("curve_values must be between 0 and 100")
     reference_token_text = _reference_token_text(backbone)
     eval_batch_prefetch = os.getenv("LIMA_EVAL_BATCH_PREFETCH", "1").strip().lower() not in ("0", "false", "off", "no")
     prefetch_fallback_policy = _normalize_prefetch_fallback_policy(os.getenv("LIMA_PREFETCH_FALLBACK_POLICY", "warn"))
@@ -473,8 +591,7 @@ def evaluate_saved_explanations(
     explain_forward_counters_total: Dict[str, float | int] = {}
     explain_timing_totals: Dict[str, float | int] = {}
     explain_elapsed_seconds_total = 0.0
-    trajectory_points: List[Dict[str, Any]] = []
-    sample_trajectory_ranges: Dict[str, Dict[str, int]] = {}
+    curve_groups: Dict[tuple, Dict[str, Any]] = {}
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -561,11 +678,20 @@ def evaluate_saved_explanations(
             primary_q_percent=AML_PRIMARY_Q_PERCENT,
             reference_token_text=reference_token_text,
         )
-        required_texts = list(perturbation_plan.get("required_texts", []))
-        cache_runtime["required_text_count"] += int(perturbation_plan.get("required_text_count", len(required_texts)))
-        cache_runtime["unique_text_count"] += int(
-            perturbation_plan.get("unique_required_text_count", len(required_texts))
+        curve_plan = build_curve_perturbation_plan(
+            chunks=eval_units,
+            ranking=ranking_units,
+            curve_values=curve_q_values,
         )
+        required_texts_raw = [
+            *list(perturbation_plan.get("required_texts", [])),
+            *list(curve_plan.get("required_texts", [])),
+        ]
+        required_texts = list(dict.fromkeys(str(text) for text in required_texts_raw))
+        cache_runtime["required_text_count"] += int(perturbation_plan.get("required_text_count", 0)) + int(
+            curve_plan.get("required_text_count", 0)
+        )
+        cache_runtime["unique_text_count"] += len(required_texts)
         timing_breakdown["text_build_seconds"] += time.time() - t_text_build
 
         sample_prob_cache: Dict[str, np.ndarray] = {}
@@ -648,50 +774,35 @@ def evaluate_saved_explanations(
                     perturbation_plan=perturbation_plan,
                 )
                 if mode_name == "predicted":
-                    trajectory_payload = deletion_trajectory(
-                        chunks = eval_units,
-                        ranking = ranking_units,
-                        target_label = target_label,
-                        verbalizers = verbalizers,
-                        prob_fn = _prob_fn,
-                        perturbation_plan = perturbation_plan,
+                    curve_points = perturbation_curve_points(
+                        curve_plan=curve_plan,
+                        target_label=target_label,
+                        verbalizers=verbalizers,
+                        prob_fn=_prob_fn,
+                        full_probability=float(full_probs[target_label]),
                     )
-                    trajectory_start = len(trajectory_points)
-                    target_label_text = None
-                    if 0 <= int(target_label) < len(getattr(bundle, "label_names", [])):
-                        target_label_text = str(bundle.label_names[int(target_label)])
-                    elif 0 <= int(target_label) < len(verbalizers):
-                        target_label_text = str(verbalizers[int(target_label)])
-                    for point in trajectory_payload["points"]:
-                        trajectory_points.append(
-                            {
-                                "source_family": "lima_llm",
-                                "run_id": str(output_root.name),
-                                "report_stage": "EVAL",
-                                "dataset": str(bundle.dataset_name),
-                                "split": str(bundle.split),
-                                "model_name": str(model_name),
-                                "method_name": str(method),
-                                "sample_id": str(sample_id),
-                                "target_label_id": int(target_label),
-                                "target_label_text": target_label_text,
-                                "step_index": int(point["step_index"]),
-                                "total_steps": int(point["total_steps"]),
-                                "delete_count": int(point["delete_count"]),
-                                "delete_fraction": float(point["delete_fraction"]),
-                                "remaining_fraction": float(point["remaining_fraction"]),
-                                "target_probability": float(point["target_probability"]),
-                                "prob_drop_from_full": float(point["prob_drop_from_full"]),
-                                "is_full_text_step": bool(point["is_full_text_step"]),
-                                "deleted_ids": list(point["deleted_ids"]),
-                            }
-                        )
-                    sample_trajectory_ranges[str(sample_id)] = {
-                        "start_row": int(trajectory_start),
-                        "end_row_exclusive": int(len(trajectory_points)),
-                        "step_count": int(len(trajectory_payload["points"])),
-                    }
-                    aopc_payload = {"aopc": float(trajectory_payload["aopc"])}
+                    _accumulate_curve_points(
+                        curve_groups,
+                        metadata={
+                            "source_family": "lima_llm",
+                            "run_id": str(output_root.name),
+                            "report_stage": "EVAL",
+                            "dataset": str(bundle.dataset_name),
+                            "split": str(bundle.split),
+                            "model_name": str(model_name),
+                            "method_name": _curve_method_name(method, payload),
+                            "perturbation_unit": str(granularity),
+                        },
+                        points=curve_points,
+                    )
+                    aopc_payload = aopc_metrics(
+                        chunks=eval_units,
+                        ranking=ranking_units,
+                        target_label=target_label,
+                        verbalizers=verbalizers,
+                        prob_fn=_prob_fn,
+                        perturbation_plan=perturbation_plan,
+                    )
                 else:
                     aopc_payload = aopc_metrics(
                         chunks = eval_units,
@@ -759,20 +870,7 @@ def evaluate_saved_explanations(
         "gold": _mode_report(mode_states["gold"], total, method),
         "predicted": _mode_report(mode_states["predicted"], total, method),
     }
-    trajectory_artifacts = _write_trajectory_artifacts(output_root, trajectory_points)
-
-    for sample_json in sample_jsons:
-        payload = json.loads(sample_json.read_text(encoding = "utf-8"))
-        sample_id = str(payload.get("sample_id", ""))
-        if sample_id not in sample_trajectory_ranges:
-            continue
-        row_range = sample_trajectory_ranges[sample_id]
-        payload["trajectory_step_count"] = int(row_range["step_count"])
-        payload["trajectory_row_range"] = {
-            "start_row": int(row_range["start_row"]),
-            "end_row_exclusive": int(row_range["end_row_exclusive"]),
-        }
-        atomic_write_json(sample_json, payload)
+    curve_artifacts = _write_curve_summary_artifact(output_root, curve_groups)
 
     report = {
         "report_method": method,
@@ -783,6 +881,8 @@ def evaluate_saved_explanations(
             "protocol": "AML",
             "primary_top_k_percent": int(AML_PRIMARY_Q_PERCENT),
             "aopc_top_k_percentages": [int(q) for q in aopc_q_values],
+            "curve_percentages": [int(q) for q in curve_q_values],
+            "curve_target": "predicted",
             "aopc_average_denominator": "len(top_k_percentages)+1",
             "morf_average_denominator": "num_deletion_steps",
             "perturbation_target": "predicted",
@@ -872,7 +972,7 @@ def evaluate_saved_explanations(
         "backbone_batch_stats": backbone_batch_stats,
         "artifacts": {
             "eval_report_json": "eval_report.json",
-            **trajectory_artifacts,
+            **curve_artifacts,
         },
     }
     return report

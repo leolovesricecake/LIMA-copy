@@ -17,6 +17,7 @@ import pandas as pd
 TRAJECTORY_SUMMARY_CSV = "trajectory_summary.csv"
 TRAJECTORY_POINTS_CSV = "trajectory_points.csv"
 TRAJECTORY_POINTS_JSONL = "trajectory_points.jsonl"
+CURVE_SUMMARY_CSV = "curve_summary.csv"
 
 SUMMARY_GROUP_COLUMNS = [
     "source_family",
@@ -152,12 +153,24 @@ def _load_summary(path: Path, fallback_source_family: str) -> pd.DataFrame:
     return frame
 
 
+def _load_curve_summary(path: Path, fallback_source_family: str) -> pd.DataFrame:
+    frame = pd.read_csv(path)
+    frame = _fill_metadata_from_report(frame, path.parent, fallback_source_family)
+    return frame
+
+
 def _scan_roots(roots: Sequence[str], fallback_source_family: str) -> List[pd.DataFrame]:
     frames: List[pd.DataFrame] = []
     seen_run_dirs = set()
     for root in roots:
         root_path = Path(root)
+        for curve_path in sorted(root_path.rglob(CURVE_SUMMARY_CSV)):
+            seen_run_dirs.add(curve_path.parent.resolve())
+            frames.append(_load_curve_summary(curve_path, fallback_source_family))
+
         for summary_path in sorted(root_path.rglob(TRAJECTORY_SUMMARY_CSV)):
+            if summary_path.parent.resolve() in seen_run_dirs:
+                continue
             seen_run_dirs.add(summary_path.parent.resolve())
             frames.append(_load_summary(summary_path, fallback_source_family))
 
@@ -175,7 +188,7 @@ def _prepare_frame(aml_roots: Sequence[str], lima_roots: Sequence[str]) -> pd.Da
     frames.extend(_scan_roots(aml_roots, "aml"))
     frames.extend(_scan_roots(lima_roots, "lima_llm"))
     if not frames:
-        raise SystemExit("No trajectory_summary.csv or trajectory_points files were found.")
+        raise SystemExit("No curve_summary.csv, trajectory_summary.csv, or trajectory_points files were found.")
 
     frame = pd.concat(frames, ignore_index = True)
     frame["dataset"] = frame["dataset"].map(_canonical_dataset_name)
@@ -183,6 +196,17 @@ def _prepare_frame(aml_roots: Sequence[str], lima_roots: Sequence[str]) -> pd.Da
     frame["method_name"] = frame["method_name"].map(_normalize_method_name)
     frame["report_stage"] = frame["report_stage"].fillna("").map(lambda value: str(value).strip())
     frame["run_id"] = frame["run_id"].fillna("").map(lambda value: str(value).strip())
+    if "curve_type" not in frame.columns:
+        frame["curve_type"] = "deletion"
+    frame["curve_type"] = frame["curve_type"].fillna("deletion").map(lambda value: str(value).strip().lower())
+    if "mean_prob_delta_from_full" not in frame.columns and "mean_prob_drop_from_full" in frame.columns:
+        frame["mean_prob_delta_from_full"] = frame["mean_prob_drop_from_full"]
+    if "std_prob_delta_from_full" not in frame.columns and "std_prob_drop_from_full" in frame.columns:
+        frame["std_prob_delta_from_full"] = frame["std_prob_drop_from_full"]
+    if "mean_prob_drop_from_full" not in frame.columns and "mean_prob_delta_from_full" in frame.columns:
+        frame["mean_prob_drop_from_full"] = frame["mean_prob_delta_from_full"]
+    if "std_prob_drop_from_full" not in frame.columns and "std_prob_delta_from_full" in frame.columns:
+        frame["std_prob_drop_from_full"] = frame["std_prob_delta_from_full"]
     return frame
 
 
@@ -231,14 +255,16 @@ def _plot_group(
         *,
         output_dir: Path,
         y_mode: str,
+        x_col: str,
         title_template: str,
         dpi: int) -> List[Dict[str, object]]:
     group = group.copy()
     group["line_label"] = pd.Series(_line_label_map(group))
 
-    mean_col = "mean_target_probability" if y_mode == "probability" else "mean_prob_drop_from_full"
-    std_col = "std_target_probability" if y_mode == "probability" else "std_prob_drop_from_full"
+    mean_col = "mean_target_probability" if y_mode == "probability" else "mean_prob_delta_from_full"
+    std_col = "std_target_probability" if y_mode == "probability" else "std_prob_delta_from_full"
     ylabel = "Target Probability" if y_mode == "probability" else "Probability Drop From Full"
+    xlabel = x_col.replace("_", " ").title()
 
     dataset = str(group["dataset"].iloc[0])
     model_name = str(group["model_name"].iloc[0])
@@ -249,28 +275,27 @@ def _plot_group(
 
     for line_label, line_group in sorted(group.groupby("line_label"), key = lambda item: item[0]):
         pooled_rows = []
-        for _, step_group in line_group.groupby(["step_index", "delete_fraction"], dropna = False):
+        for _, step_group in line_group.groupby([x_col], dropna = False):
             stats = _pooled_stats(step_group, mean_col = mean_col, std_col = std_col)
             first_row = step_group.iloc[0]
             pooled_rows.append(
                 {
-                    "step_index": int(first_row["step_index"]),
-                    "delete_fraction": float(first_row["delete_fraction"]),
+                    "x": float(first_row[x_col]),
                     "mean": float(stats["mean"]),
                     "std": float(stats["std"]),
                 }
             )
 
-        pooled_frame = pd.DataFrame(pooled_rows).sort_values(["delete_fraction", "step_index"])
+        pooled_frame = pd.DataFrame(pooled_rows).sort_values(["x"])
         ax.plot(
-            pooled_frame["delete_fraction"].to_numpy(),
+            pooled_frame["x"].to_numpy(),
             pooled_frame["mean"].to_numpy(),
             linewidth = 2.0,
             label = line_label,
         )
         if len(pooled_frame) > 1 and float(pooled_frame["std"].max()) > 0.0:
             ax.fill_between(
-                pooled_frame["delete_fraction"].to_numpy(),
+                pooled_frame["x"].to_numpy(),
                 (pooled_frame["mean"] - pooled_frame["std"]).to_numpy(),
                 (pooled_frame["mean"] + pooled_frame["std"]).to_numpy(),
                 alpha = 0.18,
@@ -287,12 +312,14 @@ def _plot_group(
                 "report_stages": ",".join(sorted({str(value) for value in line_group["report_stage"].tolist() if str(value)})),
                 "run_ids": ",".join(sorted({str(value) for value in line_group["run_id"].tolist() if str(value)})),
                 "sample_count": int(run_sample_counts["sample_count"].sum()) if not run_sample_counts.empty else 0,
-                "step_count": int(pooled_frame["step_index"].nunique()),
+                "curve_type": ",".join(sorted({str(value) for value in line_group["curve_type"].tolist() if str(value)})),
+                "x_axis": x_col,
+                "step_count": int(pooled_frame["x"].nunique()),
                 "output_png": str(output_path),
             }
         )
 
-    ax.set_xlabel("Delete Fraction")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title_template.format(model_name = model_name, dataset = dataset))
     ax.set_xlim(0.0, 1.0)
@@ -306,11 +333,18 @@ def _plot_group(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description = "Plot MoRF perturbation curves from AML and lima_llm trajectory artifacts.")
+    parser = argparse.ArgumentParser(description = "Plot perturbation curves from AML and lima_llm curve artifacts.")
     parser.add_argument("--aml-root", action = "append", default = [], help = "AML result root. Can be passed multiple times.")
     parser.add_argument("--lima-root", action = "append", default = [], help = "lima_llm result root. Can be passed multiple times.")
     parser.add_argument("--output-dir", required = True, help = "Directory to save <model_name>-<dataset>.png outputs.")
     parser.add_argument("--y", choices = ["probability", "drop"], default = "probability", help = "Y-axis metric.")
+    parser.add_argument("--curve", choices = ["deletion", "retention"], default = "deletion", help = "Curve family to plot.")
+    parser.add_argument(
+        "--x",
+        choices = ["auto", "delete_fraction", "remaining_fraction", "keep_fraction"],
+        default = "auto",
+        help = "X-axis field. auto uses keep_fraction for retention and delete_fraction for deletion.",
+    )
     parser.add_argument("--dataset", action = "append", default = [], help = "Optional dataset filter. Can be repeated.")
     parser.add_argument("--model", action = "append", default = [], help = "Optional model filter. Can be repeated.")
     parser.add_argument("--method", action = "append", default = [], help = "Optional method filter. Can be repeated.")
@@ -328,8 +362,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     frame = _prepare_frame(args.aml_root, args.lima_root)
     frame = _apply_filters(frame, args.dataset, args.model, args.method)
+    frame = frame[frame["curve_type"] == str(args.curve)]
     if frame.empty:
-        raise SystemExit("No trajectory data remained after applying filters.")
+        raise SystemExit("No curve data remained after applying filters.")
+    x_col = str(args.x)
+    if x_col == "auto":
+        x_col = "keep_fraction" if str(args.curve) == "retention" else "delete_fraction"
+    if x_col not in frame.columns:
+        raise SystemExit(f"Requested x-axis column is unavailable: {x_col}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents = True, exist_ok = True)
@@ -341,6 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 group,
                 output_dir = output_dir,
                 y_mode = args.y,
+                x_col = x_col,
                 title_template = args.title_template,
                 dpi = args.dpi,
             )

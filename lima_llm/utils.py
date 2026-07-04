@@ -160,6 +160,18 @@ def parse_q_values(raw: str) -> Tuple[int, ...]:
     return values
 
 
+def parse_curve_values(raw: str) -> Tuple[int, ...]:
+    items = [x.strip() for x in raw.split(",") if x.strip() != ""]
+    if not items:
+        raise ValueError("--eval-curve-values must not be empty")
+    values = tuple(sorted(set(int(x) for x in items)))
+    if values[0] < 0:
+        raise ValueError("eval curve values must be >= 0")
+    if values[-1] > 100:
+        raise ValueError("eval curve values must be <= 100")
+    return values
+
+
 def safe_log(x: float, eps: float = 1e-12) -> float:
     return math.log(max(x, eps))
 
