@@ -36,20 +36,16 @@
 pip install inseq transformers captum
 ```
 
-Inseq 的 LIME 实现依赖 Captum，因此建议按上面的命令安装。
-
-## 4. 常用命令
-
-默认旧方法集合：
-
-```bash
-CUDA_VISIBLE_DEVICES=3 python baselines/inseq/run_inseq_llm_baselines.py \
-  --datasets imdb \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+<!-- saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime -->
+# todo: eraser-occlusion
+# failed: eraser-ig,sig
+CUDA_VISIBLE_DEVICES=7 python baselines/inseq/run_inseq_llm_baselines.py \
+  --datasets eraser \
+  --model-path /mnt/huawei/nsq/models/meta-llama/Llama-3.1-8B-Instruct \
   --dtype bfloat16 \
   --max-length 2048 \
-  --methods saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,reagent \
-  --k 8 \
+  --methods occlusion,lime \
+  --k 8 
   --target-mode gold \
   --eval-q-values 1,5,10,20,50 \
   --eval-granularity token \
@@ -57,40 +53,6 @@ CUDA_VISIBLE_DEVICES=3 python baselines/inseq/run_inseq_llm_baselines.py \
   --save-dir baselines/inseq \
   --device cuda \
   --deterministic
-```
-
-只跑 LIME：
-
-```bash
-CUDA_VISIBLE_DEVICES=3 python baselines/inseq/run_inseq_llm_baselines.py \
-  --dataset sst2 \
-  --max-samples 20 \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-  --dtype bfloat16 \
-  --max-length 2048 \
-  --methods lime \
-  --n-samples 32 \
-  --k 8 \
-  --target-mode gold \
-  --eval-q-values 1,5,10,20,50 \
-  --eval-granularity token \
-  --base-save-dir results \
-  --save-dir baselines/inseq \
-  --device cuda
-```
-
-快速 smoke：
-
-```bash
-CUDA_VISIBLE_DEVICES=4 python baselines/inseq/run_inseq_llm_baselines.py \
-  --dataset all \
-  --max-samples 3 \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-  --device cuda \
-  --methods lime \
-  --n-samples 8 \
-  --base-save-dir results \
-  --save-dir smoke-inseq-lime
 ```
 
 ## 5. 输出
