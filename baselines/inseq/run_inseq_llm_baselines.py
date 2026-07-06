@@ -79,6 +79,7 @@ INSEQ_NATIVE_METHODS = (
 )
 
 SUPPORTED_METHODS = INSEQ_NATIVE_METHODS
+_INSEQ_LIME_BFLOAT16_PATCHED = False
 
 DATASET_ALIASES = {
     "sst2": "sst2",
@@ -421,11 +422,89 @@ def _reagent_load_kwargs(args) -> Dict[str, Any]:
     }
 
 
+def _tensor_to_numpy_list_for_inseq_lime(value):
+    if torch is not None and isinstance(value, torch.Tensor):
+        value = value.detach().cpu()
+        if value.dtype == torch.bfloat16:
+            value = value.float()
+        return value.numpy().tolist()
+    return value
+
+
+def _patch_inseq_lime_bfloat16_numpy() -> None:
+    """Patch Inseq 0.7.x LIME so bf16 tensors are cast before numpy conversion."""
+    global _INSEQ_LIME_BFLOAT16_PATCHED
+    if _INSEQ_LIME_BFLOAT16_PATCHED:
+        return
+    if torch is None:
+        return
+
+    from inseq.attr.feat.ops.lime import Lime
+
+    current = getattr(Lime, "perturb_func", None)
+    if getattr(current, "_lima_bfloat16_safe", False):
+        _INSEQ_LIME_BFLOAT16_PATCHED = True
+        return
+
+    def perturb_func(
+        self,
+        original_input_tuple: tuple = (),
+        mask_prob: float = 0.3,
+        mask_token: str = "unk",
+        **kwargs: Any,
+    ) -> tuple:
+        perturbed_inputs = []
+        for original_input_tensor in original_input_tuple:
+            mask_value_probs = torch.tensor([mask_prob, 1 - mask_prob])
+            mask_multinomial_binary = torch.multinomial(
+                mask_value_probs, len(original_input_tensor[0]), replacement=True
+            )
+
+            mask_special_token_ids = torch.Tensor(
+                [
+                    1 if id_ in self.attribution_model.special_tokens_ids else 0
+                    for id_ in _tensor_to_numpy_list_for_inseq_lime(original_input_tensor[0])
+                ]
+            ).int()
+
+            mask = (
+                torch.tensor(
+                    [
+                        m + s if s == 0 else s
+                        for m, s in zip(mask_multinomial_binary, mask_special_token_ids, strict=False)
+                    ]
+                )
+                .to(self.attribution_model.device)
+                .unsqueeze(-1)
+            )
+
+            if mask_token == "unk":
+                tokenizer_mask_token = self.attribution_model.tokenizer.unk_token_id
+            elif mask_token == "pad":
+                tokenizer_mask_token = self.attribution_model.tokenizer.pad_token_id
+            else:
+                raise ValueError(f"Invalid mask token {mask_token} for tokenizer: {self.attribution_model.tokenizer}")
+            if tokenizer_mask_token is None:
+                tokenizer_mask_token = self.attribution_model.tokenizer.eos_token_id
+            if tokenizer_mask_token is None:
+                raise ValueError(f"Tokenizer has no {mask_token!r}, pad, or eos token id for LIME masking.")
+
+            perturbed_inputs.append(original_input_tensor * mask + (1 - mask) * int(tokenizer_mask_token))
+
+        return tuple(perturbed_inputs)
+
+    perturb_func._lima_bfloat16_safe = True  # type: ignore[attr-defined]
+    Lime.perturb_func = perturb_func
+    _INSEQ_LIME_BFLOAT16_PATCHED = True
+
+
 def _build_inseq_model(backbone: HFBackbone, method_name: str, args):
     import inseq
 
     # Reuse the already-loaded HF model/tokenizer to avoid loading a second copy of the LLM.
     # Inseq accepts PreTrainedModel and PreTrainedTokenizerBase objects.
+    if method_name == "lime":
+        _patch_inseq_lime_bfloat16_numpy()
     method_kwargs = _reagent_load_kwargs(args) if method_name == "reagent" else {}
     model = inseq.load_model(
         backbone.model,
