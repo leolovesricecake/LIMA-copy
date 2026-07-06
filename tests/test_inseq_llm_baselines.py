@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -57,3 +58,23 @@ def test_method_cli_args_records_dataset_and_method() -> None:
     payload = RUNNER._method_cli_args(args, "sst2", "lime")
     assert payload["dataset"] == "sst2"
     assert payload["method"] == "lime"
+
+
+def test_scan_resume_skips_strict_completed_samples(tmp_path: Path) -> None:
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    payload = {
+        "explain_method": "lime",
+        "chunk_ranking": [0],
+        "chunk_scores": [0.5],
+        "selected_chunk_ids": [0],
+        "trace": [],
+    }
+    (sample_dir / "done.json").write_text(json.dumps(payload), encoding="utf-8")
+    (sample_dir / "done.txt").write_text("selected text", encoding="utf-8")
+
+    done = argparse.Namespace(sample_id="done")
+    todo = argparse.Namespace(sample_id="todo")
+    pending = RUNNER._scan_resume([done, todo], output_root=tmp_path, resume_mode="strict")
+
+    assert [sample.sample_id for sample in pending] == ["todo"]
