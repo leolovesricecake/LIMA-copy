@@ -13,24 +13,7 @@ _FLOAT_FORWARD_COUNTER_KEYS = {
     "batch_pack_seconds",
     "batch_forward_seconds",
 }
-
-
-def _get_nested(payload: Dict[str, Any], path: str) -> Any:
-    current: Any = payload
-    for key in path.split("."):
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
-
-
-def _flatten_dict(prefix: str, payload: Dict[str, Any], out: Dict[str, Any]) -> None:
-    for key, value in payload.items():
-        child_prefix = f"{prefix}.{key}" if prefix else str(key)
-        if isinstance(value, dict):
-            _flatten_dict(child_prefix, value, out)
-        else:
-            out[child_prefix] = value
+_MODEL_INVOCATION_COUNTER_KEYS = ("predict_calls", "embed_calls", "gradient_calls")
 
 
 def _accumulate_numeric_dict(
@@ -55,6 +38,62 @@ def _divide_numeric_dict(values: Dict[str, float | int], denominator: int) -> Di
     if denominator <= 0:
         return {}
     return {key: float(value) / float(denominator) for key, value in values.items()}
+
+
+def _numeric_dict(values: Any) -> Dict[str, float | int]:
+    if not isinstance(values, dict):
+        return {}
+    out: Dict[str, float | int] = {}
+    for key, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if key in _FLOAT_FORWARD_COUNTER_KEYS or isinstance(value, float):
+            out[str(key)] = float(value)
+        else:
+            out[str(key)] = int(value)
+    return out
+
+
+def _positive_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, int(value))
+
+
+def _counter_value(counters: Dict[str, float | int], key: str) -> float:
+    value = counters.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
+def _sum_model_invocations(counters: Dict[str, float | int]) -> float:
+    return float(sum(_counter_value(counters, key) for key in _MODEL_INVOCATION_COUNTER_KEYS))
+
+
+def _add_explain_model_call_fields(row: Dict[str, Any], report: Dict[str, Any]) -> None:
+    metrics_secondary = report.get("metrics_secondary", {})
+    if not isinstance(metrics_secondary, dict):
+        metrics_secondary = {}
+    explain_diagnostics = report.get("explain_diagnostics", {})
+    if not isinstance(explain_diagnostics, dict):
+        explain_diagnostics = {}
+
+    sample_count = _positive_int(report.get("sample_count"))
+    explain_sample_count = _positive_int(explain_diagnostics.get("sample_count")) or sample_count
+
+    explain_total = _numeric_dict(metrics_secondary.get("explain_forward_counters_total"))
+    if not explain_total:
+        explain_total = _numeric_dict(explain_diagnostics.get("forward_counters_total"))
+    if not explain_total:
+        row["explain_model_calls_total"] = 0.0
+        row["explain_model_calls_mean_per_sample"] = 0.0
+        return
+
+    total_calls = _sum_model_invocations(explain_total)
+    mean_calls = total_calls / float(explain_sample_count) if explain_sample_count > 0 else 0.0
+    row["explain_model_calls_total"] = total_calls
+    row["explain_model_calls_mean_per_sample"] = mean_calls
 
 
 def _aggregate_explain_stats_from_samples(method_dir: Path) -> Dict[str, Any]:
@@ -116,7 +155,7 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
     - dataset / model / method
     - report_method / split / sample_count
     - metrics_primary 中的所有指标
-    - 关键调用次数与耗时统计
+    - explain_model_calls_total / explain_model_calls_mean_per_sample
     """
     rows: List[Dict[str, Any]] = []
 
@@ -201,36 +240,7 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                     "sample_count": report.get("sample_count"),
                 }
                 row.update(metrics)
-
-                for nested_path in [
-                    "metrics_secondary.forward_counters_delta",
-                    "metrics_secondary.eval_forward_counters_delta",
-                    "metrics_secondary.explain_forward_counters_total",
-                    "metrics_secondary.explain_forward_counters_mean_per_sample",
-                    "metrics_secondary.timing_breakdown",
-                    "metrics_secondary.explain_timing_totals",
-                    "metrics_secondary.explain_timing_mean_per_sample",
-                    "explain_diagnostics.forward_counters_total",
-                    "explain_diagnostics.forward_counters_mean_per_sample",
-                    "explain_diagnostics.timing_totals",
-                    "explain_diagnostics.timing_mean_per_sample",
-                ]:
-                    nested_value = _get_nested(report, nested_path)
-                    if isinstance(nested_value, dict):
-                        _flatten_dict(nested_path, nested_value, row)
-                    elif nested_value is not None:
-                        row[nested_path] = nested_value
-
-                for scalar_path in [
-                    "metrics_secondary.runtime_seconds",
-                    "metrics_secondary.explain_elapsed_seconds_total",
-                    "metrics_secondary.explain_elapsed_seconds_mean_per_sample",
-                    "explain_diagnostics.elapsed_seconds_total",
-                    "explain_diagnostics.elapsed_seconds_mean_per_sample",
-                ]:
-                    scalar_value = _get_nested(report, scalar_path)
-                    if scalar_value is not None:
-                        row[scalar_path] = scalar_value
+                _add_explain_model_call_fields(row, report)
 
                 rows.append(row)
 
