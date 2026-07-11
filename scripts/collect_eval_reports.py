@@ -71,6 +71,14 @@ def _sum_model_invocations(counters: Dict[str, float | int]) -> float:
     return float(sum(_counter_value(counters, key) for key in _MODEL_INVOCATION_COUNTER_KEYS))
 
 
+def _has_report_explain_counters(report: Dict[str, Any]) -> bool:
+    metrics_secondary = report.get("metrics_secondary", {})
+    if isinstance(metrics_secondary, dict) and isinstance(metrics_secondary.get("explain_forward_counters_total"), dict):
+        return True
+    explain_diagnostics = report.get("explain_diagnostics", {})
+    return isinstance(explain_diagnostics, dict) and isinstance(explain_diagnostics.get("forward_counters_total"), dict)
+
+
 def _add_explain_model_call_fields(row: Dict[str, Any], report: Dict[str, Any]) -> None:
     metrics_secondary = report.get("metrics_secondary", {})
     if not isinstance(metrics_secondary, dict):
@@ -195,9 +203,11 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                     print(f"[WARN] Failed to read JSON: {report_path} ({e})")
                     continue
 
-                explain_stats_fallback = _aggregate_explain_stats_from_samples(method_dir)
-                if explain_stats_fallback and not isinstance(report.get("explain_diagnostics"), dict):
-                    report["explain_diagnostics"] = explain_stats_fallback
+                explain_stats_fallback = {}
+                if not _has_report_explain_counters(report):
+                    explain_stats_fallback = _aggregate_explain_stats_from_samples(method_dir)
+                    if explain_stats_fallback and not isinstance(report.get("explain_diagnostics"), dict):
+                        report["explain_diagnostics"] = explain_stats_fallback
                 if explain_stats_fallback:
                     metrics_secondary = report.setdefault("metrics_secondary", {})
                     if not isinstance(metrics_secondary.get("explain_forward_counters_total"), dict):
