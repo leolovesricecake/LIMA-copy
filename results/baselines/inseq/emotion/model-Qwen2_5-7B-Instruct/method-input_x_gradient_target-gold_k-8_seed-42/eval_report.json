@@ -13,7 +13,33 @@
       20,
       50
     ],
+    "curve_percentages": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45,
+      50,
+      55,
+      60,
+      65,
+      70,
+      75,
+      80,
+      85,
+      90,
+      95,
+      100
+    ],
+    "curve_target": "predicted",
     "aopc_average_denominator": "len(top_k_percentages)+1",
+    "morf_average_denominator": "num_deletion_steps",
+    "perturbation_target": "predicted",
     "log_odds_reference_token": "<|endoftext|>",
     "perturbation_unit": "token",
     "unit_segmentation": "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable",
@@ -32,7 +58,7 @@
     "sufficiency": 0.10228619295559951,
     "aopc_sufficiency": 0.05004428290587479,
     "aopc_comprehensiveness": 0.02779407067609327,
-    "aopc": 0.09596229084424465
+    "aopc": 0.0958512687167162
   },
   "metrics_secondary": {
     "sparsity": 0.5363330742529344,
@@ -42,22 +68,39 @@
     "selected_all_ratio": 0.1535,
     "plausibility_available": false,
     "plausibility_coverage_ratio": 0.0,
-    "runtime_seconds": 1974.5692791938782,
+    "runtime_seconds": 4120.389777183533,
     "forward_counters_delta": {
-      "model_forward_calls": 78798,
-      "batch_pack_seconds": 20.592195926699787,
-      "batch_rows": 49586,
       "gradient_calls": 0,
-      "batch_tokenize_calls": 13133,
-      "batch_forward_seconds": 1813.0890506352298,
-      "oom_shrink_events": 0,
-      "batch_pack_calls": 78798,
-      "batch_forward_calls": 78798,
       "embed_calls": 0,
-      "predict_calls": 49586,
-      "batch_tokenize_seconds": 5.505035929963924,
-      "batch_calls": 2000
+      "batch_rows": 71820,
+      "batch_tokenize_seconds": 11.504741854034364,
+      "predict_calls": 71820,
+      "batch_pack_calls": 112986,
+      "batch_forward_calls": 112986,
+      "batch_forward_seconds": 2709.30707764579,
+      "batch_calls": 2000,
+      "batch_tokenize_calls": 18831,
+      "batch_pack_seconds": 164.22956905933097,
+      "oom_shrink_events": 0,
+      "model_forward_calls": 112986
     },
+    "eval_forward_counters_delta": {
+      "gradient_calls": 0,
+      "embed_calls": 0,
+      "batch_rows": 71820,
+      "batch_tokenize_seconds": 11.504741854034364,
+      "predict_calls": 71820,
+      "batch_pack_calls": 112986,
+      "batch_forward_calls": 112986,
+      "batch_forward_seconds": 2709.30707764579,
+      "batch_calls": 2000,
+      "batch_tokenize_calls": 18831,
+      "batch_pack_seconds": 164.22956905933097,
+      "oom_shrink_events": 0,
+      "model_forward_calls": 112986
+    },
+    "explain_forward_counters_total": {},
+    "explain_forward_counters_mean_per_sample": {},
     "method_diagnostics": {
       "evaluated_samples": 2000,
       "failed_samples": 0,
@@ -65,16 +108,20 @@
       "error_examples": []
     },
     "timing_breakdown": {
-      "unit_build_seconds": 1.1379921436309814,
-      "text_build_seconds": 0.6526219844818115,
-      "prefetch_seconds": 1961.101307630539,
-      "metric_compute_seconds": 0.3793184757232666
+      "unit_build_seconds": 1.4207310676574707,
+      "text_build_seconds": 1.2868385314941406,
+      "prefetch_seconds": 4102.564831733704,
+      "metric_compute_seconds": 0.9702861309051514
     },
+    "explain_timing_totals": {},
+    "explain_timing_mean_per_sample": {},
+    "explain_elapsed_seconds_total": 0.0,
+    "explain_elapsed_seconds_mean_per_sample": 0.0,
     "cache_stats": {
-      "required_text_count": 65174,
-      "unique_text_count": 49586,
-      "cache_requests": 126020,
-      "cache_hits": 126020,
+      "required_text_count": 151174,
+      "unique_text_count": 71820,
+      "cache_requests": 204268,
+      "cache_hits": 204268,
       "cache_misses": 0,
       "cache_hit_rate": 1.0
     },
@@ -85,21 +132,21 @@
       "batch_attempt_count": 2000,
       "batch_success_count": 2000,
       "batch_fallback_count": 0,
-      "prefetched_text_count": 49586,
-      "missing_text_count": 49586,
+      "prefetched_text_count": 71820,
+      "missing_text_count": 71820,
       "fallback_error_examples": []
     },
     "backbone_batch_stats": {
       "batch_calls": 2000,
-      "batch_rows": 49586,
-      "model_forward_calls": 78798,
+      "batch_rows": 71820,
+      "model_forward_calls": 112986,
       "oom_shrink_events": 0,
-      "batch_tokenize_calls": 13133,
-      "batch_pack_calls": 78798,
-      "batch_forward_calls": 78798,
-      "batch_tokenize_seconds": 5.505035929963924,
-      "batch_pack_seconds": 20.592195926699787,
-      "batch_forward_seconds": 1813.0890506352298
+      "batch_tokenize_calls": 18831,
+      "batch_pack_calls": 112986,
+      "batch_forward_calls": 112986,
+      "batch_tokenize_seconds": 11.504741854034364,
+      "batch_pack_seconds": 164.22956905933097,
+      "batch_forward_seconds": 2709.30707764579
     }
   },
   "metrics_by_target": {
@@ -111,7 +158,7 @@
         "sufficiency": 0.10228619295559951,
         "aopc_sufficiency": 0.05004428290587479,
         "aopc_comprehensiveness": 0.02779407067609327,
-        "aopc": 0.09596229084424465
+        "aopc": 0.0958512687167162
       },
       "method_diagnostics": {
         "evaluated_samples": 2000,
@@ -144,7 +191,7 @@
         "sufficiency": 0.25360374059921015,
         "aopc_sufficiency": 0.12889471113856174,
         "aopc_comprehensiveness": 0.057609253070159565,
-        "aopc": 0.21201905948241653
+        "aopc": 0.21171613291640132
       },
       "method_diagnostics": {
         "evaluated_samples": 2000,
@@ -183,7 +230,17 @@
     "units_split_across_chunks_total": 0,
     "units_split_across_chunks_rate": 0.0,
     "tokenizer_fallback_samples": 0,
-    "tokenizer_fallback_unit_total": 0
+    "tokenizer_fallback_unit_total": 0,
+    "explain_sample_count": 2000
+  },
+  "explain_diagnostics": {
+    "sample_count": 2000,
+    "forward_counters_total": {},
+    "forward_counters_mean_per_sample": {},
+    "timing_totals": {},
+    "timing_mean_per_sample": {},
+    "elapsed_seconds_total": 0.0,
+    "elapsed_seconds_mean_per_sample": 0.0
   },
   "q_values": [
     1,
@@ -200,16 +257,16 @@
     50
   ],
   "timing_breakdown": {
-    "unit_build_seconds": 1.1379921436309814,
-    "text_build_seconds": 0.6526219844818115,
-    "prefetch_seconds": 1961.101307630539,
-    "metric_compute_seconds": 0.3793184757232666
+    "unit_build_seconds": 1.4207310676574707,
+    "text_build_seconds": 1.2868385314941406,
+    "prefetch_seconds": 4102.564831733704,
+    "metric_compute_seconds": 0.9702861309051514
   },
   "cache_stats": {
-    "required_text_count": 65174,
-    "unique_text_count": 49586,
-    "cache_requests": 126020,
-    "cache_hits": 126020,
+    "required_text_count": 151174,
+    "unique_text_count": 71820,
+    "cache_requests": 204268,
+    "cache_hits": 204268,
     "cache_misses": 0,
     "cache_hit_rate": 1.0
   },
@@ -220,38 +277,42 @@
     "batch_attempt_count": 2000,
     "batch_success_count": 2000,
     "batch_fallback_count": 0,
-    "prefetched_text_count": 49586,
-    "missing_text_count": 49586,
+    "prefetched_text_count": 71820,
+    "missing_text_count": 71820,
     "fallback_error_examples": []
   },
   "backbone_batch_stats": {
     "batch_calls": 2000,
-    "batch_rows": 49586,
-    "model_forward_calls": 78798,
+    "batch_rows": 71820,
+    "model_forward_calls": 112986,
     "oom_shrink_events": 0,
-    "batch_tokenize_calls": 13133,
-    "batch_pack_calls": 78798,
-    "batch_forward_calls": 78798,
-    "batch_tokenize_seconds": 5.505035929963924,
-    "batch_pack_seconds": 20.592195926699787,
-    "batch_forward_seconds": 1813.0890506352298
+    "batch_tokenize_calls": 18831,
+    "batch_pack_calls": 112986,
+    "batch_forward_calls": 112986,
+    "batch_tokenize_seconds": 11.504741854034364,
+    "batch_pack_seconds": 164.22956905933097,
+    "batch_forward_seconds": 2709.30707764579
+  },
+  "artifacts": {
+    "eval_report_json": "eval_report.json",
+    "curve_summary_csv": "curve_summary.csv"
   },
   "provenance": {
     "schema_version": 1,
     "stage": "eval_report",
-    "captured_at_utc": "2026-06-17T17:28:36Z",
+    "captured_at_utc": "2026-07-06T05:34:21Z",
     "timing": {
-      "start_utc": "2026-06-17T16:55:41Z",
-      "end_utc": "2026-06-17T17:28:36Z",
-      "elapsed_seconds": 1974.7532978057861
+      "start_utc": "2026-07-06T04:25:41Z",
+      "end_utc": "2026-07-06T05:34:21Z",
+      "elapsed_seconds": 4120.419712781906
     },
     "git": {
       "available": true,
       "root": "/mnt/huawei/nsq/LIMA-copy",
-      "commit": "62b171e5efca54e3c61d060c30becb72d0dcae94",
-      "commit_short": "62b171e",
+      "commit": "f183590fd12346d755c2344a49b85f700cae421a",
+      "commit_short": "f183590",
       "branch": "feat/lima-llm-transfer-v1",
-      "describe": "best-0516-34-g62b171e-dirty",
+      "describe": "best-0516-48-gf183590-dirty",
       "dirty": true
     },
     "command": {
@@ -265,7 +326,7 @@
         "--max-length",
         "2048",
         "--methods",
-        "saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion",
+        "saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime",
         "--k",
         "8",
         "--target-mode",
@@ -295,7 +356,7 @@
         "max_length": 2048,
         "trust_remote_code": false,
         "attn_implementation": "eager",
-        "methods": "saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion",
+        "methods": "saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime",
         "k": 8,
         "seed": 42,
         "target_mode": "gold",
@@ -304,6 +365,7 @@
         "score_mode": "abs",
         "n_steps": 32,
         "internal_batch_size": 8,
+        "n_samples": 32,
         "attr_pos_start": null,
         "attr_pos_end": null,
         "save_inseq_json": false,
@@ -325,14 +387,14 @@
       "python_version": "3.10.20",
       "platform": "Linux-5.15.0-181-generic-x86_64-with-glibc2.35",
       "cwd": "/mnt/huawei/nsq/LIMA-copy",
-      "pid": 1712394,
+      "pid": 4157140,
       "deterministic": {
         "enabled": false,
         "applied": false
       },
       "vars": {
         "HF_ENDPOINT": "https://hf-mirror.com",
-        "CUDA_VISIBLE_DEVICES": "4"
+        "CUDA_VISIBLE_DEVICES": "5"
       }
     }
   }

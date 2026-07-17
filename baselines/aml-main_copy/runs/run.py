@@ -90,8 +90,8 @@ def main(argv = None):
     inference_pretrain_experiment_name = f"INFERENCE_PRETRAIN_{experiment_name_prefix}_{time_str}"
     InferencePretrain(hp, inference_pretrain_experiment_name, explained_model = explained_model).run()
 
-    fine_tune_exp_name = f"FINE_TUNE_{experiment_name_prefix}_{time_str}"
-    FineTune(hp, fine_tune_exp_name, explained_model = explained_model).run()
+    # fine_tune_exp_name = f"FINE_TUNE_{experiment_name_prefix}_{time_str}"
+    # FineTune(hp, fine_tune_exp_name, explained_model = explained_model).run()
     print(
         "*" * 20,
         "END OF",

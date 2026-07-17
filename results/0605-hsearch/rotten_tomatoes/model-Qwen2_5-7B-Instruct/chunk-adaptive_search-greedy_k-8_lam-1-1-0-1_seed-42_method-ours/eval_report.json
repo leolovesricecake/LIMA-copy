@@ -13,7 +13,33 @@
       20,
       50
     ],
+    "curve_percentages": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45,
+      50,
+      55,
+      60,
+      65,
+      70,
+      75,
+      80,
+      85,
+      90,
+      95,
+      100
+    ],
+    "curve_target": "predicted",
     "aopc_average_denominator": "len(top_k_percentages)+1",
+    "morf_average_denominator": "num_deletion_steps",
+    "perturbation_target": "predicted",
     "log_odds_reference_token": "<|endoftext|>",
     "perturbation_unit": "token",
     "unit_segmentation": "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable",
@@ -32,7 +58,7 @@
     "sufficiency": -0.08903603820133724,
     "aopc_sufficiency": -0.020984476281252017,
     "aopc_comprehensiveness": 0.051345617131518924,
-    "aopc": 0.14584335374183643
+    "aopc": 0.14585882178544532
   },
   "metrics_secondary": {
     "sparsity": 1.0,
@@ -42,21 +68,66 @@
     "selected_all_ratio": 1.0,
     "plausibility_available": false,
     "plausibility_coverage_ratio": 0.0,
-    "runtime_seconds": 755.7172932624817,
+    "runtime_seconds": 590.9888324737549,
     "forward_counters_delta": {
-      "batch_tokenize_calls": 8469,
-      "batch_calls": 1066,
-      "predict_calls": 32301,
+      "predict_calls": 46167,
+      "model_forward_calls": 23966,
       "oom_shrink_events": 0,
-      "batch_pack_seconds": 52.04478289699182,
-      "model_forward_calls": 16938,
-      "batch_forward_calls": 16938,
+      "batch_forward_calls": 23966,
+      "batch_pack_seconds": 6.713268917519599,
       "gradient_calls": 0,
-      "batch_forward_seconds": 387.8222059798427,
-      "batch_tokenize_seconds": 3.7841910077258945,
+      "batch_calls": 1066,
+      "batch_rows": 46167,
       "embed_calls": 0,
-      "batch_pack_calls": 16938,
-      "batch_rows": 32301
+      "batch_forward_seconds": 524.4271285883151,
+      "batch_tokenize_calls": 11983,
+      "batch_tokenize_seconds": 10.505090637132525,
+      "batch_pack_calls": 23966
+    },
+    "eval_forward_counters_delta": {
+      "predict_calls": 46167,
+      "model_forward_calls": 23966,
+      "oom_shrink_events": 0,
+      "batch_forward_calls": 23966,
+      "batch_pack_seconds": 6.713268917519599,
+      "gradient_calls": 0,
+      "batch_calls": 1066,
+      "batch_rows": 46167,
+      "embed_calls": 0,
+      "batch_forward_seconds": 524.4271285883151,
+      "batch_tokenize_calls": 11983,
+      "batch_tokenize_seconds": 10.505090637132525,
+      "batch_pack_calls": 23966
+    },
+    "explain_forward_counters_total": {
+      "batch_calls": 5481,
+      "batch_forward_calls": 14492,
+      "batch_forward_seconds": 3.0,
+      "batch_pack_calls": 14492,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 19789,
+      "batch_tokenize_calls": 7246,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 25271,
+      "gradient_calls": 0,
+      "model_forward_calls": 31816,
+      "oom_shrink_events": 0,
+      "predict_calls": 19789
+    },
+    "explain_forward_counters_mean_per_sample": {
+      "batch_calls": 5.141651031894934,
+      "batch_forward_calls": 13.594746716697935,
+      "batch_forward_seconds": 0.0028142589118198874,
+      "batch_pack_calls": 13.594746716697935,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 18.563789868667918,
+      "batch_tokenize_calls": 6.797373358348968,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 23.706378986866792,
+      "gradient_calls": 0.0,
+      "model_forward_calls": 29.846153846153847,
+      "oom_shrink_events": 0.0,
+      "predict_calls": 18.563789868667918
     },
     "method_diagnostics": {
       "evaluated_samples": 1066,
@@ -65,16 +136,28 @@
       "error_examples": []
     },
     "timing_breakdown": {
-      "unit_build_seconds": 0.5963435173034668,
-      "text_build_seconds": 0.5563583374023438,
-      "prefetch_seconds": 750.8425765037537,
-      "metric_compute_seconds": 0.23797082901000977
+      "unit_build_seconds": 0.636533260345459,
+      "text_build_seconds": 0.9376735687255859,
+      "prefetch_seconds": 583.3374066352844,
+      "metric_compute_seconds": 0.4904325008392334
     },
+    "explain_timing_totals": {
+      "chunk_build_seconds": 1.2525286043528467,
+      "search_seconds": 1111.602662273217,
+      "model_prefetch_seconds": 896.8249589141924
+    },
+    "explain_timing_mean_per_sample": {
+      "chunk_build_seconds": 0.0011749799290364416,
+      "search_seconds": 1.0427792329017045,
+      "model_prefetch_seconds": 0.8412992109889235
+    },
+    "explain_elapsed_seconds_total": 1113.2310676574707,
+    "explain_elapsed_seconds_mean_per_sample": 1.044306817689935,
     "cache_stats": {
-      "required_text_count": 40230,
-      "unique_text_count": 32301,
-      "cache_requests": 79686,
-      "cache_hits": 79686,
+      "required_text_count": 86068,
+      "unique_text_count": 46167,
+      "cache_requests": 121826,
+      "cache_hits": 121826,
       "cache_misses": 0,
       "cache_hit_rate": 1.0
     },
@@ -85,21 +168,21 @@
       "batch_attempt_count": 1066,
       "batch_success_count": 1066,
       "batch_fallback_count": 0,
-      "prefetched_text_count": 32301,
-      "missing_text_count": 32301,
+      "prefetched_text_count": 46167,
+      "missing_text_count": 46167,
       "fallback_error_examples": []
     },
     "backbone_batch_stats": {
       "batch_calls": 1066,
-      "batch_rows": 32301,
-      "model_forward_calls": 16938,
+      "batch_rows": 46167,
+      "model_forward_calls": 23966,
       "oom_shrink_events": 0,
-      "batch_tokenize_calls": 8469,
-      "batch_pack_calls": 16938,
-      "batch_forward_calls": 16938,
-      "batch_tokenize_seconds": 3.7841910077258945,
-      "batch_pack_seconds": 52.04478289699182,
-      "batch_forward_seconds": 387.8222059798427
+      "batch_tokenize_calls": 11983,
+      "batch_pack_calls": 23966,
+      "batch_forward_calls": 23966,
+      "batch_tokenize_seconds": 10.505090637132525,
+      "batch_pack_seconds": 6.713268917519599,
+      "batch_forward_seconds": 524.4271285883151
     }
   },
   "metrics_by_target": {
@@ -111,7 +194,7 @@
         "sufficiency": -0.08903603820133724,
         "aopc_sufficiency": -0.020984476281252017,
         "aopc_comprehensiveness": 0.051345617131518924,
-        "aopc": 0.14584335374183643
+        "aopc": 0.14585882178544532
       },
       "method_diagnostics": {
         "evaluated_samples": 1066,
@@ -144,7 +227,7 @@
         "sufficiency": 0.17839896289831464,
         "aopc_sufficiency": 0.12366702701675049,
         "aopc_comprehensiveness": 0.05193701025682532,
-        "aopc": 0.16335258502320496
+        "aopc": 0.16333581614869977
       },
       "method_diagnostics": {
         "evaluated_samples": 1066,
@@ -183,7 +266,53 @@
     "units_split_across_chunks_total": 0,
     "units_split_across_chunks_rate": 0.0,
     "tokenizer_fallback_samples": 0,
-    "tokenizer_fallback_unit_total": 0
+    "tokenizer_fallback_unit_total": 0,
+    "explain_sample_count": 1066
+  },
+  "explain_diagnostics": {
+    "sample_count": 1066,
+    "forward_counters_total": {
+      "batch_calls": 5481,
+      "batch_forward_calls": 14492,
+      "batch_forward_seconds": 3.0,
+      "batch_pack_calls": 14492,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 19789,
+      "batch_tokenize_calls": 7246,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 25271,
+      "gradient_calls": 0,
+      "model_forward_calls": 31816,
+      "oom_shrink_events": 0,
+      "predict_calls": 19789
+    },
+    "forward_counters_mean_per_sample": {
+      "batch_calls": 5.141651031894934,
+      "batch_forward_calls": 13.594746716697935,
+      "batch_forward_seconds": 0.0028142589118198874,
+      "batch_pack_calls": 13.594746716697935,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 18.563789868667918,
+      "batch_tokenize_calls": 6.797373358348968,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 23.706378986866792,
+      "gradient_calls": 0.0,
+      "model_forward_calls": 29.846153846153847,
+      "oom_shrink_events": 0.0,
+      "predict_calls": 18.563789868667918
+    },
+    "timing_totals": {
+      "chunk_build_seconds": 1.2525286043528467,
+      "search_seconds": 1111.602662273217,
+      "model_prefetch_seconds": 896.8249589141924
+    },
+    "timing_mean_per_sample": {
+      "chunk_build_seconds": 0.0011749799290364416,
+      "search_seconds": 1.0427792329017045,
+      "model_prefetch_seconds": 0.8412992109889235
+    },
+    "elapsed_seconds_total": 1113.2310676574707,
+    "elapsed_seconds_mean_per_sample": 1.044306817689935
   },
   "q_values": [
     1,
@@ -200,16 +329,16 @@
     50
   ],
   "timing_breakdown": {
-    "unit_build_seconds": 0.5963435173034668,
-    "text_build_seconds": 0.5563583374023438,
-    "prefetch_seconds": 750.8425765037537,
-    "metric_compute_seconds": 0.23797082901000977
+    "unit_build_seconds": 0.636533260345459,
+    "text_build_seconds": 0.9376735687255859,
+    "prefetch_seconds": 583.3374066352844,
+    "metric_compute_seconds": 0.4904325008392334
   },
   "cache_stats": {
-    "required_text_count": 40230,
-    "unique_text_count": 32301,
-    "cache_requests": 79686,
-    "cache_hits": 79686,
+    "required_text_count": 86068,
+    "unique_text_count": 46167,
+    "cache_requests": 121826,
+    "cache_hits": 121826,
     "cache_misses": 0,
     "cache_hit_rate": 1.0
   },
@@ -220,38 +349,42 @@
     "batch_attempt_count": 1066,
     "batch_success_count": 1066,
     "batch_fallback_count": 0,
-    "prefetched_text_count": 32301,
-    "missing_text_count": 32301,
+    "prefetched_text_count": 46167,
+    "missing_text_count": 46167,
     "fallback_error_examples": []
   },
   "backbone_batch_stats": {
     "batch_calls": 1066,
-    "batch_rows": 32301,
-    "model_forward_calls": 16938,
+    "batch_rows": 46167,
+    "model_forward_calls": 23966,
     "oom_shrink_events": 0,
-    "batch_tokenize_calls": 8469,
-    "batch_pack_calls": 16938,
-    "batch_forward_calls": 16938,
-    "batch_tokenize_seconds": 3.7841910077258945,
-    "batch_pack_seconds": 52.04478289699182,
-    "batch_forward_seconds": 387.8222059798427
+    "batch_tokenize_calls": 11983,
+    "batch_pack_calls": 23966,
+    "batch_forward_calls": 23966,
+    "batch_tokenize_seconds": 10.505090637132525,
+    "batch_pack_seconds": 6.713268917519599,
+    "batch_forward_seconds": 524.4271285883151
+  },
+  "artifacts": {
+    "eval_report_json": "eval_report.json",
+    "curve_summary_csv": "curve_summary.csv"
   },
   "provenance": {
     "schema_version": 1,
     "stage": "eval_report",
-    "captured_at_utc": "2026-06-07T06:26:33Z",
+    "captured_at_utc": "2026-07-07T00:36:09Z",
     "timing": {
-      "start_utc": "2026-06-07T06:13:57Z",
-      "end_utc": "2026-06-07T06:26:33Z",
-      "elapsed_seconds": 755.8249192237854
+      "start_utc": "2026-07-07T00:26:18Z",
+      "end_utc": "2026-07-07T00:36:09Z",
+      "elapsed_seconds": 591.0313413143158
     },
     "git": {
       "available": true,
       "root": "/mnt/huawei/nsq/LIMA-copy",
-      "commit": "be23dfb42da0c483735b8726f2b222b842c29d56",
-      "commit_short": "be23dfb",
+      "commit": "f183590fd12346d755c2344a49b85f700cae421a",
+      "commit_short": "f183590",
       "branch": "feat/lima-llm-transfer-v1",
-      "describe": "best-0516-28-gbe23dfb-dirty",
+      "describe": "best-0516-48-gf183590-dirty",
       "dirty": true
     },
     "command": {
@@ -263,7 +396,7 @@
         "--model-path",
         "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
         "--device",
-        "cuda:2",
+        "cuda:1",
         "--dtype",
         "bfloat16",
         "--max-length",
@@ -311,7 +444,7 @@
         "sst2_source": null,
         "dataset_cache_dir": "/mnt/huawei/nsq/LIMA-copy/datasets",
         "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
-        "device": "cuda:2",
+        "device": "cuda:1",
         "dtype": "bfloat16",
         "max_length": 2048,
         "embedding_layer_ratio": 0.7,
@@ -341,15 +474,16 @@
         "resume_check": "strict",
         "run_eval": true,
         "eval_q_values": "1,5,10,20,50",
+        "eval_curve_values": "0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100",
         "eval_granularity": "token",
         "explain_method": "ours"
       }
     },
     "environment": {
       "python_version": "3.8.0",
-      "platform": "Linux-5.15.0-179-generic-x86_64-with-glibc2.10",
+      "platform": "Linux-5.15.0-181-generic-x86_64-with-glibc2.10",
       "cwd": "/mnt/huawei/nsq/LIMA-copy",
-      "pid": 3081998,
+      "pid": 1624457,
       "deterministic": {
         "enabled": false,
         "applied": false

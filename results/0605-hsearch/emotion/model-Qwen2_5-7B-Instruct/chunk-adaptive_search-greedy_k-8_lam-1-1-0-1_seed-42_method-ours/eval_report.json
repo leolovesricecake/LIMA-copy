@@ -13,7 +13,33 @@
       20,
       50
     ],
+    "curve_percentages": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45,
+      50,
+      55,
+      60,
+      65,
+      70,
+      75,
+      80,
+      85,
+      90,
+      95,
+      100
+    ],
+    "curve_target": "predicted",
     "aopc_average_denominator": "len(top_k_percentages)+1",
+    "morf_average_denominator": "num_deletion_steps",
+    "perturbation_target": "predicted",
     "log_odds_reference_token": "<|endoftext|>",
     "perturbation_unit": "token",
     "unit_segmentation": "subword token spans from tokenizer offset_mapping with contiguous coverage repair; fallback to whitespace spans if unavailable",
@@ -32,7 +58,7 @@
     "sufficiency": 0.015725858847371682,
     "aopc_sufficiency": 0.0061914382295098,
     "aopc_comprehensiveness": 0.030125964251480543,
-    "aopc": 0.10206664362772347
+    "aopc": 0.10191446718435848
   },
   "metrics_secondary": {
     "sparsity": 1.0,
@@ -42,21 +68,66 @@
     "selected_all_ratio": 1.0,
     "plausibility_available": false,
     "plausibility_coverage_ratio": 0.0,
-    "runtime_seconds": 1889.0576131343842,
+    "runtime_seconds": 2992.738182783127,
     "forward_counters_delta": {
-      "batch_tokenize_calls": 13133,
-      "batch_forward_calls": 78798,
-      "oom_shrink_events": 0,
+      "batch_forward_calls": 112992,
+      "batch_tokenize_calls": 18832,
+      "batch_rows": 71819,
+      "model_forward_calls": 112992,
       "embed_calls": 0,
-      "batch_pack_calls": 78798,
-      "batch_calls": 2000,
+      "batch_forward_seconds": 2590.689071647823,
+      "batch_pack_seconds": 74.44979657884687,
       "gradient_calls": 0,
-      "model_forward_calls": 78798,
-      "predict_calls": 49586,
-      "batch_tokenize_seconds": 6.773733189562336,
-      "batch_pack_seconds": 22.650718299904838,
-      "batch_forward_seconds": 1720.2803367516026,
-      "batch_rows": 49586
+      "batch_tokenize_seconds": 11.934597715735435,
+      "predict_calls": 71819,
+      "batch_calls": 2000,
+      "oom_shrink_events": 0,
+      "batch_pack_calls": 112992
+    },
+    "eval_forward_counters_delta": {
+      "batch_forward_calls": 112992,
+      "batch_tokenize_calls": 18832,
+      "batch_rows": 71819,
+      "model_forward_calls": 112992,
+      "embed_calls": 0,
+      "batch_forward_seconds": 2590.689071647823,
+      "batch_pack_seconds": 74.44979657884687,
+      "gradient_calls": 0,
+      "batch_tokenize_seconds": 11.934597715735435,
+      "predict_calls": 71819,
+      "batch_calls": 2000,
+      "oom_shrink_events": 0,
+      "batch_pack_calls": 112992
+    },
+    "explain_forward_counters_total": {
+      "batch_calls": 9040,
+      "batch_forward_calls": 71130,
+      "batch_forward_seconds": 1394.0,
+      "batch_pack_calls": 71130,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 32156,
+      "batch_tokenize_calls": 11855,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 41197,
+      "gradient_calls": 0,
+      "model_forward_calls": 99656,
+      "oom_shrink_events": 0,
+      "predict_calls": 32156
+    },
+    "explain_forward_counters_mean_per_sample": {
+      "batch_calls": 4.52,
+      "batch_forward_calls": 35.565,
+      "batch_forward_seconds": 0.697,
+      "batch_pack_calls": 35.565,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 16.078,
+      "batch_tokenize_calls": 5.9275,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 20.5985,
+      "gradient_calls": 0.0,
+      "model_forward_calls": 49.828,
+      "oom_shrink_events": 0.0,
+      "predict_calls": 16.078
     },
     "method_diagnostics": {
       "evaluated_samples": 2000,
@@ -65,16 +136,28 @@
       "error_examples": []
     },
     "timing_breakdown": {
-      "unit_build_seconds": 1.0496439933776855,
-      "text_build_seconds": 0.7720997333526611,
-      "prefetch_seconds": 1880.0708980560303,
-      "metric_compute_seconds": 0.44234514236450195
+      "unit_build_seconds": 1.2942402362823486,
+      "text_build_seconds": 1.4654178619384766,
+      "prefetch_seconds": 2954.1140916347504,
+      "metric_compute_seconds": 1.0073041915893555
     },
+    "explain_timing_totals": {
+      "chunk_build_seconds": 1.7450614084955305,
+      "search_seconds": 2743.7215328584425,
+      "model_prefetch_seconds": 2451.3289091123734
+    },
+    "explain_timing_mean_per_sample": {
+      "chunk_build_seconds": 0.0008725307042477652,
+      "search_seconds": 1.3718607664292213,
+      "model_prefetch_seconds": 1.2256644545561868
+    },
+    "explain_elapsed_seconds_total": 2746.120233297348,
+    "explain_elapsed_seconds_mean_per_sample": 1.373060116648674,
     "cache_stats": {
-      "required_text_count": 65174,
-      "unique_text_count": 49586,
-      "cache_requests": 126020,
-      "cache_hits": 126020,
+      "required_text_count": 151174,
+      "unique_text_count": 71819,
+      "cache_requests": 204268,
+      "cache_hits": 204268,
       "cache_misses": 0,
       "cache_hit_rate": 1.0
     },
@@ -85,21 +168,21 @@
       "batch_attempt_count": 2000,
       "batch_success_count": 2000,
       "batch_fallback_count": 0,
-      "prefetched_text_count": 49586,
-      "missing_text_count": 49586,
+      "prefetched_text_count": 71819,
+      "missing_text_count": 71819,
       "fallback_error_examples": []
     },
     "backbone_batch_stats": {
       "batch_calls": 2000,
-      "batch_rows": 49586,
-      "model_forward_calls": 78798,
+      "batch_rows": 71819,
+      "model_forward_calls": 112992,
       "oom_shrink_events": 0,
-      "batch_tokenize_calls": 13133,
-      "batch_pack_calls": 78798,
-      "batch_forward_calls": 78798,
-      "batch_tokenize_seconds": 6.773733189562336,
-      "batch_pack_seconds": 22.650718299904838,
-      "batch_forward_seconds": 1720.2803367516026
+      "batch_tokenize_calls": 18832,
+      "batch_pack_calls": 112992,
+      "batch_forward_calls": 112992,
+      "batch_tokenize_seconds": 11.934597715735435,
+      "batch_pack_seconds": 74.44979657884687,
+      "batch_forward_seconds": 2590.689071647823
     }
   },
   "metrics_by_target": {
@@ -111,7 +194,7 @@
         "sufficiency": 0.015725858847371682,
         "aopc_sufficiency": 0.0061914382295098,
         "aopc_comprehensiveness": 0.030125964251480543,
-        "aopc": 0.10206664362772347
+        "aopc": 0.10191446718435848
       },
       "method_diagnostics": {
         "evaluated_samples": 2000,
@@ -144,7 +227,7 @@
         "sufficiency": 0.2837025825022756,
         "aopc_sufficiency": 0.1390558195426026,
         "aopc_comprehensiveness": 0.04338653341127065,
-        "aopc": 0.18019128618608057
+        "aopc": 0.17986817110315
       },
       "method_diagnostics": {
         "evaluated_samples": 2000,
@@ -183,7 +266,53 @@
     "units_split_across_chunks_total": 0,
     "units_split_across_chunks_rate": 0.0,
     "tokenizer_fallback_samples": 0,
-    "tokenizer_fallback_unit_total": 0
+    "tokenizer_fallback_unit_total": 0,
+    "explain_sample_count": 2000
+  },
+  "explain_diagnostics": {
+    "sample_count": 2000,
+    "forward_counters_total": {
+      "batch_calls": 9040,
+      "batch_forward_calls": 71130,
+      "batch_forward_seconds": 1394.0,
+      "batch_pack_calls": 71130,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 32156,
+      "batch_tokenize_calls": 11855,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 41197,
+      "gradient_calls": 0,
+      "model_forward_calls": 99656,
+      "oom_shrink_events": 0,
+      "predict_calls": 32156
+    },
+    "forward_counters_mean_per_sample": {
+      "batch_calls": 4.52,
+      "batch_forward_calls": 35.565,
+      "batch_forward_seconds": 0.697,
+      "batch_pack_calls": 35.565,
+      "batch_pack_seconds": 0.0,
+      "batch_rows": 16.078,
+      "batch_tokenize_calls": 5.9275,
+      "batch_tokenize_seconds": 0.0,
+      "embed_calls": 20.5985,
+      "gradient_calls": 0.0,
+      "model_forward_calls": 49.828,
+      "oom_shrink_events": 0.0,
+      "predict_calls": 16.078
+    },
+    "timing_totals": {
+      "chunk_build_seconds": 1.7450614084955305,
+      "search_seconds": 2743.7215328584425,
+      "model_prefetch_seconds": 2451.3289091123734
+    },
+    "timing_mean_per_sample": {
+      "chunk_build_seconds": 0.0008725307042477652,
+      "search_seconds": 1.3718607664292213,
+      "model_prefetch_seconds": 1.2256644545561868
+    },
+    "elapsed_seconds_total": 2746.120233297348,
+    "elapsed_seconds_mean_per_sample": 1.373060116648674
   },
   "q_values": [
     1,
@@ -200,16 +329,16 @@
     50
   ],
   "timing_breakdown": {
-    "unit_build_seconds": 1.0496439933776855,
-    "text_build_seconds": 0.7720997333526611,
-    "prefetch_seconds": 1880.0708980560303,
-    "metric_compute_seconds": 0.44234514236450195
+    "unit_build_seconds": 1.2942402362823486,
+    "text_build_seconds": 1.4654178619384766,
+    "prefetch_seconds": 2954.1140916347504,
+    "metric_compute_seconds": 1.0073041915893555
   },
   "cache_stats": {
-    "required_text_count": 65174,
-    "unique_text_count": 49586,
-    "cache_requests": 126020,
-    "cache_hits": 126020,
+    "required_text_count": 151174,
+    "unique_text_count": 71819,
+    "cache_requests": 204268,
+    "cache_hits": 204268,
     "cache_misses": 0,
     "cache_hit_rate": 1.0
   },
@@ -220,38 +349,42 @@
     "batch_attempt_count": 2000,
     "batch_success_count": 2000,
     "batch_fallback_count": 0,
-    "prefetched_text_count": 49586,
-    "missing_text_count": 49586,
+    "prefetched_text_count": 71819,
+    "missing_text_count": 71819,
     "fallback_error_examples": []
   },
   "backbone_batch_stats": {
     "batch_calls": 2000,
-    "batch_rows": 49586,
-    "model_forward_calls": 78798,
+    "batch_rows": 71819,
+    "model_forward_calls": 112992,
     "oom_shrink_events": 0,
-    "batch_tokenize_calls": 13133,
-    "batch_pack_calls": 78798,
-    "batch_forward_calls": 78798,
-    "batch_tokenize_seconds": 6.773733189562336,
-    "batch_pack_seconds": 22.650718299904838,
-    "batch_forward_seconds": 1720.2803367516026
+    "batch_tokenize_calls": 18832,
+    "batch_pack_calls": 112992,
+    "batch_forward_calls": 112992,
+    "batch_tokenize_seconds": 11.934597715735435,
+    "batch_pack_seconds": 74.44979657884687,
+    "batch_forward_seconds": 2590.689071647823
+  },
+  "artifacts": {
+    "eval_report_json": "eval_report.json",
+    "curve_summary_csv": "curve_summary.csv"
   },
   "provenance": {
     "schema_version": 1,
     "stage": "eval_report",
-    "captured_at_utc": "2026-06-07T07:24:45Z",
+    "captured_at_utc": "2026-07-06T14:17:56Z",
     "timing": {
-      "start_utc": "2026-06-07T06:53:16Z",
-      "end_utc": "2026-06-07T07:24:45Z",
-      "elapsed_seconds": 1889.0776636600494
+      "start_utc": "2026-07-06T13:28:04Z",
+      "end_utc": "2026-07-06T14:17:56Z",
+      "elapsed_seconds": 2992.781286239624
     },
     "git": {
       "available": true,
       "root": "/mnt/huawei/nsq/LIMA-copy",
-      "commit": "be23dfb42da0c483735b8726f2b222b842c29d56",
-      "commit_short": "be23dfb",
+      "commit": "f183590fd12346d755c2344a49b85f700cae421a",
+      "commit_short": "f183590",
       "branch": "feat/lima-llm-transfer-v1",
-      "describe": "best-0516-28-gbe23dfb-dirty",
+      "describe": "best-0516-48-gf183590-dirty",
       "dirty": true
     },
     "command": {
@@ -263,7 +396,7 @@
         "--model-path",
         "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
         "--device",
-        "cuda:2",
+        "cuda:5",
         "--dtype",
         "bfloat16",
         "--max-length",
@@ -311,7 +444,7 @@
         "sst2_source": null,
         "dataset_cache_dir": "/mnt/huawei/nsq/LIMA-copy/datasets",
         "model_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
-        "device": "cuda:2",
+        "device": "cuda:5",
         "dtype": "bfloat16",
         "max_length": 2048,
         "embedding_layer_ratio": 0.7,
@@ -341,15 +474,16 @@
         "resume_check": "strict",
         "run_eval": true,
         "eval_q_values": "1,5,10,20,50",
+        "eval_curve_values": "0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100",
         "eval_granularity": "token",
         "explain_method": "ours"
       }
     },
     "environment": {
       "python_version": "3.8.0",
-      "platform": "Linux-5.15.0-179-generic-x86_64-with-glibc2.10",
+      "platform": "Linux-5.15.0-181-generic-x86_64-with-glibc2.10",
       "cwd": "/mnt/huawei/nsq/LIMA-copy",
-      "pid": 3105261,
+      "pid": 939729,
       "deterministic": {
         "enabled": false,
         "applied": false

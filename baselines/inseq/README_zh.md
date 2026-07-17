@@ -42,14 +42,15 @@ Inseq 的 LIME 实现依赖 Captum，因此建议按上面的命令安装。LIME
 
 ```bash
 <!-- saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime -->
+# meta-llama/Llama-3.1-8B-Instruct, Qwen/Qwen2.5-7B-Instruct
 # todo: eraser-occlusion
 # failed: eraser-ig,sig
-CUDA_VISIBLE_DEVICES=1 python baselines/inseq/run_inseq_llm_baselines.py \
-  --datasets emotion \
+CUDA_VISIBLE_DEVICES=0 python baselines/inseq/run_inseq_llm_baselines.py \
+  --datasets eraser \
   --model-path /mnt/huawei/nsq/models/meta-llama/Llama-3.1-8B-Instruct \
   --dtype bfloat16 \
   --max-length 2048 \
-  --methods saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime \
+  --methods lime \
   --k 8 \
   --target-mode gold \
   --eval-q-values 1,5,10,20,50 \

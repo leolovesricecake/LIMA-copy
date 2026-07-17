@@ -149,10 +149,7 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset imdb \
   --split validation \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-<<<<<<< Updated upstream
   --base-save-dir results \
-=======
->>>>>>> Stashed changes
   --save-dir baselines/proxyspex \
   --device cuda:0
 ```
@@ -164,10 +161,7 @@ python baselines/shapiq-main/run_proxyspex_llm_baseline.py \
   --dataset rotten_tomatoes \
   --split validation \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-<<<<<<< Updated upstream
   --base-save-dir results \
-=======
->>>>>>> Stashed changes
   --save-dir baselines/proxyspex \
   --device cuda:0
 ```
