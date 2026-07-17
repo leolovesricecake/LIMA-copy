@@ -20,6 +20,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 _LOCAL_SHAPIQ_SRC = Path(__file__).resolve().parent / "src"
 _PROXY_FALLBACK_WARNED: set[tuple[str, str]] = set()
+_PROXY_HPO_FALLBACK_WARNED: set[tuple[str, int]] = set()
+_MAX_PROXY_HPO_CV_SPLITS = 5
+_MIN_PROXY_HPO_TEST_FOLD_SIZE = 2
 
 from lima_llm.backbone.hf_backbone import HFBackbone
 from lima_llm.chunking.utils import compose_text_from_chunk_ids
@@ -226,13 +229,47 @@ def _warn_proxy_fallback(requested: str, effective: str, reason: str) -> None:
     )
 
 
-def _build_proxy_model(args):
+def _expected_proxy_fit_sample_count(n_players: int, budget: int) -> int:
+    """Return the number of distinct coalition rows ProxySPEX will fit the proxy on."""
+
+    n = max(0, int(n_players))
+    requested_budget = max(0, int(budget))
+    if n == 0 or requested_budget == 0:
+        return 0
+    if n >= max(0, (requested_budget - 1).bit_length()):
+        return requested_budget
+    return min(requested_budget, 1 << n)
+
+
+def _proxy_hpo_cv_splits(n_fit_samples: int | None) -> int | None:
+    if n_fit_samples is None:
+        return _MAX_PROXY_HPO_CV_SPLITS
+    # R2 scoring is undefined for a one-sample test fold. Keep every fold at size >= 2.
+    cv = min(_MAX_PROXY_HPO_CV_SPLITS, int(n_fit_samples) // _MIN_PROXY_HPO_TEST_FOLD_SIZE)
+    return cv if cv >= 2 else None
+
+
+def _warn_proxy_hpo_fallback(proxy_name: str, n_fit_samples: int) -> None:
+    key = (str(proxy_name), int(n_fit_samples))
+    if key in _PROXY_HPO_FALLBACK_WARNED:
+        return
+    _PROXY_HPO_FALLBACK_WARNED.add(key)
+    warnings.warn(
+        "Requested ProxySPEX proxy HPO, but only "
+        f"{int(n_fit_samples)} coalition samples are available; using the bare "
+        f"{proxy_name!r} proxy for this short-sample case.",
+        stacklevel=2,
+    )
+
+
+def _build_proxy_model(args, *, n_fit_samples: int | None = None):
     from sklearn.model_selection import GridSearchCV
     from sklearn.tree import DecisionTreeRegressor
 
     requested = str(args.proxy_model)
     seed = int(args.seed)
     n_jobs = int(args.proxy_n_jobs)
+    hpo_cv_splits = _proxy_hpo_cv_splits(n_fit_samples) if bool(args.hpo) else None
 
     if requested == "tree":
         return DecisionTreeRegressor(random_state=seed), "tree"
@@ -247,7 +284,7 @@ def _build_proxy_model(args):
                 verbosity=-1,
                 verbose=-1,
             )
-            if bool(args.hpo):
+            if bool(args.hpo) and hpo_cv_splits is not None:
                 return (
                     GridSearchCV(
                         estimator=estimator,
@@ -257,12 +294,15 @@ def _build_proxy_model(args):
                             "learning_rate": [0.01, 0.1],
                         },
                         scoring="r2",
-                        cv=5,
+                        cv=int(hpo_cv_splits),
                         verbose=0,
                         n_jobs=1,
                     ),
-                    "lightgbm_gridsearch_quiet",
+                    f"lightgbm_gridsearch_quiet_cv-{int(hpo_cv_splits)}",
                 )
+            if bool(args.hpo) and n_fit_samples is not None:
+                _warn_proxy_hpo_fallback("lightgbm", int(n_fit_samples))
+                return estimator, "lightgbm_quiet_hpo_disabled_small_sample"
             return estimator, "lightgbm_quiet"
         except ImportError:
             requested = "xgboost"
@@ -277,7 +317,7 @@ def _build_proxy_model(args):
                 n_jobs=n_jobs,
                 verbosity=0,
             )
-            if bool(args.hpo):
+            if bool(args.hpo) and hpo_cv_splits is not None:
                 return (
                     GridSearchCV(
                         estimator=estimator,
@@ -287,12 +327,15 @@ def _build_proxy_model(args):
                             "learning_rate": [0.01, 0.1],
                         },
                         scoring="r2",
-                        cv=5,
+                        cv=int(hpo_cv_splits),
                         verbose=0,
                         n_jobs=1,
                     ),
-                    "xgboost_gridsearch_quiet",
+                    f"xgboost_gridsearch_quiet_cv-{int(hpo_cv_splits)}",
                 )
+            if bool(args.hpo) and n_fit_samples is not None:
+                _warn_proxy_hpo_fallback("xgboost", int(n_fit_samples))
+                return estimator, "xgboost_quiet_hpo_disabled_small_sample"
             return estimator, "xgboost_quiet"
         except ImportError:
             _warn_proxy_fallback(str(args.proxy_model), "tree", "Boosting backend is not installed.")
@@ -641,6 +684,9 @@ def _explain_sample(
         visible_end=int(truncation["visible_end_char"]),
     )
     player_to_chunk_id = list(active_chunk_ids)
+    proxy_fit_sample_count = 0
+    effective_proxy_hpo = False
+    proxy_hpo_cv_splits = None
 
     if len(player_to_chunk_id) == 0:
         interaction_values = None
@@ -667,7 +713,16 @@ def _explain_sample(
             n_players=len(player_to_chunk_id),
             mode=str(args.sampling_weight_mode),
         )
-        proxy_model, effective_proxy_model = _build_proxy_model(args)
+        proxy_fit_sample_count = _expected_proxy_fit_sample_count(
+            n_players=len(player_to_chunk_id),
+            budget=int(args.budget),
+        )
+        proxy_model, effective_proxy_model = _build_proxy_model(
+            args,
+            n_fit_samples=proxy_fit_sample_count,
+        )
+        proxy_hpo_cv_splits = getattr(proxy_model, "cv", None)
+        effective_proxy_hpo = proxy_hpo_cv_splits is not None and hasattr(proxy_model, "param_grid")
         approximator = ProxySPEX(
             n=len(player_to_chunk_id),
             max_order=effective_max_order,
@@ -713,10 +768,15 @@ def _explain_sample(
         else 0,
         "proxyspex_proxy_model": str(args.proxy_model),
         "proxyspex_effective_proxy_model": str(effective_proxy_model) if player_to_chunk_id else "none",
+        "proxyspex_proxy_fit_sample_count": int(proxy_fit_sample_count),
         "proxyspex_sampling_weight_mode": str(args.sampling_weight_mode),
         "proxyspex_proxy_n_jobs": int(args.proxy_n_jobs),
         "proxyspex_quiet_proxy": bool(args.quiet_proxy),
         "proxyspex_hpo": bool(args.hpo),
+        "proxyspex_effective_hpo": bool(effective_proxy_hpo),
+        "proxyspex_proxy_hpo_cv_splits": int(proxy_hpo_cv_splits)
+        if proxy_hpo_cv_splits is not None
+        else None,
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
         "value_function": "target_probability",
@@ -825,8 +885,8 @@ def _write_configs(output_root: Path, args, raw_argv: Sequence[str], determinist
 
 def _validate_args(args) -> None:
     normalize_eval_granularity(args.eval_granularity)
-    if int(args.budget) <= 0:
-        raise ValueError("--budget must be positive")
+    if int(args.budget) < 2:
+        raise ValueError("--budget must be at least 2 because ProxySPEX evaluates empty and grand coalitions")
     if int(args.max_order) <= 0:
         raise ValueError("--max-order must be positive")
     if int(args.k) < 0:
@@ -836,8 +896,6 @@ def _validate_args(args) -> None:
     if int(args.proxy_n_jobs) == 0:
         raise ValueError("--proxy-n-jobs must not be 0")
     _sampling_weights(1, str(args.sampling_weight_mode))
-    if bool(args.hpo) and int(args.budget) < 5 and args.proxy_model in {"lightgbm", "xgboost"}:
-        raise ValueError("HPO-backed boosting proxies need at least 5 sampled coalitions for GridSearchCV.")
 
 
 def run(args, raw_argv: Sequence[str]) -> None:
