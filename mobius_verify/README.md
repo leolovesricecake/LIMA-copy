@@ -101,18 +101,18 @@ model:
 真实模型命令：
 
 ```bash
-python3 mobius_verify/scripts/collect_exact_values.py \
+python3 scripts/collect_exact_values.py \
   --config mobius_verify/configs/exact_default.yaml
 
-python3 mobius_verify/scripts/compute_exact_spectra.py \
+python3 scripts/compute_exact_spectra.py \
   --results-dir mobius_verify/results/exact_default \
   --d-max 4
 
-python3 mobius_verify/scripts/run_limited_query_recovery.py \
-  --config mobius_verify/configs/recovery_default.yaml
+python3 scripts/run_limited_query_recovery.py \
+  --config configs/recovery_default.yaml
 
-python3 mobius_verify/scripts/aggregate_results.py \
-  --results-dir mobius_verify/results/exact_default
+python3 scripts/aggregate_results.py \
+  --results-dir results/exact_default
 ```
 
 ## Value Function

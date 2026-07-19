@@ -1,13 +1,12 @@
 results_dir: mobius_verify/results/exact_default
 seed: 0
-max_records: 4
+max_records: 100
 mask_operator: delete
 batch_size: 16
 
 dataset:
   name: sst2
   split: validation
-  max_samples: 20
   dataset_cache_dir: /mnt/huawei/nsq/temp/hf
   verbalizers: [negative, positive]
 
