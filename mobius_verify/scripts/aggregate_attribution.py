@@ -116,7 +116,20 @@ def _result_rows(results_dir: Path) -> list[Dict[str, Any]]:
                 "evaluation_only_queries",
             ):
                 row[key] = ledger.get(key)
-            row["support_size"] = payload.get("model", {}).get("coefficient_count")
+            model_payload = payload.get("model", {})
+            model_diagnostics = model_payload.get("diagnostics", {})
+            row["support_size"] = model_payload.get("coefficient_count")
+            row["proxy_degenerate"] = model_diagnostics.get("degenerate_proxy")
+            row["proxy_nontrivial_tree_count"] = model_diagnostics.get(
+                "nontrivial_tree_count"
+            )
+            row["proxy_training_prediction_std"] = model_diagnostics.get(
+                "proxy_training_prediction_std"
+            )
+            lightgbm_diagnostics = model_diagnostics.get("lightgbm") or {}
+            row["lightgbm_min_child_samples"] = lightgbm_diagnostics.get(
+                "min_child_samples"
+            )
             timing = payload.get("timing", {})
             row["fit_elapsed_seconds"] = timing.get("fit_elapsed_seconds")
             row["evaluation_elapsed_seconds"] = timing.get("evaluation_elapsed_seconds")
@@ -128,7 +141,6 @@ def _result_rows(results_dir: Path) -> list[Dict[str, Any]]:
                 int(payload.get("budget", 0)) / (n_features * math.log2(n_features))
             )
             row["_positive_ranking"] = payload.get("rankings", {}).get("positive", [])
-            model_payload = payload.get("model", {})
             row["_hyperedges"] = list(
                 model_payload.get("hyperedges") or model_payload.get("presence_mobius") or []
             )
@@ -471,6 +483,11 @@ def aggregate(results_dir: Path) -> Dict[str, Any]:
                     row.get("physical_forwards_caused") for row in group
                 ),
                 "fit_elapsed_seconds_mean": _mean(row.get("fit_elapsed_seconds") for row in group),
+                "proxy_degenerate_rate": _mean(
+                    float(bool(row["proxy_degenerate"]))
+                    for row in group
+                    if isinstance(row.get("proxy_degenerate"), bool)
+                ),
                 "support_size_mean": _mean(row.get("support_size") for row in group),
             }
         )
@@ -614,12 +631,17 @@ def aggregate(results_dir: Path) -> Dict[str, Any]:
         "",
     ]
     for summary in summaries:
+        degeneracy = summary.get("proxy_degenerate_rate")
+        degeneracy_text = (
+            f", proxy degenerate rate={degeneracy}" if degeneracy is not None else ""
+        )
         lines.append(
             "- "
             f"{summary['protocol']} / {summary['value_function']} / {summary['method']}: "
             f"n={summary['n']}, uniform R2={summary['uniform_r2_mean']}, "
             f"near-full R2={summary['near_full_r2_mean']}, "
             f"targeted sign={summary['targeted_sign_accuracy_mean']}"
+            f"{degeneracy_text}"
         )
     lines.extend(
         [

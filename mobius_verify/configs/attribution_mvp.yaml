@@ -59,5 +59,7 @@ gbt_param_grid:
 proxyspex:
   proxy_model: lightgbm
   hpo: true
+  lightgbm_verbosity: -1
+  lightgbm_min_child_samples: auto
   index: FBII
   max_order: 2

@@ -123,6 +123,20 @@ Smoke 使用 sklearn decision tree 作为 ProxySPEX proxy，不需要 LightGBM�
 
 ProxySPEX HPO 会按实际 attribution observation 数调整 CV：4 个样本使用 2-fold，少于 4 个样本对该次拟合关闭 HPO，避免 `n_splits > n_samples`。
 
+LightGBM 的叶子约束也会按最小 CV 训练折自动调整，默认关闭重复训练日志：
+
+```yaml
+proxyspex:
+  proxy_model: lightgbm
+  hpo: true
+  lightgbm_verbosity: -1
+  lightgbm_min_child_samples: auto
+```
+
+`auto` 使用 `min(20, minimum_cv_train_size // 4)`，下限为 1。也可以填写固定正整数。每次 ProxySPEX 拟合会在结果的 `model.diagnostics` 中保存实际取值、树叶数量、训练预测方差和 `degenerate_proxy`；因此日志被关闭后仍能识别代理模型是否退化。
+
+修改配置后，已有 `result.json` 会被 resume 跳过。重新拟合可在原命令后添加 `--overwrite`；同一结果目录中的 ValueOracle cache 仍会复用。
+
 
 ## 真实 SST-2 + Qwen
 

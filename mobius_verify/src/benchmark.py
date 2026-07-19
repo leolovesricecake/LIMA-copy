@@ -149,6 +149,8 @@ def _fit_controlled_method(
             proxy_model=str(proxy_cfg.get("proxy_model", "tree")),
             hpo=bool(proxy_cfg.get("hpo", False)),
             random_state=seed,
+            lightgbm_verbosity=int(proxy_cfg.get("lightgbm_verbosity", -1)),
+            lightgbm_min_child_samples=proxy_cfg.get("lightgbm_min_child_samples"),
         )
     raise ValueError(f"Unsupported controlled method: {method!r}")
 
@@ -562,6 +564,10 @@ def run_native_protocol(
                     proxy_model=str(proxy_cfg.get("proxy_model", "tree")),
                     hpo=bool(proxy_cfg.get("hpo", False)),
                     random_state=seed,
+                    lightgbm_verbosity=int(proxy_cfg.get("lightgbm_verbosity", -1)),
+                    lightgbm_min_child_samples=proxy_cfg.get(
+                        "lightgbm_min_child_samples"
+                    ),
                 )
                 masks = model.train_masks
             else:

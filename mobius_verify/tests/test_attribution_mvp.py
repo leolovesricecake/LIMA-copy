@@ -8,6 +8,10 @@ from mobius_verify.src.designs import design_matrix, low_degree_terms
 from mobius_verify.src.featureization import build_lexical_word_features
 from mobius_verify.src.interaction_verification import targeted_true_coefficient
 from mobius_verify.src.methods.sparse_mobius import model_node_scores
+from mobius_verify.src.methods.proxyspex_adapter import (
+    fit_proxyspex_from_observations,
+    resolve_lightgbm_min_child_samples,
+)
 from mobius_verify.src.methods.sparse_surrogate import fit_sparse_surrogate
 from mobius_verify.src.models.base import RawTextScorer
 from mobius_verify.src.query_ledger import QueryLedger
@@ -153,3 +157,35 @@ def test_query_ledger_survives_partial_scoring_failure(tmp_path: Path) -> None:
     assert ledger.physical_forwards_caused == 1
     assert counters["physical_values_scored_this_run"] == 1
     assert counters["scorer_batch_calls_this_run"] == 2
+
+
+def test_lightgbm_leaf_minimum_scales_with_cv_training_fold() -> None:
+    assert resolve_lightgbm_min_child_samples(
+        n_observations=4, cv_splits=2, configured="auto"
+    ) == (1, 2)
+    assert resolve_lightgbm_min_child_samples(
+        n_observations=100, cv_splits=5, configured="auto"
+    ) == (20, 80)
+    assert resolve_lightgbm_min_child_samples(
+        n_observations=8, cv_splits=2, configured=3
+    ) == (3, 4)
+
+
+def test_proxyspex_result_records_non_degeneracy_diagnostics() -> None:
+    masks = list(range(8))
+    values = [
+        float(bool(mask & 1)) + 2.0 * float((mask & 0b110) == 0b110)
+        for mask in masks
+    ]
+    model = fit_proxyspex_from_observations(
+        masks=masks,
+        values=values,
+        n_features=3,
+        proxy_model="tree",
+        hpo=False,
+        random_state=0,
+    )
+    diagnostics = model.to_dict()["diagnostics"]
+    assert diagnostics["degenerate_proxy"] is False
+    assert diagnostics["proxy_training_prediction_std"] > 0
+    assert diagnostics["refined_training_r2"] > 0.99
