@@ -44,6 +44,16 @@ def threshold_first_x(records: Sequence[Dict[str, float]], x_key: str, y_key: st
     return None
 
 
+def _trapezoid_area(y_values: np.ndarray, x_values: np.ndarray) -> float:
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y_values, x_values))
+    if len(y_values) < 2:
+        return 0.0
+    widths = x_values[1:] - x_values[:-1]
+    heights = (y_values[1:] + y_values[:-1]) * 0.5
+    return float(np.sum(widths * heights))
+
+
 def auc_logx(records: Sequence[Dict[str, float]], x_key: str, y_key: str) -> float | None:
     clean = [(float(row[x_key]), float(row[y_key])) for row in records if float(row[x_key]) > 0]
     if len(clean) < 2:
@@ -54,7 +64,7 @@ def auc_logx(records: Sequence[Dict[str, float]], x_key: str, y_key: str) -> flo
     denom = float(xs[-1] - xs[0])
     if denom <= 0:
         return None
-    return float(np.trapz(ys, xs) / denom)
+    return float(_trapezoid_area(ys, xs) / denom)
 
 
 def degree_curves(
@@ -147,4 +157,3 @@ def summarize_curve(records: Sequence[Dict[str, float]], *, x_key: str = "k") ->
         "x95": threshold_first_x(records, x_key, "r2", 0.95),
         "auc_r2_logx": auc_logx(records, x_key, "r2"),
     }
-
