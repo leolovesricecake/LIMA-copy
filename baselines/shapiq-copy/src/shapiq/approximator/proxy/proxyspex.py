@@ -122,6 +122,12 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
             sampling_weights=sampling_weights,
             initialize_dict=False,
         )
+        self.coalitions_matrix_: np.ndarray | None = None
+        self.coalition_values_: np.ndarray | None = None
+        self.final_proxy_model_: ProxyModel | None = None
+        self.unrefined_fourier_: dict[tuple[int, ...], float] | None = None
+        self.refined_fourier_: dict[tuple[int, ...], float] | None = None
+        self.moebius_transform_: dict[tuple[int, ...], float] | None = None
 
     def approximate(
         self,
@@ -144,14 +150,64 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
 
         coalitions_matrix = self._sampler.coalitions_matrix
         coalition_values = game(coalitions_matrix)
+        return self.approximate_from_observations(
+            coalitions_matrix,
+            coalition_values,
+            estimation_budget=budget,
+        )
+
+    def approximate_from_observations(
+        self,
+        coalitions_matrix: np.ndarray,
+        coalition_values: np.ndarray,
+        *,
+        estimation_budget: int | None = None,
+    ) -> InteractionValues:
+        """Fit ProxySPEX from caller-provided coalition observations.
+
+        This follows the same proxy fitting, Fourier extraction, refinement, and
+        interaction conversion path as :meth:`approximate`, while allowing
+        controlled-query experiments to share an identical observation table
+        across methods.
+
+        Args:
+            coalitions_matrix: Binary matrix with shape ``(n_samples, n_players)``.
+            coalition_values: Observed game values with shape ``(n_samples,)``.
+            estimation_budget: Budget recorded in the returned interaction values.
+                Defaults to the number of provided observations.
+
+        Returns:
+            The approximated interaction values.
+        """
+        matrix = np.asarray(coalitions_matrix, dtype=bool)
+        values = np.asarray(coalition_values, dtype=float).reshape(-1)
+        if matrix.ndim != 2 or matrix.shape[1] != self.n:
+            msg = (
+                "coalitions_matrix must have shape (n_samples, n_players); "
+                f"expected second dimension {self.n}, got {matrix.shape}."
+            )
+            raise ValueError(msg)
+        if matrix.shape[0] != len(values):
+            msg = "coalitions_matrix and coalition_values must contain the same number of rows."
+            raise ValueError(msg)
+        if matrix.shape[0] == 0:
+            msg = "ProxySPEX requires at least one coalition observation."
+            raise ValueError(msg)
+        if not np.all(np.isfinite(values)):
+            msg = "coalition_values contain NaN or infinite values."
+            raise ValueError(msg)
+
+        self.coalitions_matrix_ = matrix.copy()
+        self.coalition_values_ = values.copy()
 
         # Fit the model on the training data
-        self.proxy_model.fit(coalitions_matrix, coalition_values)
+        self.proxy_model.fit(matrix, values)
 
         if isinstance(self.proxy_model, ProxyModelWithHPO):
             final_model = self.proxy_model.best_estimator_
         else:
             final_model = self.proxy_model
+        self.final_proxy_model_ = final_model
         # Obtain TreeModel(s). convert_tree_model returns a single TreeModel for single-tree
         # proxies (e.g. a DecisionTreeRegressor) and a list for ensembles; normalize to a list.
         tree_models = convert_tree_model(final_model)
@@ -159,14 +215,17 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
             tree_models = [tree_models]
         # Obtain fourier coefficients
         unrefined_fourier = self._sklearn_to_fourier(tree_models=tree_models)
+        self.unrefined_fourier_ = dict(unrefined_fourier)
         # Refine the Fourier coefficients using the training data
         refined_fourier = self._refine(
             unrefined_fourier,
-            coalitions_matrix,
-            coalition_values,
+            matrix,
+            values,
         )
+        self.refined_fourier_ = dict(refined_fourier)
         # Convert the Fourier coefficients to the Moebius transform
         moebius_transform = self.fourier_to_moebius(refined_fourier)
+        self.moebius_transform_ = dict(moebius_transform)
         # Convert the Moebius transform to the desired index
         result = self._process_moebius(moebius_transform=moebius_transform)
         # Filter the output as needed
@@ -181,12 +240,35 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
             n_players=self.n,
             interaction_lookup=self.interaction_lookup,
             estimated=True,
-            estimation_budget=budget,
+            estimation_budget=int(matrix.shape[0])
+            if estimation_budget is None
+            else int(estimation_budget),
             baseline_value=result[self.interaction_lookup[()]]
             if () in self.interaction_lookup
             else 0.0,
             target_index=self.index,
         )
+
+    def predict_refined_fourier(self, coalitions_matrix: np.ndarray) -> np.ndarray:
+        """Predict coalition values from the fitted refined Fourier representation."""
+        if self.refined_fourier_ is None:
+            msg = "ProxySPEX must be fitted before refined Fourier prediction."
+            raise RuntimeError(msg)
+        matrix = np.asarray(coalitions_matrix, dtype=bool)
+        if matrix.ndim != 2 or matrix.shape[1] != self.n:
+            msg = (
+                "coalitions_matrix must have shape (n_samples, n_players); "
+                f"expected second dimension {self.n}, got {matrix.shape}."
+            )
+            raise ValueError(msg)
+        predictions = np.zeros(matrix.shape[0], dtype=float)
+        for interaction, coefficient in self.refined_fourier_.items():
+            if len(interaction) == 0:
+                predictions += float(coefficient)
+                continue
+            parity = np.sum(matrix[:, list(interaction)], axis=1) % 2
+            predictions += float(coefficient) * np.where(parity == 0, 1.0, -1.0)
+        return predictions
 
     def fourier_to_moebius(
         self, four_dict: dict[tuple[int, ...], float]
@@ -310,11 +392,16 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
             return four_dict
         sorted_four_coefs_sq = np.sort(four_coefs_sq)[::-1]
         cumulative_energy_ratio = np.cumsum(sorted_four_coefs_sq / tot_energy)
-        thresh_idx_95 = np.argmin(cumulative_energy_ratio < 0.95) + 1
+        thresh_idx_95 = min(
+            int(np.searchsorted(cumulative_energy_ratio, 0.95, side="left")),
+            len(sorted_four_coefs_sq) - 1,
+        )
         thresh = np.sqrt(sorted_four_coefs_sq[thresh_idx_95])
 
         four_dict_trunc = {
-            tuple(int(i in k) for i in range(n)): v for k, v in four_dict.items() if abs(v) > thresh
+            tuple(int(i in k) for i in range(n)): v
+            for k, v in four_dict.items()
+            if abs(v) >= thresh
         }
         support = np.array(list(four_dict_trunc.keys()))
 

@@ -65,19 +65,32 @@ from .imputer import (
 # base classes
 from .interaction_values import InteractionValues
 
-# plotting functions
-from .plot import (
-    bar_plot,
-    beeswarm_plot,
-    force_plot,
-    network_plot,
-    scatter_plot,
-    sentence_plot,
-    si_graph_plot,
-    stacked_bar_plot,
-    upset_plot,
-    waterfall_plot,
-)
+# Plotting dependencies are not required by the approximator API. Keep a
+# source checkout importable when optional visualization packages are absent.
+try:
+    from .plot import (
+        bar_plot,
+        beeswarm_plot,
+        force_plot,
+        network_plot,
+        scatter_plot,
+        sentence_plot,
+        si_graph_plot,
+        stacked_bar_plot,
+        upset_plot,
+        waterfall_plot,
+    )
+except ImportError:  # pragma: no cover - depends on optional plotting extras
+    bar_plot = None
+    beeswarm_plot = None
+    force_plot = None
+    network_plot = None
+    scatter_plot = None
+    sentence_plot = None
+    si_graph_plot = None
+    stacked_bar_plot = None
+    upset_plot = None
+    waterfall_plot = None
 from .tree import TreeExplainer
 
 # public utils functions

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
 
@@ -56,7 +56,7 @@ def random_uniform_masks(n_features: int, count: int, seed: int) -> List[int]:
     rng = np.random.default_rng(int(seed))
     n = int(n_features)
     out = set()
-    target = int(count)
+    target = min(int(count), 1 << n)
     while len(out) < target:
         rows = rng.random((max(1, target - len(out)), n)) < 0.5
         for row in rows:
@@ -68,6 +68,102 @@ def random_uniform_masks(n_features: int, count: int, seed: int) -> List[int]:
             if len(out) >= target:
                 break
     return sorted(out)
+
+
+def sample_attribution_masks(
+    n_features: int,
+    budget: int,
+    *,
+    seed: int,
+    exclude: Sequence[int] = (),
+    include_empty_full: bool = True,
+) -> List[int]:
+    """Sample unique Bernoulli-0.5 masks under an exact logical budget."""
+
+    n = int(n_features)
+    universe_size = 1 << n
+    excluded = {int(mask) for mask in exclude if 0 <= int(mask) < universe_size}
+    available = universe_size - len(excluded)
+    target = min(max(0, int(budget)), available)
+    if target == 0:
+        return []
+    out: set[int] = set()
+    if include_empty_full:
+        for mask in (0, universe_size - 1):
+            if mask not in excluded and len(out) < target:
+                out.add(mask)
+    rng = np.random.default_rng(int(seed))
+    if n <= 20 and target > available // 2:
+        pool = np.asarray([mask for mask in range(universe_size) if mask not in excluded], dtype=object)
+        chosen = rng.choice(len(pool), size=target, replace=False)
+        return sorted(int(pool[idx]) for idx in chosen)
+    while len(out) < target:
+        needed = target - len(out)
+        rows = rng.random((max(8, needed * 2), n)) < 0.5
+        for row in rows:
+            mask = 0
+            for idx, keep in enumerate(row):
+                if bool(keep):
+                    mask |= 1 << idx
+            if mask not in excluded:
+                out.add(mask)
+            if len(out) >= target:
+                break
+    return sorted(out)
+
+
+def sample_evaluation_masks(
+    n_features: int,
+    *,
+    count_per_distribution: int,
+    seed: int,
+    exclude: Sequence[int] = (),
+    near_full_deletions: Sequence[int] = (1, 2, 3, 5),
+    fixed_keep_fractions: Sequence[float] = (0.25, 0.5, 0.75),
+) -> Dict[str, List[int]]:
+    """Build shared held-out masks for uniform, near-full and fixed-cardinality tests."""
+
+    n = int(n_features)
+    excluded = {int(mask) for mask in exclude}
+    count = max(0, int(count_per_distribution))
+    uniform = sample_attribution_masks(
+        n,
+        count,
+        seed=int(seed),
+        exclude=sorted(excluded),
+        include_empty_full=False,
+    )
+    used = excluded | set(uniform)
+    rng = np.random.default_rng(int(seed) + 104729)
+
+    def _draw_by_cardinality(delete_counts: Sequence[int], target: int) -> List[int]:
+        choices = sorted({max(0, min(n, int(value))) for value in delete_counts})
+        possible = sum(math.comb(n, deletion) for deletion in choices)
+        target = min(int(target), max(0, possible))
+        out: set[int] = set()
+        attempts = 0
+        while len(out) < target and attempts < max(1000, target * 100):
+            attempts += 1
+            deletion = int(rng.choice(choices))
+            deleted = rng.choice(n, size=deletion, replace=False).tolist() if deletion else []
+            mask = (1 << n) - 1
+            for idx in deleted:
+                mask &= ~(1 << int(idx))
+            if mask not in used:
+                out.add(mask)
+        return sorted(out)
+
+    near_full = _draw_by_cardinality(near_full_deletions, count)
+    used.update(near_full)
+    keep_counts = sorted(
+        {
+            max(0, min(n, int(round(float(fraction) * n))))
+            for fraction in fixed_keep_fractions
+        }
+    )
+    fixed_deletions = [n - keep for keep in keep_counts]
+    fixed = _draw_by_cardinality(fixed_deletions, count)
+    return {"uniform": uniform, "near_full": near_full, "fixed_cardinality": fixed}
 
 
 def random_near_full_masks(
@@ -129,4 +225,3 @@ def split_masks(
     validation = sorted(shuffled[n_test : n_test + n_val])
     train_pool = sorted(shuffled[n_test + n_val :])
     return train_pool, validation, test
-

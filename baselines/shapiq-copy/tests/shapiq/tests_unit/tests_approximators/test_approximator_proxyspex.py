@@ -177,3 +177,79 @@ def test_refine_zero_total_energy():
 
     assert result == four_dict
     assert len(result) == len(four_dict)
+
+
+def test_refine_energy_threshold_handles_last_coefficient_boundary():
+    """A 95% crossing at the final energy term must not index past the array."""
+    from sklearn.tree import DecisionTreeRegressor
+
+    n = 5
+    approximator = ProxySPEX(
+        n=n,
+        max_order=2,
+        index="FBII",
+        proxy_model=DecisionTreeRegressor(random_state=0),
+        hpo=False,
+        random_state=42,
+    )
+    interactions = [
+        tuple(idx for idx in range(n) if mask & (1 << idx))
+        for mask in range(1, 20)
+    ]
+    four_dict = {(): 0.0, **{interaction: 1.0 for interaction in interactions}}
+    train_X = np.asarray(
+        [[bool(mask & (1 << idx)) for idx in range(n)] for mask in range(1 << n)],
+        dtype=bool,
+    )
+    train_y = np.zeros(len(train_X), dtype=float)
+    for interaction, coefficient in four_dict.items():
+        if not interaction:
+            train_y += coefficient
+        else:
+            parity = np.sum(train_X[:, list(interaction)], axis=1) % 2
+            train_y += coefficient * np.where(parity == 0, 1.0, -1.0)
+
+    result = approximator._refine(four_dict, train_X, train_y)
+
+    assert result
+    assert all(np.isfinite(value) for value in result.values())
+
+
+def test_fixed_observations_reuse_native_fit_extract_path():
+    """Caller-provided observations must match the native post-sampling path."""
+    from sklearn.tree import DecisionTreeRegressor
+
+    n = 3
+
+    def game(matrix):
+        values = []
+        for row in matrix:
+            values.append(float(row[0]) + 2.0 * float(row[1] and row[2]))
+        return np.asarray(values)
+
+    native = ProxySPEX(
+        n=n,
+        max_order=2,
+        index="FBII",
+        proxy_model=DecisionTreeRegressor(random_state=0),
+        hpo=False,
+        random_state=7,
+    )
+    native_result = native.approximate(2**n, game)
+    controlled = ProxySPEX(
+        n=n,
+        max_order=2,
+        index="FBII",
+        proxy_model=DecisionTreeRegressor(random_state=0),
+        hpo=False,
+        random_state=7,
+    )
+    controlled_result = controlled.approximate_from_observations(
+        native.coalitions_matrix_,
+        native.coalition_values_,
+    )
+    assert native.refined_fourier_ == pytest.approx(controlled.refined_fourier_)
+    assert native.moebius_transform_ == pytest.approx(controlled.moebius_transform_)
+    assert native_result.dict_values == pytest.approx(controlled_result.dict_values)
+    prediction = controlled.predict_refined_fourier(native.coalitions_matrix_)
+    assert prediction.shape == native.coalition_values_.shape

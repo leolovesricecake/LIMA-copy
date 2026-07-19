@@ -101,6 +101,7 @@ def main() -> None:
         scorer,
         target_class_source=str(value_cfg.get("target_class_source", "full_input_prediction")),
         verbalizer_length_normalization=str(value_cfg.get("verbalizer_length_normalization", "mean")),
+        value_type=str(value_cfg.get("type", "predicted_class_margin")),
     )
     records = load_sentiment_records(dataset_cfg)
     max_records = config.get("max_records")

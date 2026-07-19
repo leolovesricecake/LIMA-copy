@@ -6,4 +6,4 @@ matplotlib
 psutil
 datasets
 tqdm
-
+pytest

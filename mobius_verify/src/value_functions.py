@@ -18,6 +18,8 @@ class ValueFunctionMetadata:
     full_scores: List[float]
     target_class_source: str
     verbalizer_length_normalization: str
+    full_value: float
+    full_competitor_class: Optional[int]
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -27,7 +29,59 @@ class ValueFunctionMetadata:
             "full_scores": [float(x) for x in self.full_scores],
             "target_class_source": self.target_class_source,
             "verbalizer_length_normalization": self.verbalizer_length_normalization,
+            "full_value": float(self.full_value),
+            "full_competitor_class": self.full_competitor_class,
         }
+
+
+VALUE_FUNCTION_TYPES = {"predicted_class_margin", "raw_target_score"}
+
+
+def normalize_value_function_type(value_type: str) -> str:
+    normalized = str(value_type).strip().lower()
+    aliases = {
+        "margin": "predicted_class_margin",
+        "predicted_margin": "predicted_class_margin",
+        "raw": "raw_target_score",
+        "raw_target": "raw_target_score",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in VALUE_FUNCTION_TYPES:
+        raise ValueError(
+            f"Unsupported value function: {value_type!r}. Expected one of {sorted(VALUE_FUNCTION_TYPES)}."
+        )
+    return normalized
+
+
+def values_from_score_matrix(
+    scores: Sequence[Sequence[float]] | np.ndarray,
+    *,
+    target_class: int,
+    value_type: str = "predicted_class_margin",
+) -> np.ndarray:
+    matrix = np.asarray(scores, dtype=np.float64)
+    if matrix.ndim != 2:
+        raise ValueError(f"scores must have shape [n_samples, n_classes], got {matrix.shape}")
+    target = int(target_class)
+    if target < 0 or target >= matrix.shape[1]:
+        raise ValueError(f"target_class={target} is outside [0, {matrix.shape[1]})")
+    normalized = normalize_value_function_type(value_type)
+    target_scores = matrix[:, target]
+    if normalized == "raw_target_score":
+        return target_scores.astype(np.float64)
+    if matrix.shape[1] < 2:
+        raise ValueError("predicted_class_margin requires at least two classes")
+    competitors = np.delete(matrix, target, axis=1)
+    return (target_scores - np.max(competitors, axis=1)).astype(np.float64)
+
+
+def best_competitor(scores: Sequence[float], target_class: int) -> int | None:
+    row = np.asarray(scores, dtype=np.float64)
+    if row.ndim != 1 or len(row) < 2:
+        return None
+    target = int(target_class)
+    candidates = [(float(value), idx) for idx, value in enumerate(row) if idx != target]
+    return int(max(candidates, key=lambda item: (item[0], -item[1]))[1])
 
 
 class PredictedClassMarginValueFunction:
@@ -37,10 +91,12 @@ class PredictedClassMarginValueFunction:
         *,
         target_class_source: str = "full_input_prediction",
         verbalizer_length_normalization: str = "mean",
+        value_type: str = "predicted_class_margin",
     ) -> None:
         self.scorer = scorer
         self.target_class_source = str(target_class_source)
         self.verbalizer_length_normalization = str(verbalizer_length_normalization)
+        self.value_type = normalize_value_function_type(value_type)
 
     def target_for_text(self, text: str, *, gold_label: Optional[int] = None) -> tuple[int, np.ndarray]:
         scores = np.asarray(self.scorer.score_text(text), dtype=np.float64)
@@ -63,17 +119,29 @@ class PredictedClassMarginValueFunction:
         target, scores = self.target_for_text(feature_spec.normalized_model_text, gold_label=gold_label)
         label_text = str(self.scorer.verbalizers[target]) if target < len(self.scorer.verbalizers) else str(target)
         return ValueFunctionMetadata(
-            value_function="predicted_class_margin",
+            value_function=self.value_type,
             target_class=int(target),
             target_label_text=label_text,
             full_scores=[float(x) for x in scores.tolist()],
             target_class_source=self.target_class_source,
             verbalizer_length_normalization=self.verbalizer_length_normalization,
+            full_value=float(
+                values_from_score_matrix(
+                    scores.reshape(1, -1),
+                    target_class=target,
+                    value_type=self.value_type,
+                )[0]
+            ),
+            full_competitor_class=best_competitor(scores, target),
         )
 
     def evaluate_texts(self, texts: Sequence[str], *, target_class: int) -> np.ndarray:
         scores = np.asarray(self.scorer.score_texts(list(texts)), dtype=np.float64)
-        return scores[:, int(target_class)].astype(np.float64)
+        return values_from_score_matrix(
+            scores,
+            target_class=int(target_class),
+            value_type=self.value_type,
+        )
 
     def evaluate_masks(
         self,
@@ -106,4 +174,3 @@ class PredictedClassMarginValueFunction:
             cur = texts[start : start + int(batch_size)]
             values.extend(self.evaluate_texts(cur, target_class=target_class).tolist())
         return np.asarray(values, dtype=np.float64)
-

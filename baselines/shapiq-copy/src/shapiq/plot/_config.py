@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from colour import Color
+try:
+    from colour import Color
+except ImportError:  # pragma: no cover - source-checkout fallback
+    class Color:  # type: ignore[no-redef]
+        """Minimal fallback used when plotting's optional colour package is absent."""
+
+        def __init__(self, value: str) -> None:
+            self.hex = str(value)
 
 __all__ = ["BLUE", "COLORS_K_SII", "LINES", "NEUTRAL", "RED", "get_color"]
 

@@ -116,8 +116,22 @@ def _report(rows: List[Dict[str, Any]], recovery_rows: List[Dict[str, Any]]) -> 
     mobius_k90 = [row.get("mobius_k90") for row in nondeg if row.get("mobius_k90") not in {None, ""}]
     fourier_k90 = [row.get("fourier_k90") for row in nondeg if row.get("fourier_k90") not in {None, ""}]
     supported_low_degree = sum(1 for x in mobius_d90 if int(x) <= 4)
-    low_degree_rate = supported_low_degree / len(mobius_d90) if mobius_d90 else None
-    paired = paired_difference_summary(mobius_k90, fourier_k90) if mobius_k90 and fourier_k90 else {}
+    # A null d90 means the threshold was not reached and must remain in the denominator.
+    low_degree_rate = supported_low_degree / len(nondeg) if nondeg else None
+    paired_rows = [
+        (row.get("mobius_k90"), row.get("fourier_k90"))
+        for row in nondeg
+        if row.get("mobius_k90") not in {None, ""}
+        and row.get("fourier_k90") not in {None, ""}
+    ]
+    paired = (
+        paired_difference_summary(
+            [float(left) for left, _ in paired_rows],
+            [float(right) for _, right in paired_rows],
+        )
+        if paired_rows
+        else {}
+    )
     recovery_ok = [row for row in recovery_rows if row.get("status") == "ok"]
     mobius_r2 = [
         float(row["test_r2"])
@@ -134,6 +148,8 @@ def _report(rows: List[Dict[str, Any]], recovery_rows: List[Dict[str, Any]]) -> 
         "mobius_d90_ci": bootstrap_ci(mobius_d90) if mobius_d90 else {},
         "fourier_d90_ci": bootstrap_ci(fourier_d90) if fourier_d90 else {},
         "mobius_low_degree_rate_d90_le_4": low_degree_rate,
+        "mobius_d90_reached_count": int(len(mobius_d90)),
+        "mobius_d90_not_reached_count": int(len(nondeg) - len(mobius_d90)),
         "mobius_minus_fourier_k90": paired,
         "mobius_recovery_r2": bootstrap_ci(mobius_r2) if mobius_r2 else {},
         "gbt_recovery_r2": bootstrap_ci(gbt_r2) if gbt_r2 else {},
@@ -147,6 +163,7 @@ This report was generated from the currently available result files. The verdict
 
 - Non-degenerate exact/probe spectra: {len(nondeg)}
 - Mobius d90 <= 4 rate: {low_degree_rate}
+- Mobius d90 reached / not reached: {len(mobius_d90)} / {len(nondeg) - len(mobius_d90)}
 - Mobius d90 summary: {payload['mobius_d90_ci']}
 - Fourier d90 summary: {payload['fourier_d90_ci']}
 - Paired Mobius-Fourier k90 difference: {paired}
@@ -166,7 +183,7 @@ Generated once counterexamples and failed samples are present in the aggregate t
 
 # Confounders and Limitations
 
-Feature granularity, mask operator, Mobius non-orthogonality, value function choice, exact small-n/probe conditioning, and LASSO conditioning all remain explicit confounders.
+Feature granularity, mask operator, Mobius non-orthogonality, exact small-n/probe conditioning, and LASSO conditioning all remain explicit confounders. Historical `exact_default` tables were collected from raw target verbalizer scores despite the old `predicted_class_margin` label; they are sensitivity evidence, not the new margin-based primary experiment.
 
 # Final Verdict
 

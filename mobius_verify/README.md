@@ -1,177 +1,295 @@
-# Mobius Verify
+# Sparse Möbius Attribution
 
-`mobius_verify` 是一个用于验证 LLM / 神经模型局部 masked value function 结构的可复现实验工程。核心问题是：
+`mobius_verify` 现在是一个方法优先的 LLM 交互归因实验工程。它直接在 presence/deletion-Möbius 字典中估计稀疏超边，并在相同 word players、value function、掩码方式和逻辑查询预算下，与 Fourier、GBT 和完整 ProxySPEX 比较。
 
-> 对文本局部掩码函数 `f(S)`，低阶稀疏 Möbius 超图结构是否比 ProxySPEX 所依赖的 Fourier hierarchy / staircase 结构更普遍、更稳定，并且是否更容易用有限黑盒查询恢复？
+完整研究定义、实验约束和实现门控见 [docs/plan_tree.md](docs/plan_tree.md)。
 
-主实验的 sentiment 特征粒度是 **真实 lexical word**。每个样本允许有自己的 `n_i`，不会为了固定 `n` 把多个词合并成 block。固定大小只用于短文本 exact 筛选或长文本 probe set。
+## 核心问题
 
-## 环境
-
-最小 smoke 只需要：
-
-```bash
-pip install -r mobius_verify/requirements.txt
-```
-
-当前仓库机器上可能没有 `python` 命令，可使用 `python3` 或显式解释器路径。例如：
-
-```bash
-/opt/miniconda3/bin/python mobius_verify/scripts/run_synthetic.py --config mobius_verify/configs/synthetic_default.yaml
-```
-
-如果要运行真实 HF causal LM，还需要可用的 `torch`、`transformers`、模型权重和设备配置。
-
-## 快速 Smoke
-
-Smoke 配置使用 mock sentiment scorer 和内联样本，不会下载模型或数据集。
-
-```bash
-python3 mobius_verify/scripts/run_synthetic.py \
-  --config mobius_verify/configs/synthetic_default.yaml \
-  --overwrite
-
-python3 mobius_verify/scripts/collect_exact_values.py \
-  --config mobius_verify/configs/exact_smoke.yaml \
-  --overwrite
-
-python3 mobius_verify/scripts/compute_exact_spectra.py \
-  --results-dir mobius_verify/results/exact_smoke \
-  --d-max 3 \
-  --overwrite
-
-python3 mobius_verify/scripts/run_limited_query_recovery.py \
-  --config mobius_verify/configs/recovery_default.yaml \
-  --results-dir mobius_verify/results/exact_smoke \
-  --overwrite
-
-python3 mobius_verify/scripts/aggregate_results.py \
-  --results-dir mobius_verify/results/exact_smoke
-```
-
-运行后主要结果在：
+给定保留词集合 `S` 和全集 `N`：
 
 ```text
-mobius_verify/results/exact_smoke/
-├── features/
-├── values_exact_global/
-├── values_exact_probe/
-├── spectra_exact_global/
-├── spectra_exact_probe/
-├── recovery/
-└── aggregate/
+f(S) = model_value(x_S)
 ```
 
-最终摘要报告：
+Presence-Möbius 使用：
 
 ```text
-mobius_verify/results/exact_smoke/aggregate/hypothesis_report.md
+f_hat(S) = beta_0 + sum_T theta_pre[T] * 1{T subseteq S}
 ```
 
-## 配置文件
+Deletion-Möbius 先定义删除集合：
 
-- `configs/synthetic_default.yaml`：合成函数 sanity check。
-- `configs/exact_default.yaml`：真实/主实验的词级 featureization、短文本 exact global、长文本 exact probe。
-- `configs/exact_smoke.yaml`：无需模型下载的 mock smoke 配置。
-- `configs/recovery_default.yaml`：有限查询恢复实验。
-- `configs/medium_default.yaml`：medium-n 实验占位，默认 gated，不会误运行。
-
-## 真实数据和模型
-
-默认数据配置可以替换为 LIMA 已支持的 sentiment 数据集，例如 `sst2`、`rotten_tomatoes`、`emotion`、`eraser_movie_reviews`。
-
-示例：
-
-```yaml
-dataset:
-  name: sst2
-  split: validation
-  max_samples: 20
-  dataset_cache_dir: /path/to/hf_cache
-  verbalizers: [negative, positive]
-
-model:
-  type: hf_causal_lm
-  model_path: /path/to/Qwen2.5-7B-Instruct
-  device: cuda:0
-  dtype: bfloat16
-  max_length: 2048
+```text
+g(D) = f(N \ D)
 ```
 
-真实模型命令：
+再拟合：
 
-```bash
-python3 scripts/collect_exact_values.py \
-  --config mobius_verify/configs/exact_default.yaml
-
-python3 scripts/compute_exact_spectra.py \
-  --results-dir mobius_verify/results/exact_default \
-  --d-max 4
-
-python3 scripts/run_limited_query_recovery.py \
-  --config configs/recovery_default.yaml
-
-python3 scripts/aggregate_results.py \
-  --results-dir results/exact_default
+```text
+g_hat(D) = beta_0 + sum_T theta_del[T] * 1{T subseteq D}
 ```
+
+对非空 `T`，常见符号约定下 `OR interaction = -m_del(T)`。本项目不把 deletion-Möbius/OR 当作新指标；研究重点是直接 Möbius 参数化能否带来更稀疏、稳定、查询高效且可校准的归因。
+
+低阶 Möbius 与低阶 Fourier 张成相同函数空间，因此实验比较的是坐标稀疏性和恢复过程，不声称 Möbius 的低阶表达能力更强。
+
+## 当前实现
+
+- lexical-word players，保留 char/token spans；
+- delete mask operator；
+- predicted-class margin 主 value function；
+- raw target verbalizer score 敏感性实验；
+- 全局 SQLite `ValueOracle` cache；
+- 每方法独立 logical query ledger；
+- degree-1 和 degree-2 全候选；
+- empirical centering/scaling；
+- LASSO/ElasticNet support selection；
+- selected support 上 ridge refit，可识别时附带 OLS debias；
+- controlled-query comparison；
+- native-method comparison；
+- 完整 ProxySPEX tree/Fourier/refinement/Möbius 链路；
+- uniform、near-full、fixed-cardinality held-out faithfulness；
+- comprehensiveness、sufficiency、MoRF/LeRF 删除曲线；
+- deletion/presence targeted exact coefficient verification；
+- random ranking 和 random hyperedge controls；
+- 多预算、seed、失败记录、resume 和聚合报告；
+- 仅用 predicted-class margin 执行 sample-level paired bootstrap 与 degree-2 门控。
 
 ## Value Function
 
-Sentiment 主 value function 是：
+对每个 masked input，模型返回所有 verbalizer 的平均 conditional log probability `z_c(S)`。
 
-```yaml
-value_function:
-  type: predicted_class_margin
-  verbalizer_length_normalization: mean
-  target_class_source: full_input_prediction
+完整输入决定固定目标类别：
+
+```text
+c_star = argmax_c z_c(N)
 ```
 
-含义：
+主实验：
 
-- 先在完整输入上确定 predicted class；
-- 对每个 masked input，只取该目标类别的 raw score；
-- 对 causal LM，raw score 实现为目标 verbalizer token 的平均 conditional log probability；
-- 不使用 softmax probability，避免概率饱和影响结构分析。
+```text
+f_margin(S) = z_c_star(S) - max_{c != c_star} z_c(S)
+```
 
-## 实验范围
+敏感性实验：
 
-`exact_global`：
+```text
+f_raw_target(S) = z_c_star(S)
+```
 
-对自然短文本完整枚举 `2^n_i` 个词子集，得到全局词级 value table 和精确 Möbius / Fourier 谱。
+ValueOracle 缓存完整类别分数向量，因此两种 value 不会重复请求 LLM。
 
-`exact_probe`：
+## 两种比较协议
 
-对长文本选择大小为 `k` 的词级 probe set，只枚举 probe 内组合；probe 外词默认保持存在，即 `rest_present`。该结果是条件局部谱，不是完整长文本全局谱。
+### Controlled
 
-`limited-query recovery`：
+所有方法共享完全相同的 attribution masks 和 values：
 
-从保存的 exact table 中抽取同一组 train / validation / test masks，对比：
+- Additive LASSO；
+- Presence-Möbius LASSO；
+- Deletion-Möbius LASSO；
+- Fourier LASSO；
+- sklearn GBT；
+- ProxySPEX fixed observations。
 
-- Additive LASSO
-- Low-degree Möbius LASSO
-- Low-degree Fourier LASSO
-- sklearn `GradientBoostingRegressor`
+该协议用于区分坐标表示与估计器的影响。
 
-查询预算按 `m = α n_i log2(n_i)` 缩放。
+### Native
+
+每种方法使用自己的采样/拟合过程，但总 logical attribution budget 相同：
+
+- Sparse deletion-Möbius；
+- 完整 ProxySPEX。
+
+所有方法拟合完成后，才生成并查询共同的 held-out evaluation masks。Evaluation 和 targeted verification 不计入 attribution budget，但单独记录真实前向数量。
+
+## 环境
+
+基础依赖：
+
+```bash
+python3 -m pip install -r mobius_verify/requirements.txt
+```
+
+真实 LLM 实验还需要：
+
+- `torch`；
+- `transformers`；
+- 可访问的模型权重；
+- ProxySPEX 主配置所用的 `lightgbm`。
+
+Smoke 使用 sklearn decision tree 作为 ProxySPEX proxy，不需要 LightGBM、GPU、模型下载或 Hugging Face 数据下载。
+
+ProxySPEX HPO 会按实际 attribution observation 数调整 CV：4 个样本使用 2-fold，少于 4 个样本对该次拟合关闭 HPO，避免 `n_splits > n_samples`。
+
+
+## 真实 SST-2 + Qwen
+
+先在 `mobius_verify/configs/attribution_mvp.yaml` 中确认：
+
+```yaml
+dataset:
+  dataset_cache_dir: /path/to/hf_cache
+
+model:
+  model_path: /path/to/Qwen2.5-7B-Instruct
+  device: cuda:0
+```
+
+运行：
+
+```bash
+python3 mobius_verify/scripts/run_attribution_benchmark.py \
+  --config mobius_verify/configs/attribution_mvp.yaml
+
+python3 mobius_verify/scripts/aggregate_attribution.py \
+  --results-dir mobius_verify/results/attribution_mvp
+```
+
+使用其他输出目录：
+
+```bash
+python3 mobius_verify/scripts/run_attribution_benchmark.py \
+  --config mobius_verify/configs/attribution_mvp.yaml \
+  --results-dir mobius_verify/results/my_experiment
+```
+
+已有完整 `result.json` 会被跳过。Native 协议若只完成了部分方法，会重新运行该比较单元，以保证各方法使用同一组、且未被训练阶段见过的 evaluation masks。
+
+## 主要配置
+
+```yaml
+seeds: [0, 1, 2]
+budget_alphas: [1, 2, 4, 8]
+max_degree: 2
+value_functions: [predicted_class_margin, raw_target_score]
+
+controlled_methods:
+  - additive_lasso
+  - presence_mobius
+  - deletion_mobius
+  - fourier
+  - sklearn_gbt
+  - proxyspex_fixed_observations
+
+native_methods:
+  - deletion_mobius
+  - proxyspex
+
+evaluation_masks_per_distribution: 128
+targeted_top_k: 5
+decision_min_samples: 10
+proxyspex_noninferiority_margin: -0.02
+hyperedge_stability_floor: 0.1
+```
+
+每个样本的预算按下式生成：
+
+```text
+B = alpha * n * log2(n)
+```
+
+也可以用 `budgets: [128, 256, 512]` 指定固定预算。
+
+## 查询预算与 Cache
+
+全局 cache 位于：
+
+```text
+results/<experiment>/cache/value_oracle.sqlite3
+```
+
+公平比较使用每个方法的：
+
+```text
+query_ledger.attribution_budget_used
+```
+
+即使某个 mask 已被其他方法缓存，该方法访问它时仍计一次 logical query。Cache 只减少实际 GPU 前向，不会给后运行的方法免费预算。
+
+主要账本字段：
+
+- `attribution_budget_used`；
+- `logical_unique_queries`；
+- `physical_forwards_caused`；
+- `global_cache_hits/misses`；
+- `evaluation_only_queries`；
+- `interaction_verification_queries`。
+
+`physical_forwards_caused`/`physical_values_scored` 表示该方法触发的未缓存文本评分数，不是 batch 数。全局实际评分文本数、scorer batch 次数和模型自身 counters 记录在 `manifest.json` 的 `value_oracle_counters` 中。使用已有 cache 重新运行时，这些本轮计数可以为 0。
+
+## 输出目录
+
+```text
+mobius_verify/results/<experiment>/
+├── run_config.json
+├── environment.json
+├── manifest.json
+├── cache/value_oracle.sqlite3
+├── features/<task>/<sample_id>.json
+├── protocols/
+│   ├── controlled/<value>/<method>/<task>/<sample>/budget_*/seed_*/result.json
+│   └── native/<value>/<method>/<task>/<sample>/budget_*/seed_*/result.json
+└── aggregate/
+    ├── sample_metrics.csv
+    ├── method_summary.csv
+    ├── query_metrics.csv
+    ├── stability_metrics.csv
+    ├── interaction_metrics.csv
+    ├── paired_differences.csv
+    ├── paired_query_auc.csv
+    ├── hypothesis_results.json
+    └── hypothesis_report.md
+```
+
+单个结果保存：
+
+- surrogate coefficients/hyperedges；
+- node scores 和正向/负向/绝对值 ranking；
+- 三种 held-out 分布的 reconstruction metrics；
+- attribution 删除曲线；
+- targeted coefficient 校准；
+- query ledger、fit diagnostics 和失败原因。
+
+## 如何解读结果
+
+- `controlled` 中 Möbius 与 Fourier 的差异主要反映坐标稀疏性和正则化几何。
+- `native` 才回答 Sparse Möbius 与完整 ProxySPEX 哪个归因方法更有效。
+- Deletion targeted verification 给出真实 deletion-Möbius coefficient。
+- Presence targeted verification 使用 near-empty 输入，分布外风险更高。
+- 高 held-out R² 不自动证明 hyperedge 是真实模型机制，仍需 targeted calibration 和多 seed stability。
+- `predicted_class_margin` 是主结论；`raw_target_score` 只能作为敏感性证据。
+
+主门控使用 near-full held-out R² 对归一化逻辑预算的 AUC，并且只使用 `predicted_class_margin`：
+
+- controlled deletion-Möbius 相对 additive 的 sample-level bootstrap CI 下界大于 0；
+- targeted top-edge magnitude 高于 matched random edge；
+- 跨 seed hyperedge support 不完全不稳定；
+- native deletion-Möbius 相对 ProxySPEX 的 CI 下界不低于 `-0.02`。
+
+样本不足、只有一个预算点或证据互相冲突时，报告会保持 `Inconclusive`，不会用 raw-target 结果替主实验作结论。
 
 ## 测试
 
-编译检查：
-
 ```bash
 python3 -m py_compile $(find mobius_verify -name '*.py' -not -path '*/results/*')
-```
-
-单元测试：
-
-```bash
 python3 -m pytest mobius_verify/tests -q
 ```
 
-如果本机 `pytest` 因 native 依赖段错误，可先用 smoke CLI 验证核心链路。
+ProxySPEX copy 测试：
 
-## 重要限制
+```bash
+PYTHONPATH=baselines/shapiq-copy/src \
+python3 -m pytest \
+  baselines/shapiq-copy/tests/shapiq/tests_unit/tests_approximators/test_approximator_proxyspex.py \
+  -q
+```
 
-Möbius 基底非正交，Fourier 基底正交，因此不能直接比较两者原始 coefficient energy。主比较必须使用同一输出空间里的 reconstruction R² / normalized RMSE。
+某些本地 Python/native 组合会让 pytest 在收集阶段段错误；此时应至少运行快速 Smoke，它覆盖真实的完整实验链路。
 
-短文本 exact global 只能说明自然短句的全局词级结构；长文本 exact probe 只能说明“在其他词保持存在时”的条件局部结构。最终结论需要按任务、长度区间、样本级 paired comparison 分别报告。
+## 旧结构审计
+
+旧的 exact-global、conditional-probe 和 limited-query recovery 不再是推荐主流程。相关脚本和数值模块暂时保留，用于 synthetic sanity、少量短文本 exact calibration 和历史结果复核。
+
+特别注意：现有 `results/exact_default` 虽曾标记为 `predicted_class_margin`，实际收集的是 raw target verbalizer score。它只能作为 sensitivity/失败案例数据，不能与新的 margin 主实验直接合并。

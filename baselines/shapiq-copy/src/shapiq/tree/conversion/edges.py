@@ -8,8 +8,6 @@ import numpy as np
 
 from shapiq.tree.base import EdgeTree
 
-from .cext import create_edge_tree_arrays  # ty: ignore[unresolved-import]
-
 if TYPE_CHECKING:
     from shapiq.typing import FloatVector, IntVector
 
@@ -31,6 +29,11 @@ def create_edge_tree(
     pre-calculates edge weights, ancestor references, empty predictions, and interaction
     height counts up to ``max_interaction``.
     """
+    # The compiled extension is needed only by the edge-based TreeSHAP path.
+    # Import it lazily so proxy/Fourier workflows remain usable from a source
+    # checkout that has not built the optional C++ module.
+    from .cext import create_edge_tree_arrays  # ty: ignore[unresolved-import]
+
     (
         parents,
         ancestors,

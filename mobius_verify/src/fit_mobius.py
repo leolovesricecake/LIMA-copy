@@ -4,9 +4,9 @@ from typing import Dict, Sequence
 
 import numpy as np
 
+from .methods.sparse_surrogate import fit_sparse_surrogate
 from .reconstruction_metrics import mae, normalized_rmse, r2_score
-from .subset_enumeration import candidate_count, candidate_terms
-from .transforms import design_mobius
+from .subset_enumeration import candidate_count
 
 
 def fit_mobius_lasso(
@@ -21,38 +21,30 @@ def fit_mobius_lasso(
     degrees: Sequence[int],
     alphas: Sequence[float],
     max_candidates: int = 20000,
+    orientation: str = "presence_mobius",
 ) -> Dict[str, object]:
-    from sklearn.linear_model import Lasso
+    """Legacy recovery wrapper backed by the shared empirical-standardized estimator."""
 
-    ytr = np.asarray(y_train, dtype=np.float64)
-    yv = np.asarray(y_validation, dtype=np.float64)
-    yt = np.asarray(y_test, dtype=np.float64)
+    y_val = np.asarray(y_validation, dtype=np.float64)
+    y_test_arr = np.asarray(y_test, dtype=np.float64)
     best = None
     infeasible = []
     for degree in degrees:
         if candidate_count(n_features, int(degree)) > int(max_candidates):
             infeasible.append(int(degree))
             continue
-        terms = candidate_terms(n_features, int(degree))
-        scales = np.asarray([2.0 ** (-term.bit_count() / 2.0) for term in terms], dtype=np.float64)
-        scales[scales <= 1e-12] = 1.0
-        X_train = design_mobius(train_masks, terms) / scales[None, :]
-        X_val = design_mobius(validation_masks, terms) / scales[None, :]
-        for alpha in alphas:
-            model = Lasso(alpha=float(alpha), fit_intercept=True, max_iter=30000, tol=1e-5)
-            model.fit(X_train, ytr)
-            pred_val = model.predict(X_val)
-            score = r2_score(yv, pred_val)
-            if best is None or score > best["validation_r2"]:
-                best = {
-                    "model": model,
-                    "terms": terms,
-                    "scales": scales,
-                    "degree": int(degree),
-                    "alpha": float(alpha),
-                    "validation_r2": float(score),
-                    "condition_number": _condition_number(X_train),
-                }
+        model = fit_sparse_surrogate(
+            masks=train_masks,
+            values=y_train,
+            n_features=n_features,
+            basis=orientation,
+            max_degree=int(degree),
+            alphas=alphas,
+        )
+        prediction = model.predict(validation_masks)
+        score = r2_score(y_val, prediction)
+        if best is None or score > best["validation_r2"]:
+            best = {"model": model, "degree": int(degree), "validation_r2": float(score)}
     if best is None:
         return {
             "method": "mobius_lasso",
@@ -60,34 +52,21 @@ def fit_mobius_lasso(
             "infeasible_degrees": infeasible,
             "max_candidates": int(max_candidates),
         }
-
-    X_test = design_mobius(test_masks, best["terms"]) / best["scales"][None, :]
-    pred = best["model"].predict(X_test)
-    coef_original = np.asarray(best["model"].coef_, dtype=np.float64) / best["scales"]
-    selected = [
-        int(term) for term, coef in zip(best["terms"], coef_original) if abs(float(coef)) > 1e-9
-    ]
+    model = best["model"]
+    prediction = model.predict(test_masks)
     return {
         "method": "mobius_lasso",
         "status": "ok",
+        "orientation": str(orientation),
         "best_degree": int(best["degree"]),
-        "best_alpha": float(best["alpha"]),
+        "best_alpha": model.diagnostics.get("best_alpha"),
         "validation_r2": float(best["validation_r2"]),
-        "test_r2": r2_score(yt, pred),
-        "test_normalized_rmse": normalized_rmse(yt, pred),
-        "test_mae": mae(yt, pred),
-        "selected_terms": selected,
-        "coefficient_count": int(len(selected)),
-        "candidate_count": int(len(best["terms"])),
-        "condition_number": best["condition_number"],
+        "test_r2": r2_score(y_test_arr, prediction),
+        "test_normalized_rmse": normalized_rmse(y_test_arr, prediction),
+        "test_mae": mae(y_test_arr, prediction),
+        "selected_terms": [int(term) for term in model.coefficient_dict()],
+        "coefficient_count": int(len(model.coefficient_dict())),
+        "candidate_count": int(len(model.terms)),
+        "condition_number": model.diagnostics.get("selected_support_condition_number"),
+        "fit_diagnostics": model.diagnostics,
     }
-
-
-def _condition_number(matrix: np.ndarray) -> float | None:
-    try:
-        if matrix.size == 0:
-            return None
-        return float(np.linalg.cond(matrix))
-    except Exception:
-        return None
-
