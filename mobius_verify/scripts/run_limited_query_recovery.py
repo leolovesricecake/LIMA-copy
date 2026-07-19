@@ -14,13 +14,13 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.fit_additive import fit_additive_lasso
-from src.fit_fourier import fit_fourier_lasso
-from src.fit_gbt import fit_sklearn_gbt
-from src.fit_mobius import fit_mobius_lasso
-from src.reconstruction_metrics import auc_logx
-from src.subset_enumeration import all_masks, split_masks
-from src.utils import atomic_write_json, load_yaml, read_json
+from mobius_verify.src.fit_additive import fit_additive_lasso
+from mobius_verify.src.fit_fourier import fit_fourier_lasso
+from mobius_verify.src.fit_gbt import fit_sklearn_gbt
+from mobius_verify.src.fit_mobius import fit_mobius_lasso
+from mobius_verify.src.reconstruction_metrics import auc_logx
+from mobius_verify.src.subset_enumeration import all_masks, split_masks
+from mobius_verify.src.utils import atomic_write_json, load_yaml, read_json, resolve_project_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,7 +138,12 @@ def _run_methods(
 def main() -> None:
     args = build_parser().parse_args()
     config = load_yaml(args.config)
-    results_dir = Path(args.results_dir or config.get("results_dir", ROOT / "results" / "exact_default"))
+    results_dir = resolve_project_path(
+        args.results_dir or config.get("results_dir"),
+        project_root=ROOT,
+        repo_root=REPO_ROOT,
+        default=ROOT / "results" / "exact_default",
+    )
     scopes = [str(x) for x in config.get("source_scopes", ["exact_global", "exact_probe"])]
     methods = [str(x) for x in config.get("methods", ["additive_lasso", "mobius_lasso", "fourier_lasso", "sklearn_gbt"])]
     seeds = [int(x) for x in config.get("seeds", [0, 1, 2, 3, 4])]
@@ -248,4 +253,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

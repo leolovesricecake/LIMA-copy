@@ -12,8 +12,8 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.statistics import bootstrap_ci, paired_difference_summary
-from src.utils import atomic_write_json, atomic_write_text, read_json
+from mobius_verify.src.statistics import bootstrap_ci, paired_difference_summary
+from mobius_verify.src.utils import atomic_write_json, atomic_write_text, read_json, resolve_project_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -177,7 +177,12 @@ Inconclusive
 
 def main() -> None:
     args = build_parser().parse_args()
-    results_dir = Path(args.results_dir)
+    results_dir = resolve_project_path(
+        args.results_dir,
+        project_root=ROOT,
+        repo_root=REPO_ROOT,
+        default=ROOT / "results" / "exact_default",
+    )
     aggregate_dir = results_dir / "aggregate"
     spectra_rows = _spectra_rows(results_dir)
     recovery_rows = _recovery_rows(results_dir)
@@ -190,4 +195,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

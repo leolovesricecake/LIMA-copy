@@ -10,10 +10,16 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.exact_analysis import analyze_value_table
-from src.subset_enumeration import all_masks, masks_array
-from src.synthetic import generate_synthetic_suite
-from src.utils import atomic_save_npy, atomic_write_json, environment_snapshot, load_yaml
+from mobius_verify.src.exact_analysis import analyze_value_table
+from mobius_verify.src.subset_enumeration import all_masks, masks_array
+from mobius_verify.src.synthetic import generate_synthetic_suite
+from mobius_verify.src.utils import (
+    atomic_save_npy,
+    atomic_write_json,
+    environment_snapshot,
+    load_yaml,
+    resolve_project_path,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,7 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     config = load_yaml(args.config)
-    out_dir = Path(config.get("results_dir", ROOT / "results" / "synthetic_default"))
+    out_dir = resolve_project_path(
+        config.get("results_dir"),
+        project_root=ROOT,
+        repo_root=REPO_ROOT,
+        default=ROOT / "results" / "synthetic_default",
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(out_dir / "run_config.yaml.json", config)
     atomic_write_json(out_dir / "environment.json", environment_snapshot())
@@ -79,4 +90,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

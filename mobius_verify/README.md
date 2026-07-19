@@ -24,7 +24,7 @@ pip install -r mobius_verify/requirements.txt
 
 ## 快速 Smoke
 
-默认配置使用 mock sentiment scorer 和内联样本，不会下载模型或数据集。
+Smoke 配置使用 mock sentiment scorer 和内联样本，不会下载模型或数据集。
 
 ```bash
 python3 mobius_verify/scripts/run_synthetic.py \
@@ -32,26 +32,27 @@ python3 mobius_verify/scripts/run_synthetic.py \
   --overwrite
 
 python3 mobius_verify/scripts/collect_exact_values.py \
-  --config mobius_verify/configs/exact_default.yaml \
+  --config mobius_verify/configs/exact_smoke.yaml \
   --overwrite
 
 python3 mobius_verify/scripts/compute_exact_spectra.py \
-  --results-dir mobius_verify/results/exact_default \
+  --results-dir mobius_verify/results/exact_smoke \
   --d-max 3 \
   --overwrite
 
 python3 mobius_verify/scripts/run_limited_query_recovery.py \
   --config mobius_verify/configs/recovery_default.yaml \
+  --results-dir mobius_verify/results/exact_smoke \
   --overwrite
 
 python3 mobius_verify/scripts/aggregate_results.py \
-  --results-dir mobius_verify/results/exact_default
+  --results-dir mobius_verify/results/exact_smoke
 ```
 
 运行后主要结果在：
 
 ```text
-mobius_verify/results/exact_default/
+mobius_verify/results/exact_smoke/
 ├── features/
 ├── values_exact_global/
 ├── values_exact_probe/
@@ -64,13 +65,14 @@ mobius_verify/results/exact_default/
 最终摘要报告：
 
 ```text
-mobius_verify/results/exact_default/aggregate/hypothesis_report.md
+mobius_verify/results/exact_smoke/aggregate/hypothesis_report.md
 ```
 
 ## 配置文件
 
 - `configs/synthetic_default.yaml`：合成函数 sanity check。
-- `configs/exact_default.yaml`：词级 featureization、短文本 exact global、长文本 exact probe。
+- `configs/exact_default.yaml`：真实/主实验的词级 featureization、短文本 exact global、长文本 exact probe。
+- `configs/exact_smoke.yaml`：无需模型下载的 mock smoke 配置。
 - `configs/recovery_default.yaml`：有限查询恢复实验。
 - `configs/medium_default.yaml`：medium-n 实验占位，默认 gated，不会误运行。
 

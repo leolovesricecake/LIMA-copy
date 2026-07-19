@@ -12,9 +12,9 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.exact_analysis import analyze_value_table
-from src.transforms import fourier_transform, mobius_transform
-from src.utils import atomic_save_npy, atomic_write_json, read_json
+from mobius_verify.src.exact_analysis import analyze_value_table
+from mobius_verify.src.transforms import fourier_transform, mobius_transform
+from mobius_verify.src.utils import atomic_save_npy, atomic_write_json, read_json, resolve_project_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,7 +48,12 @@ def _target_dir(results_dir: Path, scope: str, value_file: Path) -> Path:
 
 def main() -> None:
     args = build_parser().parse_args()
-    results_dir = Path(args.results_dir)
+    results_dir = resolve_project_path(
+        args.results_dir,
+        project_root=ROOT,
+        repo_root=REPO_ROOT,
+        default=ROOT / "results" / "exact_default",
+    )
     for scope, value_file in _iter_tables(results_dir, args.scope):
         target = _target_dir(results_dir, scope, value_file)
         if (target / "analysis.json").exists() and not args.overwrite:
@@ -64,4 +69,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

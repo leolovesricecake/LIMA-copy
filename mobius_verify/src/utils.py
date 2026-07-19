@@ -76,6 +76,32 @@ def load_yaml(path: str | Path) -> Dict[str, Any]:
     return payload
 
 
+def resolve_project_path(
+    raw_path: str | Path | None,
+    *,
+    project_root: str | Path,
+    default: str | Path,
+    repo_root: str | Path | None = None,
+) -> Path:
+    """Resolve paths consistently from either repo root or project root.
+
+    Configs in this project may use `mobius_verify/results/...` for commands
+    run at repo root, or `results/...` for commands run inside mobius_verify.
+    """
+
+    if raw_path in {None, ""}:
+        return Path(default).expanduser().resolve()
+    path = Path(str(raw_path)).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    project = Path(project_root).expanduser().resolve()
+    repo = Path(repo_root).expanduser().resolve() if repo_root is not None else project.parent
+    parts = path.parts
+    if parts and parts[0] == project.name:
+        return (repo / path).resolve()
+    return (project / path).resolve()
+
+
 def set_seed(seed: int) -> None:
     random.seed(int(seed))
     np.random.seed(int(seed))
@@ -139,4 +165,3 @@ def iter_existing_files(root: str | Path, pattern: str) -> Iterable[Path]:
     if not base.exists():
         return []
     return sorted(base.glob(pattern))
-

@@ -10,7 +10,7 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.utils import atomic_write_text
+from mobius_verify.src.utils import atomic_write_text, resolve_project_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,7 +21,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    figures = Path(args.results_dir) / "figures"
+    results_dir = resolve_project_path(
+        args.results_dir,
+        project_root=ROOT,
+        repo_root=REPO_ROOT,
+        default=ROOT / "results" / "exact_default",
+    )
+    figures = results_dir / "figures"
     figures.mkdir(parents=True, exist_ok=True)
     atomic_write_text(
         figures / "README.md",

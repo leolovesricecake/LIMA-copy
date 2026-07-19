@@ -1,0 +1,61 @@
+results_dir: mobius_verify/results/exact_smoke
+seed: 0
+max_records: 4
+mask_operator: delete
+batch_size: 16
+
+dataset:
+  source: inline
+  name: inline_sentiment
+  task: inline_sentiment
+  verbalizers: [negative, positive]
+  samples:
+    - sample_id: short-pos-1
+      text: "A smart funny film with great heart"
+      label: 1
+      label_text: positive
+    - sample_id: short-neg-1
+      text: "Not at all convincing and often dull"
+      label: 0
+      label_text: negative
+    - sample_id: short-mixed-1
+      text: "The cast is good but the story is bad"
+      label: 0
+      label_text: negative
+    - sample_id: long-probe-1
+      text: "The opening is bright and funny but the middle becomes dull and the ending is not convincing at all despite one good performance"
+      label: 0
+      label_text: negative
+
+model:
+  type: mock_sentiment
+
+value_function:
+  type: predicted_class_margin
+  verbalizer_length_normalization: mean
+  target_class_source: full_input_prediction
+
+featureization:
+  type: lexical_words
+  merge_subwords: true
+  preserve_all_words: true
+  punctuation_policy: attach_to_neighbor
+  fixed_n: null
+
+exact_global:
+  enabled: true
+  min_n: 6
+  max_n: 10
+  length_bins:
+    - [6, 8]
+    - [9, 10]
+
+exact_probe:
+  enabled: true
+  probe_sizes: [6, 8]
+  probes_per_sample: 1
+  strategies:
+    - contiguous_random
+    - dispersed_random
+    - stratified_position
+  conditioning_mode: rest_present
