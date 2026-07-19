@@ -1,0 +1,7 @@
+results_dir: mobius_verify/results/synthetic_default
+seed: 0
+n_features: 8
+instances_per_family: 2
+noise_std: 0.0
+d_max: 4
+

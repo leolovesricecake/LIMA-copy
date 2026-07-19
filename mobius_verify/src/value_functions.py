@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence
+
+import numpy as np
+
+from .masking import apply_mask
+from .models.base import RawTextScorer
+from .schema import FeatureSpec
+
+
+@dataclass(frozen=True)
+class ValueFunctionMetadata:
+    value_function: str
+    target_class: int
+    target_label_text: str
+    full_scores: List[float]
+    target_class_source: str
+    verbalizer_length_normalization: str
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "value_function": self.value_function,
+            "target_class": int(self.target_class),
+            "target_label_text": self.target_label_text,
+            "full_scores": [float(x) for x in self.full_scores],
+            "target_class_source": self.target_class_source,
+            "verbalizer_length_normalization": self.verbalizer_length_normalization,
+        }
+
+
+class PredictedClassMarginValueFunction:
+    def __init__(
+        self,
+        scorer: RawTextScorer,
+        *,
+        target_class_source: str = "full_input_prediction",
+        verbalizer_length_normalization: str = "mean",
+    ) -> None:
+        self.scorer = scorer
+        self.target_class_source = str(target_class_source)
+        self.verbalizer_length_normalization = str(verbalizer_length_normalization)
+
+    def target_for_text(self, text: str, *, gold_label: Optional[int] = None) -> tuple[int, np.ndarray]:
+        scores = np.asarray(self.scorer.score_text(text), dtype=np.float64)
+        if self.target_class_source == "gold":
+            if gold_label is None:
+                raise ValueError("gold_label is required when target_class_source='gold'")
+            target = int(gold_label)
+        elif self.target_class_source == "full_input_prediction":
+            target = int(np.argmax(scores))
+        else:
+            raise ValueError(f"Unsupported target_class_source: {self.target_class_source!r}")
+        return target, scores
+
+    def metadata_for_feature_spec(
+        self,
+        feature_spec: FeatureSpec,
+        *,
+        gold_label: Optional[int] = None,
+    ) -> ValueFunctionMetadata:
+        target, scores = self.target_for_text(feature_spec.normalized_model_text, gold_label=gold_label)
+        label_text = str(self.scorer.verbalizers[target]) if target < len(self.scorer.verbalizers) else str(target)
+        return ValueFunctionMetadata(
+            value_function="predicted_class_margin",
+            target_class=int(target),
+            target_label_text=label_text,
+            full_scores=[float(x) for x in scores.tolist()],
+            target_class_source=self.target_class_source,
+            verbalizer_length_normalization=self.verbalizer_length_normalization,
+        )
+
+    def evaluate_texts(self, texts: Sequence[str], *, target_class: int) -> np.ndarray:
+        scores = np.asarray(self.scorer.score_texts(list(texts)), dtype=np.float64)
+        return scores[:, int(target_class)].astype(np.float64)
+
+    def evaluate_masks(
+        self,
+        feature_spec: FeatureSpec,
+        masks: Sequence[int],
+        *,
+        target_class: int,
+        operator: str = "delete",
+        active_feature_ids: Optional[Sequence[int]] = None,
+        conditioning_mode: str = "global",
+        mask_token: Optional[str] = None,
+        unk_token: Optional[str] = None,
+        batch_size: int = 32,
+    ) -> np.ndarray:
+        values: List[float] = []
+        texts: List[str] = []
+        for mask in masks:
+            texts.append(
+                apply_mask(
+                    feature_spec,
+                    int(mask),
+                    operator=operator,
+                    active_feature_ids=active_feature_ids,
+                    conditioning_mode=conditioning_mode,
+                    mask_token=mask_token,
+                    unk_token=unk_token,
+                )
+            )
+        for start in range(0, len(texts), int(batch_size)):
+            cur = texts[start : start + int(batch_size)]
+            values.extend(self.evaluate_texts(cur, target_class=target_class).tolist())
+        return np.asarray(values, dtype=np.float64)
+

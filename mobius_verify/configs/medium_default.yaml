@@ -1,0 +1,11 @@
+results_dir: mobius_verify/results/medium_default
+enabled: false
+note: "Medium-n experiments are intentionally gated until stages A-C produce enough evidence."
+featureization:
+  type: lexical_words
+  fixed_n: null
+limited_query:
+  use_full_word_features: true
+  query_budget_type: n_log_n
+  alphas: [0.25, 0.5, 1, 2, 4, 8]
+

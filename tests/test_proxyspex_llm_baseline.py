@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -127,6 +128,22 @@ def test_uniform_size_sampling_weights_are_available_for_ablation() -> None:
     assert weights.tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
 
 
+def test_expected_proxy_fit_sample_count_respects_budget_cap_and_full_enumeration() -> None:
+    assert RUNNER._expected_proxy_fit_sample_count(n_players=0, budget=512) == 0
+    assert RUNNER._expected_proxy_fit_sample_count(n_players=1, budget=512) == 2
+    assert RUNNER._expected_proxy_fit_sample_count(n_players=2, budget=512) == 4
+    assert RUNNER._expected_proxy_fit_sample_count(n_players=20, budget=512) == 512
+
+
+def test_proxy_hpo_cv_splits_keep_r2_test_folds_valid() -> None:
+    assert RUNNER._proxy_hpo_cv_splits(None) == 5
+    assert RUNNER._proxy_hpo_cv_splits(2) is None
+    assert RUNNER._proxy_hpo_cv_splits(3) is None
+    assert RUNNER._proxy_hpo_cv_splits(4) == 2
+    assert RUNNER._proxy_hpo_cv_splits(9) == 4
+    assert RUNNER._proxy_hpo_cv_splits(10) == 5
+
+
 def test_build_proxy_model_tree_is_quiet_fallback_free() -> None:
     args = argparse.Namespace(
         proxy_model="tree",
@@ -138,6 +155,52 @@ def test_build_proxy_model_tree_is_quiet_fallback_free() -> None:
     proxy_model, effective = RUNNER._build_proxy_model(args)
     assert effective == "tree"
     assert proxy_model.__class__.__name__ == "DecisionTreeRegressor"
+
+
+def test_build_proxy_model_lightgbm_hpo_uses_adaptive_cv(monkeypatch) -> None:
+    fake_lightgbm = types.ModuleType("lightgbm")
+
+    class LGBMRegressor:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    fake_lightgbm.LGBMRegressor = LGBMRegressor
+    monkeypatch.setitem(sys.modules, "lightgbm", fake_lightgbm)
+
+    args = argparse.Namespace(
+        proxy_model="lightgbm",
+        seed=7,
+        proxy_n_jobs=1,
+        quiet_proxy=True,
+        hpo=True,
+    )
+    proxy_model, effective = RUNNER._build_proxy_model(args, n_fit_samples=4)
+    assert proxy_model.__class__.__name__ == "GridSearchCV"
+    assert proxy_model.cv == 2
+    assert effective == "lightgbm_gridsearch_quiet_cv-2"
+
+
+def test_build_proxy_model_lightgbm_hpo_disables_tiny_sample(monkeypatch) -> None:
+    fake_lightgbm = types.ModuleType("lightgbm")
+
+    class LGBMRegressor:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    fake_lightgbm.LGBMRegressor = LGBMRegressor
+    monkeypatch.setitem(sys.modules, "lightgbm", fake_lightgbm)
+
+    args = argparse.Namespace(
+        proxy_model="lightgbm",
+        seed=7,
+        proxy_n_jobs=1,
+        quiet_proxy=True,
+        hpo=True,
+    )
+    with pytest.warns(UserWarning, match="only 2 coalition samples"):
+        proxy_model, effective = RUNNER._build_proxy_model(args, n_fit_samples=2)
+    assert proxy_model.__class__.__name__ == "LGBMRegressor"
+    assert effective == "lightgbm_quiet_hpo_disabled_small_sample"
 
 
 def test_rank_desc_scores_uses_raw_scores_and_chunk_id_tiebreak() -> None:
