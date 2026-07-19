@@ -107,6 +107,38 @@ def set_seed(seed: int) -> None:
     np.random.seed(int(seed))
 
 
+def patch_multiprocess_resource_tracker_shutdown() -> None:
+    """Suppress a known non-fatal multiprocess shutdown bug on some Python builds.
+
+    Some versions of `multiprocess` call the private `_recursion_count` method on
+    `_thread.RLock` during ResourceTracker destruction. On affected Python 3.12
+    builds this attribute is absent, producing an "Exception ignored in ..."
+    message after the main script has already finished. We suppress only that
+    specific shutdown AttributeError and leave all other errors untouched.
+    """
+
+    try:
+        import multiprocess.resource_tracker as resource_tracker
+    except Exception:
+        return
+
+    cls = getattr(resource_tracker, "ResourceTracker", None)
+    original = getattr(cls, "__del__", None)
+    if cls is None or original is None or getattr(cls, "_mobius_safe_del_patched", False):
+        return
+
+    def _safe_del(self):
+        try:
+            return original(self)
+        except AttributeError as exc:
+            if "_recursion_count" in str(exc):
+                return None
+            raise
+
+    cls.__del__ = _safe_del
+    cls._mobius_safe_del_patched = True
+
+
 def listify(value: Any) -> list[Any]:
     if value is None:
         return []

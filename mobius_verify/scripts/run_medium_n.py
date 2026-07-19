@@ -10,7 +10,13 @@ for path in (ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from mobius_verify.src.utils import atomic_write_json, environment_snapshot, load_yaml, resolve_project_path
+from mobius_verify.src.utils import (
+    atomic_write_json,
+    environment_snapshot,
+    load_yaml,
+    patch_multiprocess_resource_tracker_shutdown,
+    resolve_project_path,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    patch_multiprocess_resource_tracker_shutdown()
     args = build_parser().parse_args()
     config = load_yaml(args.config)
     out_dir = resolve_project_path(

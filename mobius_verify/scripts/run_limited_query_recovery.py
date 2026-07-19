@@ -20,7 +20,13 @@ from mobius_verify.src.fit_gbt import fit_sklearn_gbt
 from mobius_verify.src.fit_mobius import fit_mobius_lasso
 from mobius_verify.src.reconstruction_metrics import auc_logx
 from mobius_verify.src.subset_enumeration import all_masks, split_masks
-from mobius_verify.src.utils import atomic_write_json, load_yaml, read_json, resolve_project_path
+from mobius_verify.src.utils import (
+    atomic_write_json,
+    load_yaml,
+    patch_multiprocess_resource_tracker_shutdown,
+    read_json,
+    resolve_project_path,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,6 +142,7 @@ def _run_methods(
 
 
 def main() -> None:
+    patch_multiprocess_resource_tracker_shutdown()
     args = build_parser().parse_args()
     config = load_yaml(args.config)
     results_dir = resolve_project_path(
