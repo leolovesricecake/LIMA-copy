@@ -44,6 +44,28 @@ class BaseBackbone(ABC):
             return np.zeros((0, len(verbalizers)), dtype=np.float32)
         return self._predict_label_probs_batch_impl(texts, verbalizers)
 
+    def predict_label_scores(self, text: str, verbalizers: Sequence[str]) -> np.ndarray:
+        return self.predict_label_scores_batch([text], verbalizers)[0]
+
+    def predict_label_scores_batch(
+        self,
+        texts: Sequence[str],
+        verbalizers: Sequence[str],
+    ) -> np.ndarray:
+        """Return pre-softmax label scores.
+
+        Backbones without native score access fall back to log probabilities.
+        Causal-LM backbones override this with mean conditional log likelihoods.
+        """
+
+        if not texts:
+            return np.zeros((0, len(verbalizers)), dtype=np.float32)
+        probabilities = np.asarray(
+            self.predict_label_probs_batch(texts, verbalizers),
+            dtype=np.float64,
+        )
+        return np.log(np.clip(probabilities, 1e-30, 1.0)).astype(np.float32)
+
     @abstractmethod
     def embed_text(self, text: str) -> np.ndarray:
         raise NotImplementedError

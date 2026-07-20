@@ -1,9 +1,208 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
+
+
+@dataclass(frozen=True)
+class DeletionMobiusSamplingResult:
+    masks: List[int]
+    diagnostics: Dict[str, object]
+
+
+def _sampling_digest(masks: Sequence[int]) -> str:
+    payload = json.dumps([int(mask) for mask in masks], separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def sample_deletion_mobius_masks(
+    n_features: int,
+    budget: int,
+    *,
+    seed: int,
+    global_fraction: float = 0.5,
+    near_full_fraction: float = 0.3,
+    fixed_cardinality_fraction: float = 0.2,
+    near_full_deletions: Sequence[int] = (1, 2, 3, 5),
+    fixed_keep_fractions: Sequence[float] = (0.25, 0.5, 0.75),
+    include_empty_full: bool = True,
+) -> DeletionMobiusSamplingResult:
+    """Sample the method-owned observation design for deletion-Mobius recovery.
+
+    Masks encode kept players. Near-full rows therefore correspond to small
+    deletion sets in g(D) = f(N \\ D). The mixture supplies local coefficient
+    information without giving up global surrogate coverage.
+    """
+
+    n = int(n_features)
+    if n < 0:
+        raise ValueError("n_features must be non-negative")
+    universe_size = 1 << n
+    target = min(max(0, int(budget)), universe_size)
+    if target == 0:
+        return DeletionMobiusSamplingResult(
+            masks=[],
+            diagnostics={
+                "sampler": "deletion_mobius_mixture_v1",
+                "requested_budget": int(budget),
+                "realized_budget": 0,
+                "source_counts": {},
+                "masks_digest": _sampling_digest([]),
+            },
+        )
+
+    fractions = np.asarray(
+        [float(global_fraction), float(near_full_fraction), float(fixed_cardinality_fraction)],
+        dtype=np.float64,
+    )
+    if np.any(fractions < 0) or float(np.sum(fractions)) <= 0:
+        raise ValueError("Sampler fractions must be non-negative with a positive sum")
+    fractions = fractions / float(np.sum(fractions))
+
+    if target == universe_size and n <= 20:
+        masks = list(range(universe_size))
+        return DeletionMobiusSamplingResult(
+            masks=masks,
+            diagnostics={
+                "sampler": "deletion_mobius_mixture_v1",
+                "requested_budget": int(budget),
+                "realized_budget": int(len(masks)),
+                "universe_size": int(universe_size),
+                "source_counts": {"exhaustive": int(len(masks))},
+                "normalized_fractions": {
+                    "global": float(fractions[0]),
+                    "near_full": float(fractions[1]),
+                    "fixed_cardinality": float(fractions[2]),
+                },
+                "masks_digest": _sampling_digest(masks),
+            },
+        )
+
+    rng = np.random.default_rng(int(seed))
+    source_by_mask: Dict[int, str] = {}
+    full = universe_size - 1
+
+    def add(mask: int, source: str) -> bool:
+        value = int(mask)
+        if value < 0 or value >= universe_size or value in source_by_mask:
+            return False
+        source_by_mask[value] = str(source)
+        return True
+
+    if include_empty_full:
+        for mask, source in ((full, "anchor_full"), (0, "anchor_empty")):
+            if len(source_by_mask) < target:
+                add(mask, source)
+
+    remaining = target - len(source_by_mask)
+    raw_allocations = fractions * remaining
+    allocations = np.floor(raw_allocations).astype(int)
+    for index in np.argsort(-(raw_allocations - allocations))[: remaining - int(np.sum(allocations))]:
+        allocations[int(index)] += 1
+
+    def draw_by_deletion_count(count: int, deletion_counts: Sequence[int], source: str) -> None:
+        choices = sorted({max(0, min(n, int(value))) for value in deletion_counts})
+        if not choices or count <= 0:
+            return
+        goal = min(target, len(source_by_mask) + int(count))
+        attempts = 0
+        max_attempts = max(1000, int(count) * 200)
+        while len(source_by_mask) < goal and attempts < max_attempts:
+            attempts += 1
+            deletion_count = int(rng.choice(choices))
+            deleted = (
+                rng.choice(n, size=deletion_count, replace=False).tolist()
+                if deletion_count > 0
+                else []
+            )
+            mask = full
+            for player in deleted:
+                mask &= ~(1 << int(player))
+            add(mask, source)
+
+    draw_by_deletion_count(
+        int(allocations[1]),
+        near_full_deletions,
+        "near_full",
+    )
+    keep_counts = sorted(
+        {
+            max(0, min(n, int(round(float(fraction) * n))))
+            for fraction in fixed_keep_fractions
+        }
+    )
+    draw_by_deletion_count(
+        int(allocations[2]),
+        [n - keep_count for keep_count in keep_counts],
+        "fixed_cardinality",
+    )
+
+    global_goal = min(target, len(source_by_mask) + int(allocations[0]))
+    attempts = 0
+    while len(source_by_mask) < global_goal and attempts < max(1000, target * 200):
+        attempts += 1
+        row = rng.random(n) < 0.5
+        mask = 0
+        for player, keep in enumerate(row):
+            if bool(keep):
+                mask |= 1 << player
+        add(mask, "global_bernoulli")
+
+    # Reallocate any source shortfall while preserving the exact logical budget.
+    attempts = 0
+    while len(source_by_mask) < target and attempts < max(2000, target * 400):
+        attempts += 1
+        row = rng.random(n) < 0.5
+        mask = 0
+        for player, keep in enumerate(row):
+            if bool(keep):
+                mask |= 1 << player
+        add(mask, "global_fill")
+
+    if len(source_by_mask) < target and n <= 20:
+        remaining_pool = [mask for mask in range(universe_size) if mask not in source_by_mask]
+        rng.shuffle(remaining_pool)
+        for mask in remaining_pool[: target - len(source_by_mask)]:
+            add(mask, "exhaustive_fill")
+
+    if len(source_by_mask) != target:
+        raise RuntimeError(
+            f"Could not realize deletion-Mobius budget: requested={target}, got={len(source_by_mask)}"
+        )
+
+    masks = sorted(source_by_mask)
+    source_counts: Dict[str, int] = {}
+    for source in source_by_mask.values():
+        source_counts[source] = source_counts.get(source, 0) + 1
+    popcounts = [int(mask).bit_count() for mask in masks]
+    deletion_counts = [n - count for count in popcounts]
+    diagnostics = {
+        "sampler": "deletion_mobius_mixture_v1",
+        "requested_budget": int(budget),
+        "realized_budget": int(len(masks)),
+        "universe_size": int(universe_size),
+        "seed": int(seed),
+        "include_empty_full": bool(include_empty_full),
+        "normalized_fractions": {
+            "global": float(fractions[0]),
+            "near_full": float(fractions[1]),
+            "fixed_cardinality": float(fractions[2]),
+        },
+        "near_full_deletions": [int(value) for value in near_full_deletions],
+        "fixed_keep_fractions": [float(value) for value in fixed_keep_fractions],
+        "source_counts": dict(sorted(source_counts.items())),
+        "keep_count_min": int(min(popcounts)),
+        "keep_count_max": int(max(popcounts)),
+        "deletion_count_min": int(min(deletion_counts)),
+        "deletion_count_max": int(max(deletion_counts)),
+        "masks_digest": _sampling_digest(masks),
+    }
+    return DeletionMobiusSamplingResult(masks=masks, diagnostics=diagnostics)
 
 
 def all_masks(n_features: int) -> List[int]:

@@ -110,7 +110,9 @@ def trapezoid_auc(xs: Sequence[float], ys: Sequence[float]) -> float:
         return 0.0
     x = np.asarray(xs, dtype=np.float64)
     y = np.asarray(ys, dtype=np.float64)
-    return float(np.trapz(y, x))
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y, x))
+    return float(np.sum((x[1:] - x[:-1]) * (y[1:] + y[:-1]) * 0.5))
 
 
 def spans_to_char_mask(text_len: int, spans: Sequence[Tuple[int, int]]) -> np.ndarray:

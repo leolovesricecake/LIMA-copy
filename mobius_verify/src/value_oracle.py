@@ -32,7 +32,7 @@ def feature_spec_digest(feature_spec: FeatureSpec) -> str:
 
 
 class ValueOracle:
-    """Persistent all-class score cache shared by every attribution method."""
+    """Persistent all-class score cache for one independent method run."""
 
     def __init__(
         self,
