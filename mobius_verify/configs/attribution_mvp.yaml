@@ -1,8 +1,7 @@
 results_dir: mobius_verify/results/attribution_mvp
 seeds: [0, 1, 2]
 budget_alphas: [1, 2, 4, 8]
-max_records: 50
-min_features: 4
+# min_features: 2
 max_features: 128
 mask_operator: delete
 batch_size: 16
@@ -33,7 +32,7 @@ fail_fast: false
 dataset:
   name: sst2
   split: validation
-  max_samples: 50
+  # max_samples: 50
   dataset_cache_dir: /mnt/huawei/nsq/temp/hf
   verbalizers: [negative, positive]
 
