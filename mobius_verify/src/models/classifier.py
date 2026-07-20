@@ -8,6 +8,23 @@ import numpy as np
 from .base import RawTextScorer
 
 
+class BackboneLabelScorer(RawTextScorer):
+    """Expose a LIMA backbone's raw label scores to ValueOracle."""
+
+    def __init__(self, backbone, verbalizers: Sequence[str]) -> None:
+        self.backbone = backbone
+        self.verbalizers = [str(value) for value in verbalizers]
+
+    def score_texts(self, texts: Sequence[str]) -> np.ndarray:
+        return np.asarray(
+            self.backbone.predict_label_scores_batch(list(texts), self.verbalizers),
+            dtype=np.float64,
+        )
+
+    def snapshot_counters(self) -> Dict[str, float | int]:
+        return dict(self.backbone.snapshot_counters())
+
+
 class MockSentimentScorer(RawTextScorer):
     """A deterministic raw-score sentiment scorer for fast smoke tests."""
 
@@ -89,11 +106,10 @@ class HFVerbalizerScorer(RawTextScorer):
     def score_texts(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:
             return np.zeros((0, len(self.verbalizers)), dtype=np.float64)
-        columns = [
-            self.backbone._label_conditional_logprob_batch(list(texts), str(label))
-            for label in self.verbalizers
-        ]
-        return np.stack(columns, axis=1).astype(np.float64)
+        return np.asarray(
+            self.backbone.predict_label_scores_batch(list(texts), self.verbalizers),
+            dtype=np.float64,
+        )
 
     def snapshot_counters(self) -> Dict[str, float | int]:
         return self.backbone.snapshot_counters()
@@ -113,4 +129,3 @@ def build_text_scorer(config: Dict[str, Any], *, verbalizers: Sequence[str]) -> 
             trust_remote_code=bool(config.get("trust_remote_code", False)),
         )
     raise ValueError(f"Unsupported model scorer type: {model_type!r}")
-

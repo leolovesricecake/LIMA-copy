@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import math
 import os
 import sys
@@ -29,11 +31,23 @@ _MAX_PROXY_HPO_CV_SPLITS = 5
 _MIN_PROXY_HPO_TEST_FOLD_SIZE = 2
 
 from lima_llm.backbone.hf_backbone import HFBackbone
+from lima_llm.attribution_text import (
+    PROMPT_PREFIX,
+    PROMPT_SUFFIX,
+    active_chunk_ids_from_visible_span as _active_unit_ids_from_visible_span,
+    compose_coalition_text as _compose_coalition_text,
+    prompt_visible_text_span_after_left_truncation as _prompt_visible_text_span_after_left_truncation,
+)
+from lima_llm.attribution_values import (
+    attribution_values_from_label_scores,
+    normalize_attribution_value_function,
+    probabilities_from_label_scores,
+)
 from lima_llm.chunking.utils import compose_text_from_chunk_ids
 from lima_llm.data import load_dataset_bundle
 from lima_llm.eval.evaluate import evaluate_saved_explanations
 from lima_llm.eval.metrics import EMPTY_PERTURBATION_TEXT
-from lima_llm.eval.units import content_span, normalize_eval_granularity
+from lima_llm.eval.units import normalize_eval_granularity
 from lima_llm.pipeline.io import rebuild_summary_csv, save_explanation
 from lima_llm.pipeline.resume import is_sample_completed, sample_output_paths
 from lima_llm.types import ExplanationResult, ScoreComponents, ScoreTrace, TextChunk
@@ -49,8 +63,6 @@ from proxyspex_chunking import build_proxyspex_chunks, load_adaptive_overrides, 
 
 
 METHOD_NAME = "proxyspex"
-PROMPT_PREFIX = "Text:\n"
-PROMPT_SUFFIX = "\nLabel:"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,7 +87,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--k", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--target-mode", type=str, default="gold", choices=["gold", "predicted"])
+    parser.add_argument("--target-mode", type=str, default="predicted", choices=["gold", "predicted"])
+    parser.add_argument(
+        "--value-function",
+        type=str,
+        default="predicted_probability",
+        choices=["target_probability", "predicted_probability", "predicted_class_margin"],
+        help=(
+            "Coalition payoff. target_probability follows --target-mode and preserves the "
+            "original baseline with --target-mode gold; predicted_* always explain the "
+            "full-input predicted class."
+        ),
+    )
     parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
     parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
     parser.add_argument(
@@ -183,36 +206,46 @@ def _model_slug(model_path: str) -> str:
     return str(model_path).rstrip("/").split("/")[-1].replace(".", "_")
 
 
+def _effective_target_mode(value_function: str, requested_target_mode: str) -> str:
+    normalized = normalize_attribution_value_function(value_function)
+    if normalized in {"predicted_probability", "predicted_class_margin"}:
+        return "predicted"
+    return str(requested_target_mode)
+
+
 def _output_root(args) -> Path:
     chunker = normalize_proxyspex_chunker(getattr(args, "chunker", "word"))
     eval_granularity = normalize_eval_granularity(getattr(args, "eval_granularity", "token"))
+    adaptive_segment = (
+        f"profile-{getattr(args, 'adaptive_profile', 'balanced')}_"
+        if chunker == "adaptive"
+        else ""
+    )
+    adaptive_overrides = getattr(args, "adaptive_overrides", None)
+    if chunker == "adaptive" and adaptive_overrides:
+        encoded = json.dumps(
+            adaptive_overrides,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        adaptive_segment += f"overrides-{hashlib.sha256(encoded).hexdigest()[:8]}_"
     return (
         Path(args.base_save_dir)
         / str(args.save_dir)
         / str(args.dataset)
         / f"model-{_model_slug(args.model_path)}"
         / (
-            f"chunk-{chunker}_eval-{eval_granularity}_"
+            f"chunk-{chunker}_{adaptive_segment}eval-{eval_granularity}_"
             f"index-{args.index}_order-{int(args.max_order)}_budget-{int(args.budget)}_"
-            f"proxy-{args.proxy_model}_hpo-{int(bool(args.hpo))}_target-{args.target_mode}_"
+            f"proxy-{args.proxy_model}_hpo-{int(bool(args.hpo))}_"
+            f"weights-{args.sampling_weight_mode}_pair-{int(bool(args.pairing_trick))}_"
+            f"top-{int(bool(args.top_order))}_"
+            f"value-{normalize_attribution_value_function(getattr(args, 'value_function', 'predicted_probability'))}_"
+            f"target-{_effective_target_mode(getattr(args, 'value_function', 'predicted_probability'), args.target_mode)}_"
             f"k-{int(args.k)}_seed-{int(args.seed)}"
         )
     )
-
-
-def _token_ids_no_special(tokenizer, text: str) -> List[int]:
-    encoded = tokenizer(text, add_special_tokens=False, truncation=False)
-    return [int(token_id) for token_id in encoded["input_ids"]]
-
-
-def _target_label_ids(tokenizer, label_text: str, max_length: int) -> List[int]:
-    ids = _token_ids_no_special(tokenizer, " " + str(label_text))
-    max_label = max(1, int(max_length) - 1)
-    if len(ids) > max_label:
-        ids = ids[-max_label:]
-    if not ids:
-        raise ValueError(f"Label text is not tokenizable: {label_text!r}")
-    return ids
 
 
 def _stable_uniform_coalition_sampling_weights(n_players: int) -> np.ndarray:
@@ -421,86 +454,6 @@ def _maybe_suppress_native_output(enabled: bool):
         yield
 
 
-def _prompt_visible_text_span_after_left_truncation(
-    *,
-    tokenizer,
-    text: str,
-    label_text: str,
-    max_length: int,
-) -> Dict[str, Any]:
-    prompt = f"{PROMPT_PREFIX}{text}{PROMPT_SUFFIX}"
-    target_ids = _target_label_ids(tokenizer, label_text, max_length=max_length)
-    try:
-        encoded = tokenizer(
-            prompt,
-            return_offsets_mapping=True,
-            add_special_tokens=False,
-            truncation=False,
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            "ProxySPEX runner needs tokenizer offset_mapping support to align truncation with "
-            "token/word evaluation units."
-        ) from exc
-
-    prompt_ids = [int(x) for x in encoded["input_ids"]]
-    offsets = list(encoded.get("offset_mapping") or [])
-    if len(offsets) != len(prompt_ids):
-        raise RuntimeError("Tokenizer returned mismatched input_ids and offset_mapping lengths.")
-
-    max_total = max(2, int(max_length))
-    max_prompt = max(0, max_total - len(target_ids))
-    kept_offsets = offsets[-max_prompt:] if max_prompt > 0 else []
-    dropped_prompt_token_count = max(0, len(prompt_ids) - len(kept_offsets))
-
-    text_start = len(PROMPT_PREFIX)
-    text_end = text_start + len(text)
-    visible_spans: List[Tuple[int, int]] = []
-    for start, end in kept_offsets:
-        s = max(int(start), text_start)
-        e = min(int(end), text_end)
-        if e > s:
-            visible_spans.append((s - text_start, e - text_start))
-
-    if visible_spans:
-        visible_start = min(start for start, _ in visible_spans)
-        visible_end = max(end for _, end in visible_spans)
-    else:
-        visible_start = len(text)
-        visible_end = len(text)
-
-    return {
-        "visible_start_char": int(visible_start),
-        "visible_end_char": int(visible_end),
-        "visible_char_count": int(max(0, visible_end - visible_start)),
-        "prompt_token_count": int(len(prompt_ids)),
-        "kept_prompt_token_count": int(len(kept_offsets)),
-        "dropped_prompt_token_count": int(dropped_prompt_token_count),
-        "target_token_count": int(len(target_ids)),
-        "max_prompt_token_budget": int(max_prompt),
-    }
-
-
-def _active_unit_ids_from_visible_span(units: Sequence[TextChunk], visible_start: int, visible_end: int) -> List[int]:
-    active = []
-    for unit in units:
-        start, end = content_span(unit)
-        if min(int(end), int(visible_end)) > max(int(start), int(visible_start)):
-            active.append(int(unit.chunk_id))
-    return active
-
-
-def _compose_coalition_text(
-    *,
-    units: Sequence[TextChunk],
-    player_to_chunk_id: Sequence[int],
-    coalition_row: Sequence[bool],
-) -> str:
-    selected = [int(player_to_chunk_id[idx]) for idx, keep in enumerate(coalition_row) if bool(keep)]
-    text = compose_text_from_chunk_ids(units, selected)
-    return text if text != "" else EMPTY_PERTURBATION_TEXT
-
-
 class ProxySPEXCoalitionGame:
     def __init__(
         self,
@@ -510,12 +463,14 @@ class ProxySPEXCoalitionGame:
         backbone: HFBackbone,
         verbalizers: Sequence[str],
         target_label: int,
+        value_function: str = "target_probability",
     ) -> None:
         self.units = list(units)
         self.player_to_chunk_id = [int(x) for x in player_to_chunk_id]
         self.backbone = backbone
         self.verbalizers = list(verbalizers)
         self.target_label = int(target_label)
+        self.value_function = normalize_attribution_value_function(value_function)
         self.cache: Dict[str, float] = {}
         self.call_count = 0
         self.row_count = 0
@@ -551,9 +506,22 @@ class ProxySPEXCoalitionGame:
                 seen_missing.add(text)
 
         if missing:
-            probs = np.asarray(self.backbone.predict_label_probs_batch(missing, self.verbalizers), dtype=np.float32)
+            score_fn = getattr(self.backbone, "predict_label_scores_batch", None)
+            if callable(score_fn):
+                label_scores = np.asarray(score_fn(missing, self.verbalizers), dtype=np.float64)
+            else:
+                probabilities = np.asarray(
+                    self.backbone.predict_label_probs_batch(missing, self.verbalizers),
+                    dtype=np.float64,
+                )
+                label_scores = np.log(np.clip(probabilities, 1e-30, 1.0))
+            values = attribution_values_from_label_scores(
+                label_scores,
+                target_class=self.target_label,
+                value_function=self.value_function,
+            )
             for idx, text in enumerate(missing):
-                self.cache[text] = float(probs[idx, self.target_label])
+                self.cache[text] = float(values[idx])
             self.unique_text_count = int(len(self.cache))
 
         return np.asarray([self.cache[text] for text in texts], dtype=np.float64)
@@ -565,6 +533,7 @@ class ProxySPEXCoalitionGame:
             "cache_hits": int(self.cache_hits),
             "cache_misses": int(self.cache_misses),
             "unique_text_count": int(len(self.cache)),
+            "value_function": self.value_function,
         }
 
 
@@ -665,11 +634,24 @@ def _counter_delta(before: Mapping[str, float | int], after: Mapping[str, float 
     return out
 
 
-def _sample_target_label(sample, bundle, backbone: HFBackbone, target_mode: str) -> tuple[int, np.ndarray]:
-    probs = np.asarray(backbone.predict_label_probs(sample.text, bundle.verbalizers), dtype=np.float32)
-    if target_mode == "predicted":
-        return int(np.argmax(probs)), probs
-    return int(sample.label), probs
+def _sample_target_label(
+    sample,
+    bundle,
+    backbone: HFBackbone,
+    target_mode: str,
+    value_function: str,
+) -> tuple[int, np.ndarray, np.ndarray]:
+    score_fn = getattr(backbone, "predict_label_scores", None)
+    if callable(score_fn):
+        label_scores = np.asarray(score_fn(sample.text, bundle.verbalizers), dtype=np.float64)
+        probs = probabilities_from_label_scores(label_scores.reshape(1, -1))[0].astype(np.float32)
+    else:
+        probs = np.asarray(backbone.predict_label_probs(sample.text, bundle.verbalizers), dtype=np.float32)
+        label_scores = np.log(np.clip(probs.astype(np.float64), 1e-30, 1.0))
+    effective_target_mode = _effective_target_mode(value_function, target_mode)
+    if effective_target_mode == "predicted":
+        return int(np.argmax(probs)), probs, label_scores
+    return int(sample.label), probs, label_scores
 
 
 def _explain_sample(
@@ -684,7 +666,16 @@ def _explain_sample(
     timing: Dict[str, float] = {}
     counter_before = backbone.snapshot_counters()
 
-    target_label, full_probs = _sample_target_label(sample, bundle, backbone, args.target_mode)
+    value_function = normalize_attribution_value_function(
+        getattr(args, "value_function", "predicted_probability")
+    )
+    target_label, full_probs, full_label_scores = _sample_target_label(
+        sample,
+        bundle,
+        backbone,
+        args.target_mode,
+        value_function,
+    )
     target_label_text = str(bundle.verbalizers[target_label])
 
     t_units = time.time()
@@ -724,6 +715,7 @@ def _explain_sample(
     proxy_fit_sample_count = 0
     effective_proxy_hpo = False
     proxy_hpo_cv_splits = None
+    attribution_counter_before = backbone.snapshot_counters()
 
     if len(player_to_chunk_id) == 0:
         interaction_values = None
@@ -744,6 +736,7 @@ def _explain_sample(
             backbone=backbone,
             verbalizers=bundle.verbalizers,
             target_label=target_label,
+            value_function=value_function,
         )
         effective_max_order = min(int(args.max_order), len(player_to_chunk_id))
         sampling_weights = _sampling_weights(
@@ -782,6 +775,11 @@ def _explain_sample(
             player_to_chunk_id=player_to_chunk_id,
             total_chunk_count=len(units),
         )
+    attribution_counter_after = backbone.snapshot_counters()
+    attribution_forward_delta = _counter_delta(
+        attribution_counter_before,
+        attribution_counter_after,
+    )
 
     chunk_scores_by_id = {idx: float(score) for idx, score in enumerate(chunk_scores)}
     chunk_ranking, selected = _rank_desc_scores(chunk_scores, int(args.k))
@@ -816,12 +814,14 @@ def _explain_sample(
         else None,
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
-        "value_function": "target_probability",
+        "value_function": value_function,
         "projection_strategy": "signed_equal_share",
-        "target_mode": str(args.target_mode),
+        "target_mode": _effective_target_mode(value_function, args.target_mode),
+        "target_mode_requested": str(args.target_mode),
         "target_label": int(target_label),
         "target_label_text": target_label_text,
         "full_label_probabilities": [float(x) for x in full_probs.tolist()],
+        "full_label_scores": [float(x) for x in full_label_scores.tolist()],
         "eval_granularity": str(args.eval_granularity),
         "proxyspex_chunker": normalize_proxyspex_chunker(getattr(args, "chunker", "word")),
         "chunk_diagnostics": chunk_diagnostics,
@@ -846,6 +846,20 @@ def _explain_sample(
         "explain_timing_breakdown": timing,
         "elapsed_seconds": float(elapsed),
     }
+    metadata["query_accounting"] = {
+        "logical_attribution_queries": int(game_stats.get("row_count", 0)),
+        "logical_unique_attribution_queries": int(game_stats.get("unique_text_count", 0)),
+        "unique_attribution_texts": int(game_stats.get("unique_text_count", 0)),
+        "physical_values_scored": int(game_stats.get("unique_text_count", 0)),
+        "total_predict_rows_including_target_setup": int(
+            metadata["forward_counters_delta"].get("predict_calls", 0)
+        ),
+        "model_forward_calls": int(attribution_forward_delta.get("model_forward_calls", 0)),
+        "batch_calls": int(attribution_forward_delta.get("batch_calls", 0)),
+        "batch_rows": int(attribution_forward_delta.get("batch_rows", 0)),
+        "attribution_forward_counters_delta": attribution_forward_delta,
+        "elapsed_seconds": float(elapsed),
+    }
 
     return ExplanationResult(
         explain_method=METHOD_NAME,
@@ -868,6 +882,13 @@ def _explain_sample(
             "collaboration": 0.0,
             "target_probability": float(full_probs[target_label]),
             "label_probabilities": [float(x) for x in full_probs.tolist()],
+            "attribution_value": float(
+                attribution_values_from_label_scores(
+                    full_label_scores.reshape(1, -1),
+                    target_class=target_label,
+                    value_function=value_function,
+                )[0]
+            ),
         },
         trace=_build_rank_trace(selected=selected, chunk_scores=chunk_scores_by_id),
         metadata=metadata,
@@ -898,6 +919,27 @@ def _write_configs(output_root: Path, args, raw_argv: Sequence[str], determinist
     now = time.time()
     payload = dict(vars(args))
     payload["method"] = METHOD_NAME
+    payload["value_function"] = normalize_attribution_value_function(
+        getattr(args, "value_function", "predicted_probability")
+    )
+    payload["comparison_contract"] = {
+        "dataset": str(args.dataset),
+        "split": str(args.split),
+        "model_path": str(args.model_path),
+        "max_length": int(args.max_length),
+        "prompt_template": f"{PROMPT_PREFIX}{{text}}{PROMPT_SUFFIX}",
+        "chunker": normalize_proxyspex_chunker(getattr(args, "chunker", "word")),
+        "adaptive_profile": str(getattr(args, "adaptive_profile", "balanced")),
+        "adaptive_overrides": getattr(args, "adaptive_overrides", None),
+        "mask_operator": "delete",
+        "empty_perturbation_text": EMPTY_PERTURBATION_TEXT,
+        "target_mode": _effective_target_mode(payload["value_function"], args.target_mode),
+        "target_mode_requested": str(args.target_mode),
+        "value_function": payload["value_function"],
+        "eval_granularity": normalize_eval_granularity(args.eval_granularity),
+        "eval_q_values": [int(value) for value in parse_q_values(args.eval_q_values)],
+        "verbalizers": [str(value) for value in getattr(args, "comparison_verbalizers", [])],
+    }
 
     run_config_payload = dict(payload)
     run_config_payload["provenance"] = build_provenance(
@@ -927,6 +969,14 @@ def _write_configs(output_root: Path, args, raw_argv: Sequence[str], determinist
 def _validate_args(args) -> None:
     normalize_eval_granularity(args.eval_granularity)
     normalize_proxyspex_chunker(getattr(args, "chunker", "word"))
+    value_function = normalize_attribution_value_function(
+        getattr(args, "value_function", "predicted_probability")
+    )
+    if value_function == "raw_target_score":
+        raise ValueError(
+            "ProxySPEX supports target_probability, predicted_probability, and "
+            "predicted_class_margin."
+        )
     if int(args.budget) < 2:
         raise ValueError("--budget must be at least 2 because ProxySPEX evaluates empty and grand coalitions")
     if int(args.max_order) <= 0:
@@ -951,13 +1001,6 @@ def run(args, raw_argv: Sequence[str]) -> None:
     ensure_dir(output_root / "samples")
 
     deterministic_info = configure_determinism(bool(args.deterministic))
-    _write_configs(
-        output_root=output_root,
-        args=args,
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-    )
-
     bundle = load_dataset_bundle(
         dataset_name=args.dataset,
         split=args.split,
@@ -965,6 +1008,13 @@ def run(args, raw_argv: Sequence[str]) -> None:
         eraser_root=args.eraser_root,
         sst2_source=args.sst2_source,
         dataset_cache_dir=args.dataset_cache_dir,
+    )
+    args.comparison_verbalizers = list(bundle.verbalizers)
+    _write_configs(
+        output_root=output_root,
+        args=args,
+        raw_argv=raw_argv,
+        deterministic_info=deterministic_info,
     )
     backbone = HFBackbone(
         model_path=args.model_path,

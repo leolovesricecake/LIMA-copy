@@ -5,6 +5,12 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
+from lima_llm.attribution_values import (
+    ATTRIBUTION_VALUE_FUNCTIONS,
+    attribution_values_from_label_scores,
+    normalize_attribution_value_function,
+)
+
 from .masking import apply_mask
 from .models.base import RawTextScorer
 from .schema import FeatureSpec
@@ -34,23 +40,11 @@ class ValueFunctionMetadata:
         }
 
 
-VALUE_FUNCTION_TYPES = {"predicted_class_margin", "raw_target_score"}
+VALUE_FUNCTION_TYPES = set(ATTRIBUTION_VALUE_FUNCTIONS)
 
 
 def normalize_value_function_type(value_type: str) -> str:
-    normalized = str(value_type).strip().lower()
-    aliases = {
-        "margin": "predicted_class_margin",
-        "predicted_margin": "predicted_class_margin",
-        "raw": "raw_target_score",
-        "raw_target": "raw_target_score",
-    }
-    normalized = aliases.get(normalized, normalized)
-    if normalized not in VALUE_FUNCTION_TYPES:
-        raise ValueError(
-            f"Unsupported value function: {value_type!r}. Expected one of {sorted(VALUE_FUNCTION_TYPES)}."
-        )
-    return normalized
+    return normalize_attribution_value_function(value_type)
 
 
 def values_from_score_matrix(
@@ -59,20 +53,11 @@ def values_from_score_matrix(
     target_class: int,
     value_type: str = "predicted_class_margin",
 ) -> np.ndarray:
-    matrix = np.asarray(scores, dtype=np.float64)
-    if matrix.ndim != 2:
-        raise ValueError(f"scores must have shape [n_samples, n_classes], got {matrix.shape}")
-    target = int(target_class)
-    if target < 0 or target >= matrix.shape[1]:
-        raise ValueError(f"target_class={target} is outside [0, {matrix.shape[1]})")
-    normalized = normalize_value_function_type(value_type)
-    target_scores = matrix[:, target]
-    if normalized == "raw_target_score":
-        return target_scores.astype(np.float64)
-    if matrix.shape[1] < 2:
-        raise ValueError("predicted_class_margin requires at least two classes")
-    competitors = np.delete(matrix, target, axis=1)
-    return (target_scores - np.max(competitors, axis=1)).astype(np.float64)
+    return attribution_values_from_label_scores(
+        scores,
+        target_class=int(target_class),
+        value_function=value_type,
+    )
 
 
 def best_competitor(scores: Sequence[float], target_class: int) -> int | None:

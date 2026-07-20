@@ -134,6 +134,79 @@ def test_copy_runner_defaults_word_explanation_and_token_eval() -> None:
     args = RUNNER.build_parser().parse_args(["--dataset", "sst2", "--model-path", "tiny-local"])
     assert args.chunker == "word"
     assert args.eval_granularity == "token"
+    assert args.value_function == "predicted_probability"
+    assert args.target_mode == "predicted"
+
+
+def test_predicted_probability_forces_predicted_target() -> None:
+    sample = SimpleNamespace(
+        sample_id="sample-predicted",
+        text="good movie",
+        label=0,
+        label_text="negative",
+    )
+    bundle = SimpleNamespace(
+        verbalizers=["negative", "positive"],
+        dataset_name="sst2",
+        split="validation",
+    )
+    result = RUNNER._explain_sample(
+        sample=sample,
+        bundle=bundle,
+        backbone=_Backbone(),
+        args=_args(value_function="predicted_probability", target_mode="gold"),
+        ProxySPEX=_DummyProxySPEX,
+    )
+    assert result.metadata["target_label"] == 1
+    assert result.metadata["target_mode"] == "predicted"
+    assert result.metadata["target_mode_requested"] == "gold"
+
+
+def test_target_probability_can_reproduce_gold_target_behavior() -> None:
+    sample = SimpleNamespace(
+        sample_id="sample-gold",
+        text="good movie",
+        label=0,
+        label_text="negative",
+    )
+    bundle = SimpleNamespace(
+        verbalizers=["negative", "positive"],
+        dataset_name="sst2",
+        split="validation",
+    )
+    result = RUNNER._explain_sample(
+        sample=sample,
+        bundle=bundle,
+        backbone=_Backbone(),
+        args=_args(value_function="target_probability", target_mode="gold"),
+        ProxySPEX=_DummyProxySPEX,
+    )
+    assert result.metadata["target_label"] == 0
+    assert result.metadata["target_mode"] == "gold"
+    assert np.isclose(result.scores["attribution_value"], 0.2)
+
+
+def test_proxy_game_supports_probability_and_margin_values() -> None:
+    units = [SimpleNamespace(chunk_id=0, start_char=0, end_char=1, text="x")]
+    probability_game = RUNNER.ProxySPEXCoalitionGame(
+        units=units,
+        player_to_chunk_id=[0],
+        backbone=_Backbone(),
+        verbalizers=["negative", "positive"],
+        target_label=1,
+        value_function="predicted_probability",
+    )
+    margin_game = RUNNER.ProxySPEXCoalitionGame(
+        units=units,
+        player_to_chunk_id=[0],
+        backbone=_Backbone(),
+        verbalizers=["negative", "positive"],
+        target_label=1,
+        value_function="predicted_class_margin",
+    )
+    coalition = np.asarray([[True]], dtype=bool)
+    assert np.isclose(probability_game(coalition)[0], 0.8)
+    assert np.isclose(margin_game(coalition)[0], np.log(4.0))
 
 
 def test_explain_sample_uses_word_chunks_as_players_even_when_eval_is_token() -> None:

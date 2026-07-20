@@ -8,7 +8,7 @@ from typing import Dict, Iterable, Set
 class QueryLedger:
     """Logical query accounting for one method run.
 
-    Global cache hits still count as logical information requests. Physical
+    Oracle cache hits still count as logical information requests. Physical
     scoring is tracked separately so experiment order cannot change a method's
     attribution budget.
     """

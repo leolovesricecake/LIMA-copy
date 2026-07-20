@@ -58,11 +58,12 @@ score_i += interaction(S) / |S|, if i in S
 
 Runner 的关键约定如下：
 
-- `--eval-granularity token` 时，players 就是 tokenizer offset mapping 得到的 token 单元。
-- `--eval-granularity word` 时，players 就是 whitespace-preserving word 单元。
+- `--chunker token|word|adaptive` 决定 ProxySPEX players，默认是 `word`。
+- `--eval-granularity token|word` 只决定最终 faithfulness 扰动单元，默认是 `token`。
 - 解释目标沿用主线分类 prompt：`Text:\n{text}\nLabel:`
-- 默认 value function 是目标 verbalizer 的 probability。
-- 默认 target 是 gold verbalizer，可用 `--target-mode predicted` 改成模型预测标签。
+- 默认 value function 是 `predicted_probability`，解释完整输入预测类别的概率。
+- `predicted_class_margin` 解释预测类别相对最强竞争类别的 raw verbalizer margin。
+- `target_probability` 按 `--target-mode` 选目标；`target_probability + target-mode=gold` 忠实复现旧默认。
 - 超长样本按 HFBackbone 的左截断逻辑处理：被截断掉的左侧 token/word 仍保留在输出 chunks 中，但分数为 `0`。
 - ProxySPEX 的高阶 interaction 使用 `signed_equal_share` 投影回单个 token/word。
 - 排序规则是原始分数降序，分数相同按 chunk id 升序，不取绝对值。
@@ -98,8 +99,10 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --sst2-source hf://nyu-mll/glue \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --dtype bfloat16 \
+  --chunker word \
   --eval-granularity token \
-  --target-mode gold \
+  --value-function predicted_probability \
+  --target-mode predicted \
   --index FBII \
   --max-order 2 \
   --budget 512 \
@@ -188,7 +191,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
 默认输出目录为：
 
 ```text
-results/baselines/proxyspex/<dataset>/model-<model>/index-<index>_order-<order>_budget-<budget>_proxy-<proxy>_hpo-<0|1>_target-<mode>_k-<k>_seed-<seed>/
+results/baselines/proxyspex/<dataset>/model-<model>/chunk-<chunker>_eval-<granularity>_index-<index>_order-<order>_budget-<budget>_proxy-<proxy>_hpo-<0|1>_weights-<mode>_pair-<0|1>_top-<0|1>_value-<value>_target-<mode>_k-<k>_seed-<seed>/
 ```
 
 每个 run 包含：
@@ -199,6 +202,7 @@ results/baselines/proxyspex/<dataset>/model-<model>/index-<index>_order-<order>_
 - `run_config.json`
 - `eval_config.json`
 - `eval_report.json`
+- `eval_sample_metrics.jsonl`
 - `trajectory_points.csv`
 - `trajectory_points.jsonl`
 - `trajectory_summary.csv`
@@ -219,16 +223,17 @@ results/baselines/proxyspex/<dataset>/model-<model>/index-<index>_order-<order>_
 - `player_to_chunk_id`
 - `truncation`
 - `game_stats`
+- `query_accounting`
 - `forward_counters_delta`
 
 ## 7. 常见坑
 
 ### 1) 为什么 token 模式要求 offset mapping
 
-因为 runner 要保证 ProxySPEX players 和最终评测单元完全一致。`--eval-granularity token` 会要求 tokenizer 支持 `return_offsets_mapping=True`，否则脚本会报错。若模型 tokenizer 不支持 offset mapping，可以先用：
+只有 `--chunker token` 要求 tokenizer 支持 `return_offsets_mapping=True`。评估设为 token 时，如果 offset mapping 不可用会退化为 word 单元并在诊断中记录；解释 chunker 设为 token 时则会直接报错。若 tokenizer 不支持 offset mapping，可以使用：
 
 ```bash
---eval-granularity word
+--chunker word
 ```
 
 ### 2) 为什么默认 `FBII`

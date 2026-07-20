@@ -276,7 +276,18 @@ class HFBackbone(BaseBackbone):
         probs = self._predict_label_probs_batch_impl([text], verbalizers, record_batch=False)
         return probs[0]
 
-    def _predict_label_probs_batch_impl(
+    def predict_label_scores(self, text: str, verbalizers: Sequence[str]) -> np.ndarray:
+        scores = self._predict_label_scores_batch_impl([text], verbalizers, record_batch=False)
+        return scores[0]
+
+    def predict_label_scores_batch(
+        self,
+        texts: Sequence[str],
+        verbalizers: Sequence[str],
+    ) -> np.ndarray:
+        return self._predict_label_scores_batch_impl(texts, verbalizers, record_batch=True)
+
+    def _predict_label_scores_batch_impl(
         self,
         texts: Sequence[str],
         verbalizers: Sequence[str],
@@ -306,11 +317,7 @@ class HFBackbone(BaseBackbone):
                     )
                     for label in verbalizers
                 ]
-                score_mat = np.stack(score_cols, axis=1).astype(np.float64)
-                score_mat = score_mat - score_mat.max(axis=1, keepdims=True)
-                probs = np.exp(score_mat)
-                probs = probs / probs.sum(axis=1, keepdims=True)
-                outputs.append(probs.astype(np.float32))
+                outputs.append(np.stack(score_cols, axis=1).astype(np.float32))
                 idx += len(cur)
             except Exception as exc:
                 if self._is_oom_error(exc) and batch_size > 1:
@@ -319,7 +326,32 @@ class HFBackbone(BaseBackbone):
                     batch_size = max(1, batch_size // 2)
                     continue
                 raise
-        return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, len(verbalizers)), dtype=np.float32)
+        return (
+            np.concatenate(outputs, axis=0)
+            if outputs
+            else np.zeros((0, len(verbalizers)), dtype=np.float32)
+        )
+
+    def _predict_label_probs_batch_impl(
+        self,
+        texts: Sequence[str],
+        verbalizers: Sequence[str],
+        record_batch: bool = True,
+    ) -> np.ndarray:
+        score_matrix = np.asarray(
+            self._predict_label_scores_batch_impl(
+                texts,
+                verbalizers,
+                record_batch=record_batch,
+            ),
+            dtype=np.float64,
+        )
+        if not len(score_matrix):
+            return np.zeros((0, len(verbalizers)), dtype=np.float32)
+        score_matrix = score_matrix - score_matrix.max(axis=1, keepdims=True)
+        probabilities = np.exp(score_matrix)
+        probabilities = probabilities / probabilities.sum(axis=1, keepdims=True)
+        return probabilities.astype(np.float32)
 
     def _embed_text_once(self, text: str) -> np.ndarray:
         torch = self.torch

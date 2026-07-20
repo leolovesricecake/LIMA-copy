@@ -46,6 +46,7 @@ TRAJECTORY_POINTS_CSV = "trajectory_points.csv"
 TRAJECTORY_POINTS_JSONL = "trajectory_points.jsonl"
 TRAJECTORY_SUMMARY_CSV = "trajectory_summary.csv"
 CURVE_SUMMARY_CSV = "curve_summary.csv"
+EVAL_SAMPLE_METRICS_JSONL = "eval_sample_metrics.jsonl"
 
 
 def _safe_mean(xs: Sequence[float]) -> float:
@@ -592,6 +593,7 @@ def evaluate_saved_explanations(
     explain_timing_totals: Dict[str, float | int] = {}
     explain_elapsed_seconds_total = 0.0
     curve_groups: Dict[tuple, Dict[str, Any]] = {}
+    sample_metric_rows: List[Dict[str, Any]] = []
 
     max_length = getattr(backbone, "max_length", None)
 
@@ -759,6 +761,15 @@ def evaluate_saved_explanations(
             plaus_f1_values.append(f1)
             plaus_iou_values.append(iou)
 
+        sample_metric_row: Dict[str, Any] = {
+            "sample_id": str(sample_id),
+            "explain_method": method,
+            "gold_label": int(sample.label),
+            "predicted_label": int(pred_label),
+            "prediction_correct": bool(pred_label == sample.label),
+            "eval_unit_count": int(len(eval_units)),
+            "metrics_by_target": {},
+        }
         for mode_name, target_label in (("gold", sample.label), ("predicted", pred_label)):
             mode_state = mode_states[mode_name]
             try:
@@ -813,11 +824,30 @@ def evaluate_saved_explanations(
                         perturbation_plan = perturbation_plan,
                     )
                 _append_mode_metrics(mode_state, metrics, aopc_payload, per_q, tracked_q_values)
+                sample_metric_row["metrics_by_target"][mode_name] = {
+                    "target_label": int(target_label),
+                    "metrics_primary": {
+                        **{str(key): float(value) for key, value in metrics.items()},
+                        "aopc": float(aopc_payload["aopc"]),
+                    },
+                    "per_q": {
+                        str(int(q)): {
+                            str(key): float(value)
+                            for key, value in q_payload.items()
+                        }
+                        for q, q_payload in per_q.items()
+                    },
+                }
             except Exception as exc:
                 err = f"{type(exc).__name__}: {exc}"
                 mode_state["error_counts"][err] = mode_state["error_counts"].get(err, 0) + 1
                 if len(mode_state["error_examples"]) < 10:
                     mode_state["error_examples"].append({"sample_id": sample_id, "error": err})
+                sample_metric_row["metrics_by_target"][mode_name] = {
+                    "target_label": int(target_label),
+                    "error": err,
+                }
+        sample_metric_rows.append(sample_metric_row)
         timing_breakdown["metric_compute_seconds"] += time.time() - t_metric_compute
 
     elapsed = time.time() - t0
@@ -871,6 +901,7 @@ def evaluate_saved_explanations(
         "predicted": _mode_report(mode_states["predicted"], total, method),
     }
     curve_artifacts = _write_curve_summary_artifact(output_root, curve_groups)
+    _write_jsonl(output_root / EVAL_SAMPLE_METRICS_JSONL, sample_metric_rows)
 
     report = {
         "report_method": method,
@@ -972,6 +1003,7 @@ def evaluate_saved_explanations(
         "backbone_batch_stats": backbone_batch_stats,
         "artifacts": {
             "eval_report_json": "eval_report.json",
+            "eval_sample_metrics_jsonl": EVAL_SAMPLE_METRICS_JSONL,
             **curve_artifacts,
         },
     }
