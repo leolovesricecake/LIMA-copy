@@ -29,7 +29,7 @@ class DatasetBundle:
 _SST2_LABELS = ["negative", "positive"]
 _DEFAULT_ERASER_HF_DATASET = "eraser-benchmark/movie_rationales"
 _DEFAULT_IMDB_HF_DATASET = "imdb"
-_DEFAULT_ROTTEN_TOMATOES_HF_DATASET = "rotten_tomatoes"
+_DEFAULT_ROTTEN_TOMATOES_HF_DATASET = "cornell-movie-review-data/rotten_tomatoes"
 _DEFAULT_EMOTION_HF_DATASET = "dair-ai/emotion"
 
 
@@ -69,8 +69,12 @@ def _is_hf_dataset_ref(source: str) -> bool:
 def _normalize_hf_dataset_ref(source: str) -> str:
     text = source.strip()
     if text.startswith("hf://"):
-        return text[len("hf://") :]
-    return text
+        text = text[len("hf://") :]
+    legacy_aliases = {
+        "rotten_tomatoes": _DEFAULT_ROTTEN_TOMATOES_HF_DATASET,
+        "datasets/rotten_tomatoes": _DEFAULT_ROTTEN_TOMATOES_HF_DATASET,
+    }
+    return legacy_aliases.get(text, text)
 
 
 def _download_to_cache(source_url: str, cache_root: Path) -> Path:

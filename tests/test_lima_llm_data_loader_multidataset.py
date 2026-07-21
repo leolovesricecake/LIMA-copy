@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import types
 
-from lima_llm.data.loader import load_dataset_bundle
+from lima_llm.data.loader import _normalize_hf_dataset_ref, load_dataset_bundle
 
 
 class _FakeLabelFeature:
@@ -67,12 +67,18 @@ def test_rotten_tomatoes_hf_loading(monkeypatch) -> None:
     _install_fake_datasets(monkeypatch, _load_dataset)
     bundle = load_dataset_bundle(dataset_name="rotten_tomatoes", split="validation", max_samples=10)
 
-    assert calls == [("rotten_tomatoes", "validation")]
+    assert calls == [("cornell-movie-review-data/rotten_tomatoes", "validation")]
     assert bundle.dataset_name == "rotten_tomatoes"
     assert len(bundle.samples) == 2
     assert bundle.samples[0].label_text == "positive"
     assert bundle.samples[1].label_text == "negative"
     assert all(sample.rationale_char_spans == () for sample in bundle.samples)
+
+
+def test_legacy_rotten_tomatoes_refs_are_namespaced() -> None:
+    expected = "cornell-movie-review-data/rotten_tomatoes"
+    assert _normalize_hf_dataset_ref("rotten_tomatoes") == expected
+    assert _normalize_hf_dataset_ref("hf://datasets/rotten_tomatoes") == expected
 
 
 def test_emotion_supports_label_name_rows(monkeypatch) -> None:
