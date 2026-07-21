@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 from lima_llm.data.loader import _normalize_hf_dataset_ref, load_dataset_bundle
 
@@ -79,6 +80,51 @@ def test_legacy_rotten_tomatoes_refs_are_namespaced() -> None:
     expected = "cornell-movie-review-data/rotten_tomatoes"
     assert _normalize_hf_dataset_ref("rotten_tomatoes") == expected
     assert _normalize_hf_dataset_ref("hf://datasets/rotten_tomatoes") == expected
+
+
+def test_rotten_tomatoes_uses_legacy_arrow_cache_without_hub(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    arrow_path = (
+        tmp_path
+        / "datasets"
+        / "rotten_tomatoes"
+        / "default"
+        / "0.0.0"
+        / "revision"
+        / "rotten_tomatoes-validation.arrow"
+    )
+    arrow_path.parent.mkdir(parents=True)
+    arrow_path.touch()
+    calls = []
+
+    class _FakeDatasetClass:
+        @staticmethod
+        def from_file(path):
+            calls.append(path)
+            return _FakeDataset(
+                rows=[{"text": "cached review", "label": 1}],
+                label_names=["negative", "positive"],
+            )
+
+    fake_module = types.ModuleType("datasets")
+    fake_module.Dataset = _FakeDatasetClass
+    fake_module.concatenate_datasets = lambda shards: shards[0]
+    fake_module.load_dataset = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("Hub loading must not run when the legacy Arrow cache exists")
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_module)
+
+    bundle = load_dataset_bundle(
+        dataset_name="rotten_tomatoes",
+        split="validation",
+        dataset_cache_dir=str(tmp_path),
+    )
+
+    assert calls == [str(arrow_path.resolve())]
+    assert len(bundle.samples) == 1
+    assert bundle.samples[0].text == "cached review"
 
 
 def test_emotion_supports_label_name_rows(monkeypatch) -> None:

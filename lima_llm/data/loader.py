@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import tarfile
 import urllib.parse
@@ -75,6 +76,67 @@ def _normalize_hf_dataset_ref(source: str) -> str:
         "datasets/rotten_tomatoes": _DEFAULT_ROTTEN_TOMATOES_HF_DATASET,
     }
     return legacy_aliases.get(text, text)
+
+
+def _cached_arrow_split_files(
+    *,
+    dataset_cache_dir: Optional[str],
+    cache_names: Sequence[str],
+    split: str,
+) -> List[Path]:
+    if not dataset_cache_dir:
+        return []
+    cache_root = _cache_dir(dataset_cache_dir)
+    search_roots = [cache_root, cache_root / "datasets"]
+    split_pattern = re.compile(rf"(?:^|-){re.escape(str(split))}(?:-|$)")
+    files_by_parent: Dict[Path, List[Path]] = {}
+    seen_roots: set[Path] = set()
+    for base in search_roots:
+        for cache_name in cache_names:
+            root = base / str(cache_name)
+            if root in seen_roots or not root.is_dir():
+                continue
+            seen_roots.add(root)
+            for path in root.rglob("*.arrow"):
+                if split_pattern.search(path.stem):
+                    files_by_parent.setdefault(path.parent, []).append(path)
+    if not files_by_parent:
+        return []
+    newest_parent = max(
+        files_by_parent,
+        key=lambda parent: max(path.stat().st_mtime_ns for path in files_by_parent[parent]),
+    )
+    return sorted(files_by_parent[newest_parent])
+
+
+def _load_cached_arrow_split(
+    *,
+    dataset_cache_dir: Optional[str],
+    cache_names: Sequence[str],
+    split: str,
+):
+    arrow_files = _cached_arrow_split_files(
+        dataset_cache_dir=dataset_cache_dir,
+        cache_names=cache_names,
+        split=split,
+    )
+    if not arrow_files:
+        return None
+    try:
+        from datasets import Dataset, concatenate_datasets
+
+        shards = [Dataset.from_file(str(path)) for path in arrow_files]
+        dataset = shards[0] if len(shards) == 1 else concatenate_datasets(shards)
+    except Exception as exc:
+        raise RuntimeError(
+            "Found a cached Hugging Face Arrow split but could not load it: "
+            f"{arrow_files[0]}"
+        ) from exc
+    print(
+        f"[dataset-cache] loaded split={split} directly from "
+        f"{arrow_files[0].parent} ({len(arrow_files)} shard(s))"
+    )
+    return dataset
 
 
 def _download_to_cache(source_url: str, cache_root: Path) -> Path:
@@ -224,10 +286,21 @@ def _load_hf_text_classification_dataset(
 
     dataset_id = _normalize_hf_dataset_ref(dataset_ref)
     hf_split = _canonical_hf_split_for_dataset(dataset_name, split)
-    load_kwargs = {"split": hf_split}
-    if dataset_cache_dir:
-        load_kwargs["cache_dir"] = str(_cache_dir(dataset_cache_dir))
-    ds = load_dataset(dataset_id, **load_kwargs)
+    ds = None
+    if dataset_name == "rotten_tomatoes":
+        ds = _load_cached_arrow_split(
+            dataset_cache_dir=dataset_cache_dir,
+            cache_names=(
+                "rotten_tomatoes",
+                "cornell-movie-review-data___rotten_tomatoes",
+            ),
+            split=hf_split,
+        )
+    if ds is None:
+        load_kwargs = {"split": hf_split}
+        if dataset_cache_dir:
+            load_kwargs["cache_dir"] = str(_cache_dir(dataset_cache_dir))
+        ds = load_dataset(dataset_id, **load_kwargs)
     label_names = _hf_label_names(ds)
     label_name_to_id = {name.strip().lower(): idx for idx, name in enumerate(label_names)}
     dynamic_label_id_by_raw: Dict[str, int] = {}
