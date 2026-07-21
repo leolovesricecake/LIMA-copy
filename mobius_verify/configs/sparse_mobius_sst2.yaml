@@ -1,11 +1,12 @@
-results_dir: mobius_verify/results/sparse_mobius
+results_dir: results/mobius/sparse_mobius
 
 # One config is one method run. Launch other budgets/seeds as separate commands.
 budget: 512
 seed: 42
 max_degree: 2
 k: 8
-value_function: predicted_class_margin
+# value_function: predicted_class_margin
+value_function: target_probability
 target_mode: predicted
 
 chunker: word

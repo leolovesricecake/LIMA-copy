@@ -144,7 +144,7 @@ model:
 
 ```bash
 python3 mobius_verify/scripts/run_sparse_mobius_llm.py \
-  --config mobius_verify/configs/sparse_mobius_default.yaml
+  --config mobius_verify/configs/sparse_mobius_
 ```
 
 覆盖单个参数：

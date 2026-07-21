@@ -126,7 +126,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset sst2 \
   --split validation \
   --sst2-source hf://nyu-mll/glue \
-  --chunker adaptive \
+  --chunker word \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
@@ -140,7 +140,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset eraser_movie_reviews \
   --split validation \
   --eraser-root hf://eraser-benchmark/movie_rationales \
-  --chunker adaptive \
+  --chunker word \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
@@ -153,7 +153,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset imdb \
   --split validation \
-  --chunker adaptive \
+  --chunker word \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
@@ -166,7 +166,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset rotten_tomatoes \
   --split validation \
-  --chunker adaptive \
+  --chunker word \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
@@ -179,7 +179,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
 python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset emotion \
   --split validation \
-  --chunker adaptive \
+  --chunker word \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
