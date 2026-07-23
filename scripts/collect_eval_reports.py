@@ -14,6 +14,7 @@ _FLOAT_FORWARD_COUNTER_KEYS = {
     "batch_forward_seconds",
 }
 _MODEL_INVOCATION_COUNTER_KEYS = ("predict_calls", "embed_calls", "gradient_calls")
+_METRIC_TARGETS = ("predicted", "gold")
 
 
 def _accumulate_numeric_dict(
@@ -155,15 +156,61 @@ def _aggregate_explain_stats_from_samples(method_dir: Path) -> Dict[str, Any]:
     }
 
 
-def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
+def _select_target_metrics(
+    report: Dict[str, Any],
+    *,
+    target: str,
+) -> tuple[Dict[str, Any], str, int | None]:
+    normalized_target = str(target).strip().lower()
+    if normalized_target not in _METRIC_TARGETS:
+        raise ValueError(f"Unsupported metric target: {target!r}")
+
+    metrics_by_target = report.get("metrics_by_target")
+    if isinstance(metrics_by_target, dict):
+        target_report = metrics_by_target.get(normalized_target)
+        if not isinstance(target_report, dict):
+            raise KeyError(f"metrics_by_target has no {normalized_target!r} entry")
+        metrics = target_report.get("metrics_primary")
+        if not isinstance(metrics, dict):
+            raise KeyError(
+                f"metrics_by_target.{normalized_target}.metrics_primary is missing or invalid"
+            )
+        selected = dict(metrics)
+        top_level_metrics = report.get("metrics_primary")
+        if isinstance(top_level_metrics, dict) and "accuracy_full" in top_level_metrics:
+            selected["accuracy_full"] = top_level_metrics["accuracy_full"]
+        diagnostics = target_report.get("method_diagnostics")
+        evaluated_samples = (
+            _positive_int(diagnostics.get("evaluated_samples"))
+            if isinstance(diagnostics, dict)
+            else None
+        )
+        return selected, f"metrics_by_target.{normalized_target}", evaluated_samples
+
+    # Compatibility for reports written before metrics_by_target was introduced.
+    metrics = report.get("metrics_primary")
+    if not isinstance(metrics, dict):
+        raise KeyError("metrics_primary is missing or invalid")
+    return dict(metrics), "legacy_metrics_primary_target_unknown", None
+
+
+def collect_eval_reports(
+    input_dir: Path,
+    *,
+    target: str = "predicted",
+) -> List[Dict[str, Any]]:
     """
     收集形如 dataset/model/method/eval_report.json 的实验结果。
 
     每一行包含：
     - dataset / model / method
     - report_method / split / sample_count
-    - metrics_primary 中的所有指标
+    - metrics_by_target.<target>.metrics_primary 中的所有指标
     - explain_model_calls_total / explain_model_calls_mean_per_sample
+
+    顶层 metrics_primary 是历史兼容字段，在当前 evaluator 中固定对应 gold。
+    只有旧报告不存在 metrics_by_target 时才回退到该字段，并在 metrics_source
+    中标记 target 未知。
     """
     rows: List[Dict[str, Any]] = []
 
@@ -236,9 +283,13 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                         explain_stats_fallback.get("elapsed_seconds_mean_per_sample"),
                     )
 
-                metrics = report.get("metrics_primary")
-                if not isinstance(metrics, dict):
-                    print(f"[WARN] Missing or invalid metrics_primary: {report_path}")
+                try:
+                    metrics, metrics_source, evaluated_samples = _select_target_metrics(
+                        report,
+                        target=target,
+                    )
+                except (KeyError, ValueError) as exc:
+                    print(f"[WARN] Cannot select target metrics: {report_path} ({exc})")
                     continue
 
                 row = {
@@ -248,6 +299,9 @@ def collect_eval_reports(input_dir: Path) -> List[Dict[str, Any]]:
                     "report_method": report.get("report_method"),
                     "split": report.get("split"),
                     "sample_count": report.get("sample_count"),
+                    "metric_target": str(target).strip().lower(),
+                    "metrics_source": metrics_source,
+                    "evaluated_samples": evaluated_samples,
                 }
                 row.update(metrics)
                 _add_explain_model_call_fields(row, report)
@@ -263,7 +317,17 @@ def write_csv(rows: List[Dict[str, Any]], output_csv: Path) -> None:
 
     指标列会自动取所有 JSON 中出现过的 metrics_primary key 的并集。
     """
-    base_columns = ["dataset", "model", "method", "report_method", "split", "sample_count"]
+    base_columns = [
+        "dataset",
+        "model",
+        "method",
+        "report_method",
+        "split",
+        "sample_count",
+        "metric_target",
+        "metrics_source",
+        "evaluated_samples",
+    ]
 
     metric_columns = sorted(
         {
@@ -286,7 +350,7 @@ def write_csv(rows: List[Dict[str, Any]], output_csv: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Collect metrics_primary from eval_report.json files into a CSV."
+        description="Collect target-specific metrics from eval_report.json files into a CSV."
     )
     parser.add_argument(
         "--input_dir",
@@ -300,13 +364,19 @@ def main() -> None:
         default="eval_summary.csv",
         help="Output CSV path. Default: eval_summary.csv",
     )
+    parser.add_argument(
+        "--target",
+        choices=_METRIC_TARGETS,
+        default="predicted",
+        help="Faithfulness target to collect. Default: predicted",
+    )
 
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
     output_csv = input_dir / Path(args.output)
 
-    rows = collect_eval_reports(input_dir)
+    rows = collect_eval_reports(input_dir, target=args.target)
     write_csv(rows, output_csv)
 
     print(f"[INFO] Collected {len(rows)} eval reports.")

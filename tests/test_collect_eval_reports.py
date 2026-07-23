@@ -54,6 +54,8 @@ def test_collect_eval_reports_includes_call_count_fields(tmp_path: Path) -> None
     row = rows[0]
     assert row["dataset"] == "emotion"
     assert row["report_method"] == "ours"
+    assert row["metric_target"] == "predicted"
+    assert row["metrics_source"] == "legacy_metrics_primary_target_unknown"
     assert row["explain_model_calls_total"] == 18.0
     assert row["explain_model_calls_mean_per_sample"] == 9.0
     assert "metrics_secondary.forward_counters_delta.model_forward_calls" not in row
@@ -102,3 +104,39 @@ def test_collect_eval_reports_prefers_report_explain_counters_over_sample_fallba
     assert len(rows) == 1
     assert rows[0]["explain_model_calls_total"] == 5.0
     assert rows[0]["explain_model_calls_mean_per_sample"] == 5.0
+
+
+def test_collect_eval_reports_selects_predicted_target_metrics(tmp_path: Path) -> None:
+    run_dir = tmp_path / "sst2" / "model-Qwen2_5-7B-Instruct" / "method-ours"
+    run_dir.mkdir(parents=True)
+    report = {
+        "report_method": "ours",
+        "split": "validation",
+        "sample_count": 3,
+        "metrics_primary": {
+            "accuracy_full": 0.75,
+            "comprehensiveness": 0.1,
+        },
+        "metrics_by_target": {
+            "gold": {
+                "metrics_primary": {"comprehensiveness": 0.1, "sufficiency": 0.4},
+                "method_diagnostics": {"evaluated_samples": 3},
+            },
+            "predicted": {
+                "metrics_primary": {"comprehensiveness": 0.7, "sufficiency": 0.2},
+                "method_diagnostics": {"evaluated_samples": 2},
+            },
+        },
+    }
+    (run_dir / "eval_report.json").write_text(json.dumps(report), encoding="utf-8")
+
+    predicted = collect_eval_reports(tmp_path)
+    gold = collect_eval_reports(tmp_path, target="gold")
+
+    assert predicted[0]["comprehensiveness"] == 0.7
+    assert predicted[0]["sufficiency"] == 0.2
+    assert predicted[0]["accuracy_full"] == 0.75
+    assert predicted[0]["metrics_source"] == "metrics_by_target.predicted"
+    assert predicted[0]["evaluated_samples"] == 2
+    assert gold[0]["comprehensiveness"] == 0.1
+    assert gold[0]["metrics_source"] == "metrics_by_target.gold"
