@@ -4,7 +4,7 @@ This guide is for the local AML copy in `baselines/aml-main_copy`.
 
 ## 1. Canonical Tasks
 
-The mainline task names are aligned with `lima_llm`:
+The mainline task names are aligned with the shared `mobius` package:
 
 - `sst2`
 - `eraser_movie_reviews`
@@ -39,7 +39,7 @@ pip install -r requirements.txt
 pip install optuna peft scikit-learn pandas sentencepiece
 ```
 
-AML now reuses `lima_llm.data.load_dataset_bundle` for the five canonical tasks, so make sure the repo root stays available when running from this directory.
+AML now reuses `mobius.data.load_dataset_bundle` for the five canonical tasks, so make sure the repo root stays available when running from this directory.
 
 ## 4. Model and Cache Paths
 
@@ -56,7 +56,7 @@ Adjust those if your training machine stores local models elsewhere.
 python runs/run.py <task> <explained_backbone> <interpreter_backbone> <metric>
 ```
 
-Optional dataset-source arguments shared with `lima_llm`:
+Optional dataset-source arguments shared with `mobius`:
 
 ```bash
 --eraser-root /path/or/hf://dataset

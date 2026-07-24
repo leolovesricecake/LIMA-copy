@@ -25,3 +25,6 @@ __pycache__/
 
 *.npy
 *.pt
+*.zip
+.DS_Store
+**/.DS_Store

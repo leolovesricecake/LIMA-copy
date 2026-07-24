@@ -10,7 +10,7 @@ from config.constants import (LABELS_NAME, EXPLAINED_INPUT_IDS_NAME, EXPLAINED_A
                               TASK_PROMPT_INPUT_IDS, LABEL_PROMPT_INPUT_IDS, LABEL_PROMPT_ATTENTION_MASK,
                               TASK_PROMPT_ATTENTION_MASK, LABEL_PROMPT_NEW_LINE, INPUT_TXT)
 from config.types_enums import ValidationType
-from main.shared_task_data import load_task_split_dataset, uses_shared_lima_loader
+from main.shared_task_data import load_task_split_dataset, uses_shared_mobius_loader
 from models.train_models_utils import build_prompt_label_vocab_tokens, get_models_tokenizer, resolve_explained_model_path
 from utils.utils_functions import is_model_encoder_only, is_use_prompt, get_model_special_tokens
 
@@ -19,6 +19,8 @@ class DataModule(pl.LightningDataModule):
     def __init__(self, val_type: ValidationType, train_sample: int = -1, test_sample: int = -1,
                  explained_tokenizer = None, interpreter_tokenizer = None, data = None, task_prompt_input_ids = None,
                  task_prompt_attention_mask = None, label_prompt_input_ids = None, label_prompt_attention_mask = None):
+        """Initialize AML datasets, tokenizers, prompts, and split controls."""
+
         super().__init__()
         self.task = ExpArgs.task
         self.seed = ExpArgs.seed
@@ -27,7 +29,7 @@ class DataModule(pl.LightningDataModule):
         self.val_type = val_type.value
         self.train_sample = train_sample
         self.test_sample = test_sample
-        self.use_shared_loader = uses_shared_lima_loader(self.task)
+        self.use_shared_loader = uses_shared_mobius_loader(self.task)
         self.task_prompt = None
         self.input_prompt = None
         self.pre_label_prompt = None
@@ -70,6 +72,7 @@ class DataModule(pl.LightningDataModule):
             self.setup()
 
     def setup(self, stage = None):
+        """Prepare the train and evaluation datasets once for Lightning."""
 
         if self.train_dataset is None:
             if is_use_prompt():
@@ -79,12 +82,16 @@ class DataModule(pl.LightningDataModule):
             self.setup_test_ds()
 
     def setup_train_ds(self):
+        """Load, sample, validate, and tokenize the configured training split."""
+
         tmp_train_ds = self._load_split_dataset(self.task.dataset_train).shuffle(seed = self.seed)
         tmp_train_ds = self._sample_dataset(tmp_train_ds, self.train_sample, train_size_mode = True)
         self._ensure_non_empty_dataset(tmp_train_ds, split_name = self.task.dataset_train, stage = "train")
         self.train_dataset = self.handle_ds(tmp_train_ds)
 
     def setup_test_ds(self):
+        """Load, sample, validate, and tokenize the configured evaluation split."""
+
         if self.val_type == ValidationType.VAL.value:
             split_name = self.task.dataset_val
             tmp_test_ds = self._load_split_dataset(split_name).shuffle(seed = self.seed)
@@ -98,11 +105,15 @@ class DataModule(pl.LightningDataModule):
         self.val_dataset = self.handle_ds(tmp_test_ds)
 
     def _load_split_dataset(self, split_name: str):
+        """Load one split through the shared Mobius loader or the native dataset."""
+
         if self.use_shared_loader:
             return load_task_split_dataset(self.task, split_name)
         return self.dataset[split_name]
 
     def _sample_dataset(self, dataset, sample_size, train_size_mode: bool):
+        """Select a deterministic subset while preserving labels when possible."""
+
         if sample_size is None or sample_size <= 0 or sample_size >= len(dataset):
             return dataset
         split_kwargs = dict(seed = self.seed, stratify_by_column = self.dataset_column_label)
@@ -117,6 +128,8 @@ class DataModule(pl.LightningDataModule):
             return dataset.train_test_split(test_size = sample_size, **split_kwargs)["test"]
 
     def _ensure_non_empty_dataset(self, dataset, split_name: str, stage: str):
+        """Reject empty splits with a task-specific diagnostic."""
+
         if len(dataset) > 0:
             return
         hint = ""
@@ -128,6 +141,8 @@ class DataModule(pl.LightningDataModule):
         )
 
     def handle_ds(self, ds):
+        """Tokenize a split and normalize its columns for AML."""
+
         ds = ds.map(self.tokenize, batched = False)
         ds = ds.remove_columns(self.dataset_column_text)
         ds = ds.rename_column(self.dataset_column_label, LABELS_NAME)
@@ -137,6 +152,8 @@ class DataModule(pl.LightningDataModule):
         return ds
 
     def set_label_vocab_tokens(self):
+        """Build verbalizer token IDs for prompt-based explained models."""
+
         if is_use_prompt():
             explained_model_path = resolve_explained_model_path(ExpArgs.task)
             ExpArgs.label_vocab_tokens = build_prompt_label_vocab_tokens(
@@ -146,6 +163,8 @@ class DataModule(pl.LightningDataModule):
             )
 
     def tokenize(self, example):
+        """Tokenize one example for both explained and interpreter models."""
+
         inputs_txt = example[self.dataset_column_text]
         if is_use_prompt():
             inputs_txt = self.input_prompt + inputs_txt
@@ -169,21 +188,29 @@ class DataModule(pl.LightningDataModule):
         return tokenized_input
 
     def train_dataloader(self):
+        """Return the shuffled AML training data loader."""
+
         return DataLoader(dataset = self.train_dataset, batch_size = ExpArgs.batch_size, shuffle = True,
                           collate_fn = self.collate_fn)
 
     def val_dataloader(self):
+        """Return the deterministic AML evaluation data loader."""
+
         return DataLoader(self.val_dataset, batch_size = ExpArgs.eval_batch_size, shuffle = False,
                           collate_fn = self.collate_fn)
 
     @staticmethod
     def convert_to_token(item_val, tokenizer):
+        """Convert a scalar tensor or integer token ID to its token string."""
+
         val = item_val
         if isinstance(item_val, torch.Tensor):
             val = item_val.item()
         return tokenizer.convert_ids_to_tokens(val)
 
     def set_prompt(self):
+        """Construct and tokenize the task and label prompt fragments."""
+
         if is_use_prompt():
 
             task_prompt = self.task.llm_task_prompt
@@ -206,6 +233,8 @@ class DataModule(pl.LightningDataModule):
 
     @staticmethod
     def pad_sequences(key, batch, tokenizer, model_backbone, is_inputs_ids, maps = None, is_return_maps = False):
+        """Pad one batch according to encoder or decoder alignment conventions."""
+
         sequences = [item[key] for item in batch]
 
         if not is_model_encoder_only(model_backbone) and is_use_prompt():
@@ -237,6 +266,8 @@ class DataModule(pl.LightningDataModule):
         return torch.stack(padded_sequences).long()
 
     def pad_task_prompts_sequences(self, batch, tokenizer):
+        """Left-pad task prompts so they align with each explained input."""
+
         if not is_use_prompt():
             return None, None
         sequences = [self.task_prompt_input_ids.squeeze().tolist() + item[EXPLAINED_INPUT_IDS_NAME].tolist() for item in
@@ -256,6 +287,8 @@ class DataModule(pl.LightningDataModule):
         return padded_task_prompts_input_ids, padded_task_prompts_attention_mask
 
     def collate_fn(self, batch):
+        """Collate model inputs and cross-tokenizer alignment maps."""
+
         input_texts = [item[INPUT_TXT] for item in batch]
         # map tokens
         maps = self.build_tokenizer_relations(batch)
@@ -287,6 +320,8 @@ class DataModule(pl.LightningDataModule):
                 }
 
     def fill_empty_items(self, lists):
+        """Interpolate missing token-alignment entries from adjacent spans."""
+
         for i in range(len(lists)):
             if not lists[i]:
                 prev_idx = next((j for j in range(i - 1, -1, -1) if lists[j]), None)
@@ -314,6 +349,8 @@ class DataModule(pl.LightningDataModule):
         return lists
 
     def build_tokenizer_relations(self, batch):
+        """Build explained-to-interpreter token alignments for a batch."""
+
         maps = []
         if is_model_encoder_only(ExpArgs.explained_model_backbone):
             return None

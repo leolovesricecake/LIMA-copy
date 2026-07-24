@@ -1,92 +1,151 @@
-# LIMA-main (LLM Transfer v1)
+# 低阶稀疏 Möbius LLM 归因
 
-当前分支以文本 LLM 迁移实现为主，核心代码在 `lima_llm/`。
+本仓库研究一个问题：LLM 局部 value function 的交互结构，是否比带 hierarchy 假设的稀疏 Fourier 表示更适合用低阶稀疏 Möbius 超图刻画，并能否在有限模型查询下恢复为可用的归因方法。
 
-## 目录结构
+当前主方法位于 `mobius/`。ProxySPEX、Inseq 和 AML 是保留的独立 baseline；旧 exact spectrum、conditional probe、recovery 验证代码已移入 `archive/mobius_validation/`。
 
-- `lima_llm/`: 文本版 LIMA v1（数据适配、chunking、backbone、子模目标、搜索、评估、pipeline）
-- `scripts/run_lima_llm_v1.sh`: 文本版统一启动脚本
-- `tests/`: 文本版单测与集成测试
-- `lima_origin/`: 原始图像版 LIMA 代码与历史脚本（归档）
-
-## 快速开始
+## 安装
 
 ```bash
-# 1) Dry-run（无需大模型）
-python -m lima_llm --dataset sst2 --split validation --mock-backbone --save-dir dry-run-sst2 --dry-run 10
+pip install -e .
+pip install torch transformers datasets
+```
 
-# 2) 端到端（mock，含评估）
-bash scripts/run_lima_llm_v1.sh \
+运行 ProxySPEX 或 Inseq 时还需安装对应依赖：
+
+```bash
+pip install -e "baselines/shapiq-copy[proxy]"
+pip install inseq captum
+```
+
+## 快速验证
+
+下面的命令只使用 mock scorer，不下载模型或数据：
+
+```bash
+python -m mobius.cli.run \
+  --config configs/mobius/smoke.yaml \
+  --overwrite
+```
+
+## 正式运行
+
+```bash
+# SST-2
+python -m mobius.cli.run \
+  --config configs/mobius/sst2.yaml \
+  --device cuda:0
+
+# Emotion
+python -m mobius.cli.run \
+  --config configs/mobius/emotion.yaml \
+  --device cuda:1
+
+# Rotten Tomatoes
+python -m mobius.cli.run \
+  --config configs/mobius/rotten_tomatoes.yaml \
+  --device cuda:2
+```
+
+临时限制样本数或更换预算：
+
+```bash
+python -m mobius.cli.run \
+  --config configs/mobius/sst2.yaml \
+  --max-samples 20 \
+  --budget 128 \
+  --device cuda:0
+```
+
+## 评估与比较
+
+归因结束时默认自动评估。也可以单独重跑评估：
+
+```bash
+python -m mobius.cli.evaluate \
+  --run-dir results/mobius/<dataset>/<model>/<method>/<run-id> \
+  --target predicted \
+  --device cuda:0
+```
+
+对比两个已评估 run：
+
+```bash
+python -m mobius.cli.compare \
+  --left <proxyspex-run-dir> \
+  --right <sparse-mobius-run-dir> \
+  --output comparison.json
+```
+
+`metrics.json` 只包含一个平铺的显式 `target` 和它对应的一套指标，不会保存多个 target block，也不再使用含义模糊的 `metrics_primary`。默认 target 是 `predicted`；用另一个 target 重新评估会覆盖 `metrics.json`。主实验应读取 `target: predicted` 下的 `faithfulness`、`per_q`、`attribution_cost` 和 `evaluation_cost`。
+
+## 消融实验
+
+六个单轴消融配置位于 `configs/ablations/`：
+
+```bash
+python -m mobius.cli.run --config configs/ablations/basis_fourier.yaml --device cuda:0
+python -m mobius.cli.run --config configs/ablations/hierarchy_strong.yaml --device cuda:0
+python -m mobius.cli.run --config configs/ablations/sampler_bernoulli.yaml --device cuda:0
+python -m mobius.cli.run --config configs/ablations/sampler_uniform_size.yaml --device cuda:0
+python -m mobius.cli.run --config configs/ablations/projector_absolute.yaml --device cuda:0
+python -m mobius.cli.run --config configs/ablations/projector_singleton.yaml --device cuda:0
+```
+
+每一项的数学含义、控制变量和当前旧结果配置见 [使用与消融说明](docs/mobius_usage.md)。
+
+## Baseline
+
+ProxySPEX 保持原生 sampler、树 proxy、Fourier 提取、refinement 和 FBII 转换：
+
+```bash
+python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset sst2 \
   --split validation \
-  --mock-backbone \
-  --deterministic \
-  --k 8 \
-  --chunker sentence \
-  --search greedy \
-  --explain-method ours \
-  --max-samples 100 \
+  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --chunker word \
+  --eval-granularity token \
+  --value-function predicted_probability \
+  --target-mode predicted \
+  --budget 512 \
+  --max-order 2 \
+  --device cuda:0 \
   --base-save-dir results \
-  --save-dir smoke-sst2 \
-  --run-eval
+  --save-dir baselines/proxyspex-copy
 ```
 
-`--explain-method` 支持 `ours/random/gradient`。每次运行只处理一个方法，不同方法使用独立输出目录，可在不同 GPU 并行运行。
-`--chunker` 当前支持 `sentence/sentence_v2/fixed_token/adaptive`。
-- `sentence_v2` 使用 `PySBD`（`pysbd==0.3.4`）作为分句后端。若未安装 `pysbd`，`sentence_v2` 会 fail-fast 并提示安装命令。
-- `adaptive` 为低成本自适应切分策略，可用 `--adaptive-profile conservative|balanced|aggressive` 控制分层阈值（默认 `balanced`）。
-安装示例：`pip install pysbd==0.3.4`
+Inseq 示例：
 
-`--deterministic` 可开启更强确定性设置（用于回归对账/复现实验）。运行产物 `run_config.json`、`eval_config.json`、`eval_report.json` 会包含 `provenance` 字段（git/命令/环境/时间信息）。
-
-可用 `python scripts/analysis_snapshot.py --results-root results/smoke-sst2 --primary-method ours --reference-method gradient` 生成单组对账快照（JSON/CSV）。
-
-可用 `python scripts/lambda_sweep_report.py --baseline-run-dir <baseline_run_dir> --candidate-run-dirs <run_dir_1> <run_dir_2>` 生成 `lambda` 小网格的 Faithfulness 五指标方向判定与速度/稳定性副作用汇总。
-
-可用 `python scripts/trace_component_profile.py --run-dir <run_dir>` 聚合每步 `confidence/effectiveness/consistency/collaboration` 分量轨迹，辅助定位 `comp/suff` 的主要牵引项。
-
-可用 `python scripts/phase_a_chunking_compare.py --baseline-run-dir <sentence_run_dir> --candidate-run-dir <sentence_v2_run_dir>` 生成 Phase A 的切分质量/解释漂移/性能对比报告。
-
-可用 `python scripts/chunk_error_audit.py --run-dir <run_dir>` 对单个 run 的 `samples/*.json` 做 chunk 错误全量审计，输出 `chunk_error_audit.json` 与 `chunk_error_manifest.csv`。
-
-
-## 20 - deterministic
-```
-python -m lima_llm \
-  --dataset eraser_movie_reviews \
-  --split validation \
-  --eraser-root hf://eraser-benchmark/movie_rationales \
+```bash
+python baselines/inseq/run_inseq_llm_baselines.py \
+  --dataset sst2 \
+  --methods integrated_gradients,lime \
   --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-  --dtype bfloat16 \
-  --k 8 \
-  --chunker sentence \
-  --search greedy \
-  --lambdas 1,1,1,1 \
-  --dataset-cache-dir /mnt/huawei/nsq/LIMA-copy/datasets \
-  --resume-check strict \
-  --run-eval \
-  --explain-method ours \
-  --deterministic --max-samples 20 \
-  --base-save-dir results --save-dir 20-0515-deter --device cuda:1
+  --target-mode predicted \
+  --device cuda:0
 ```
 
+AML 使用方式见 `baselines/aml-main_copy/README.md`。
 
-## 20 - prefetch sort
+## 结果结构
+
+```text
+results/<dataset>/<model>/<method>/<run-id>/
+├── run.json
+├── status.json
+├── metrics.json
+├── curves-<target>.jsonl
+├── samples/
+└── diagnostics/        # 仅 output_level=debug
 ```
-LIMA_EVAL_PREFETCH_LENGTH_SORT=1 python -m lima_llm \
-  --dataset eraser_movie_reviews \
-  --split validation \
-  --eraser-root hf://eraser-benchmark/movie_rationales \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-  --dtype bfloat16 \
-  --k 8 \
-  --chunker sentence \
-  --search greedy \
-  --lambdas 1,1,1,1 \
-  --dataset-cache-dir /mnt/huawei/nsq/LIMA-copy/datasets \
-  --resume-check strict \
-  --run-eval \
-  --explain-method ours \
-  --deterministic --max-samples 20 \
-  --base-save-dir results --save-dir 20-0515-deter-sort --device cuda:1
+
+`minimal` 只保存排名与成本，`standard` 额外保存超边和拟合摘要，`debug` 再保存 masks、coalition values 和验证细节。旧结果协议不兼容，需要重新运行。
+
+run ID 默认为 `b<budget>-o<order>-s<seed>-<hash8>`。配置中可设置可读后缀：
+
+```yaml
+run_suffix: paper-main
 ```
+
+此时 run ID 为 `b<budget>-o<order>-s<seed>-paper-main`；字段缺失或为空时才使用配置哈希。

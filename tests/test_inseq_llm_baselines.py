@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_runner_module():
@@ -53,28 +53,31 @@ def test_lime_attr_kwargs_forward_n_samples_to_inseq() -> None:
     assert kwargs["attributed_fn_args"] == {"logprob": True}
 
 
-def test_method_cli_args_records_dataset_and_method() -> None:
-    args = argparse.Namespace(model_path="tiny", save_dir="baselines/inseq")
-    payload = RUNNER._method_cli_args(args, "sst2", "lime")
-    assert payload["dataset"] == "sst2"
-    assert payload["method"] == "lime"
+def test_method_config_records_dataset_method_and_schema_axes() -> None:
+    args = RUNNER.build_parser().parse_args(
+        ["--model-path", "tiny", "--dataset", "sst2", "--methods", "lime"]
+    )
+    bundle = SimpleNamespace(
+        dataset_name="sst2",
+        split="validation",
+        verbalizers=["negative", "positive"],
+    )
+    payload = RUNNER._method_config(args, bundle, "lime")
+    assert payload["dataset"]["name"] == "sst2"
+    assert payload["method"] == "inseq_lime"
+    assert payload["chunker"] == "token"
+    assert payload["eval_granularity"] == "token"
 
 
-def test_scan_resume_skips_strict_completed_samples(tmp_path: Path) -> None:
-    sample_dir = tmp_path / "samples"
-    sample_dir.mkdir()
-    payload = {
-        "explain_method": "lime",
-        "chunk_ranking": [0],
-        "chunk_scores": [0.5],
-        "selected_chunk_ids": [0],
-        "trace": [],
-    }
-    (sample_dir / "done.json").write_text(json.dumps(payload), encoding="utf-8")
-    (sample_dir / "done.txt").write_text("selected text", encoding="utf-8")
-
-    done = argparse.Namespace(sample_id="done")
-    todo = argparse.Namespace(sample_id="todo")
-    pending = RUNNER._scan_resume([done, todo], output_root=tmp_path, resume_mode="strict")
-
-    assert [sample.sample_id for sample in pending] == ["todo"]
+def test_method_output_root_uses_schema_v2_run_id() -> None:
+    args = RUNNER.build_parser().parse_args(
+        ["--model-path", "tiny", "--dataset", "sst2", "--methods", "lime"]
+    )
+    bundle = SimpleNamespace(
+        dataset_name="sst2",
+        split="validation",
+        verbalizers=["negative", "positive"],
+    )
+    path = RUNNER._method_output_root(args, bundle, "lime")
+    assert path.parts[-4:-1] == ("sst2", "tiny", "inseq_lime")
+    assert path.name.startswith("b32-o1-s42-")

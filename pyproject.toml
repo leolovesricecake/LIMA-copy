@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparse-mobius-llm"
+version = "0.2.0"
+description = "Low-order sparse Mobius interaction attribution for language models"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "PyYAML",
+  "scikit-learn",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+include = ["mobius*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

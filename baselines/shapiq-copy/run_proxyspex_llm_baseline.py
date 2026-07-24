@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import math
 import os
 import sys
@@ -30,42 +28,66 @@ _PROXY_HPO_FALLBACK_WARNED: set[tuple[str, int]] = set()
 _MAX_PROXY_HPO_CV_SPLITS = 5
 _MIN_PROXY_HPO_TEST_FOLD_SIZE = 2
 
-from lima_llm.backbone.hf_backbone import HFBackbone
-from lima_llm.attribution_text import (
-    PROMPT_PREFIX,
-    PROMPT_SUFFIX,
-    active_chunk_ids_from_visible_span as _active_unit_ids_from_visible_span,
-    compose_coalition_text as _compose_coalition_text,
-    prompt_visible_text_span_after_left_truncation as _prompt_visible_text_span_after_left_truncation,
+from mobius.core.config import load_json_object
+from mobius.core.results import ResultStore, default_run_dir
+from mobius.core.runtime import set_seed
+from mobius.core.schema import AttributionResult, TextChunk
+from mobius.data import load_dataset_bundle
+from mobius.evaluation.evaluator import evaluate_run
+from mobius.models.hf import HFBackbone
+from mobius.text.chunks import (
+    build_chunks,
+    compose_text,
+    normalize_chunker,
+    normalize_eval_granularity,
 )
-from lima_llm.attribution_values import (
-    attribution_values_from_label_scores,
-    normalize_attribution_value_function,
-    probabilities_from_label_scores,
+from mobius.text.coalitions import (
+    EMPTY_TEXT,
+    active_chunk_ids as _active_unit_ids_from_visible_span,
+    visible_text_span as _prompt_visible_text_span_after_left_truncation,
 )
-from lima_llm.chunking.utils import compose_text_from_chunk_ids
-from lima_llm.data import load_dataset_bundle
-from lima_llm.eval.evaluate import evaluate_saved_explanations
-from lima_llm.eval.metrics import EMPTY_PERTURBATION_TEXT
-from lima_llm.eval.units import normalize_eval_granularity
-from lima_llm.pipeline.io import rebuild_summary_csv, save_explanation
-from lima_llm.pipeline.resume import is_sample_completed, sample_output_paths
-from lima_llm.types import ExplanationResult, ScoreComponents, ScoreTrace, TextChunk
-from lima_llm.utils import (
-    atomic_write_json,
-    build_provenance,
-    configure_determinism,
-    ensure_dir,
-    parse_q_values,
-    set_seed,
+from mobius.values.classification import (
+    attribution_values as attribution_values_from_label_scores,
+    normalize_value_function as normalize_attribution_value_function,
+    probabilities as probabilities_from_label_scores,
 )
-from proxyspex_chunking import build_proxyspex_chunks, load_adaptive_overrides, normalize_proxyspex_chunker
 
 
 METHOD_NAME = "proxyspex"
 
 
+def parse_q_values(raw: str) -> List[int]:
+    """Parse comma-separated evaluation percentages."""
+
+    return [int(value.strip()) for value in str(raw).split(",") if value.strip()]
+
+
+def load_adaptive_overrides(raw: str | None) -> Dict[str, Any] | None:
+    """Load adaptive chunk overrides from inline JSON or a file."""
+
+    return load_json_object(raw)
+
+
+def _compose_coalition_text(
+    *,
+    units: Sequence[TextChunk],
+    player_to_chunk_id: Sequence[int],
+    coalition_row: Sequence[bool],
+) -> str:
+    """Compose a ProxySPEX keep coalition over active explanation chunks."""
+
+    selected = [
+        int(player_to_chunk_id[index])
+        for index, keep in enumerate(coalition_row)
+        if bool(keep)
+    ]
+    text = compose_text(units, selected)
+    return text if text else EMPTY_TEXT
+
+
 def build_parser() -> argparse.ArgumentParser:
+    """Handle the build parser step in this retained baseline."""
+
     parser = argparse.ArgumentParser(description="ProxySPEX baseline for HF causal language models")
     parser.add_argument(
         "--dataset",
@@ -163,22 +185,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--base-save-dir", type=str, default="results")
     parser.add_argument("--save-dir", type=str, default="baselines/proxyspex")
+    parser.add_argument(
+        "--output-level",
+        type=str,
+        default="standard",
+        choices=["minimal", "standard", "debug"],
+    )
     parser.add_argument("--resume-check", type=str, default="strict", choices=["strict", "exists-only"])
     parser.add_argument("--deterministic", action="store_true")
     return parser
 
 
 def _require_runtime_dependencies():
+    """Handle the require runtime dependencies step in this retained baseline."""
+
     try:
         import torch  # noqa: F401
         import transformers  # noqa: F401
     except Exception as exc:
         raise RuntimeError(
             "ProxySPEX LLM runner requires torch and transformers for HFBackbone. "
-            "Please install the dependencies listed in baselines/shapiq-main/README_zh.md."
+            "Please install the dependencies listed in baselines/shapiq-copy/README_zh.md."
         ) from exc
 
     def _import_proxyspex():
+        """Handle the import proxyspex step in this retained baseline."""
+
         from shapiq.approximator.proxy.proxyspex import ProxySPEX
 
         return ProxySPEX
@@ -197,58 +229,74 @@ def _require_runtime_dependencies():
                 first_exc = second_exc
         raise RuntimeError(
             "ProxySPEX runner requires shapiq and its proxy dependencies. Install with something like: "
-            "pip install -e 'baselines/shapiq-main[proxy]'. If your local checkout misses lazy_dispatch, "
+            "pip install -e 'baselines/shapiq-copy[proxy]'. If your local checkout misses lazy_dispatch, "
             "install the matching shapiq release or add the lazy_dispatch package required by this checkout."
         ) from first_exc
 
 
-def _model_slug(model_path: str) -> str:
-    return str(model_path).rstrip("/").split("/")[-1].replace(".", "_")
-
-
 def _effective_target_mode(value_function: str, requested_target_mode: str) -> str:
+    """Handle the effective target mode step in this retained baseline."""
+
     normalized = normalize_attribution_value_function(value_function)
     if normalized in {"predicted_probability", "predicted_class_margin"}:
         return "predicted"
     return str(requested_target_mode)
 
 
-def _output_root(args) -> Path:
-    chunker = normalize_proxyspex_chunker(getattr(args, "chunker", "word"))
-    eval_granularity = normalize_eval_granularity(getattr(args, "eval_granularity", "token"))
-    adaptive_segment = (
-        f"profile-{getattr(args, 'adaptive_profile', 'balanced')}_"
-        if chunker == "adaptive"
-        else ""
-    )
-    adaptive_overrides = getattr(args, "adaptive_overrides", None)
-    if chunker == "adaptive" and adaptive_overrides:
-        encoded = json.dumps(
-            adaptive_overrides,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        adaptive_segment += f"overrides-{hashlib.sha256(encoded).hexdigest()[:8]}_"
-    return (
-        Path(args.base_save_dir)
-        / str(args.save_dir)
-        / str(args.dataset)
-        / f"model-{_model_slug(args.model_path)}"
-        / (
-            f"chunk-{chunker}_{adaptive_segment}eval-{eval_granularity}_"
-            f"index-{args.index}_order-{int(args.max_order)}_budget-{int(args.budget)}_"
-            f"proxy-{args.proxy_model}_hpo-{int(bool(args.hpo))}_"
-            f"weights-{args.sampling_weight_mode}_pair-{int(bool(args.pairing_trick))}_"
-            f"top-{int(bool(args.top_order))}_"
-            f"value-{normalize_attribution_value_function(getattr(args, 'value_function', 'predicted_probability'))}_"
-            f"target-{_effective_target_mode(getattr(args, 'value_function', 'predicted_probability'), args.target_mode)}_"
-            f"k-{int(args.k)}_seed-{int(args.seed)}"
-        )
+def _result_config(args, bundle=None) -> Dict[str, Any]:
+    """Build the scientific ProxySPEX configuration written once per run."""
+
+    return {
+        "method": METHOD_NAME,
+        "output_level": str(getattr(args, "output_level", "standard")),
+        "dataset": {
+            "name": str(args.dataset),
+            "split": str(args.split),
+            "max_samples": args.max_samples,
+            "dataset_cache_dir": args.dataset_cache_dir,
+            "verbalizers": list(bundle.verbalizers) if bundle is not None else [],
+        },
+        "model": {
+            "type": "hf_causal_lm",
+            "model_path": str(args.model_path),
+            "device": str(args.device),
+            "dtype": str(args.dtype),
+            "max_length": int(args.max_length),
+            "trust_remote_code": bool(args.trust_remote_code),
+        },
+        "budget": int(args.budget),
+        "seed": int(args.seed),
+        "max_order": int(args.max_order),
+        "k": int(args.k),
+        "value_function": normalize_attribution_value_function(args.value_function),
+        "target_mode": _effective_target_mode(args.value_function, args.target_mode),
+        "chunker": normalize_chunker(args.chunker),
+        "adaptive_profile": str(args.adaptive_profile),
+        "adaptive_overrides": getattr(args, "adaptive_overrides", None),
+        "eval_granularity": normalize_eval_granularity(args.eval_granularity),
+        "eval_q_values": parse_q_values(args.eval_q_values),
+        "index": str(args.index),
+        "proxy_model": str(args.proxy_model),
+        "hpo": bool(args.hpo),
+        "sampling_weight_mode": str(args.sampling_weight_mode),
+        "pairing_trick": bool(args.pairing_trick),
+        "top_order": bool(args.top_order),
+        "projector": "signed_equal_share",
+    }
+
+
+def _output_root(args, bundle=None) -> Path:
+    """Resolve the schema-v2 directory below the requested baseline root."""
+
+    return default_run_dir(
+        Path(args.base_save_dir) / str(args.save_dir),
+        _result_config(args, bundle),
     )
 
 
 def _stable_uniform_coalition_sampling_weights(n_players: int) -> np.ndarray:
+    """Handle the stable uniform coalition sampling weights step in this retained baseline."""
+
     n = int(n_players)
     if n < 0:
         raise ValueError("n_players must be non-negative")
@@ -271,6 +319,8 @@ def _stable_uniform_coalition_sampling_weights(n_players: int) -> np.ndarray:
 
 
 def _sampling_weights(n_players: int, mode: str) -> np.ndarray:
+    """Handle the sampling weights step in this retained baseline."""
+
     value = str(mode).strip().lower()
     if value == "uniform_size":
         return np.ones(int(n_players) + 1, dtype=np.float64)
@@ -280,6 +330,8 @@ def _sampling_weights(n_players: int, mode: str) -> np.ndarray:
 
 
 def _warn_proxy_fallback(requested: str, effective: str, reason: str) -> None:
+    """Handle the warn proxy fallback step in this retained baseline."""
+
     key = (str(requested), str(effective))
     if key in _PROXY_FALLBACK_WARNED:
         return
@@ -303,6 +355,8 @@ def _expected_proxy_fit_sample_count(n_players: int, budget: int) -> int:
 
 
 def _proxy_hpo_cv_splits(n_fit_samples: int | None) -> int | None:
+    """Handle the proxy hpo cv splits step in this retained baseline."""
+
     if n_fit_samples is None:
         return _MAX_PROXY_HPO_CV_SPLITS
     # R2 scoring is undefined for a one-sample test fold. Keep every fold at size >= 2.
@@ -311,6 +365,8 @@ def _proxy_hpo_cv_splits(n_fit_samples: int | None) -> int | None:
 
 
 def _warn_proxy_hpo_fallback(proxy_name: str, n_fit_samples: int) -> None:
+    """Handle the warn proxy hpo fallback step in this retained baseline."""
+
     key = (str(proxy_name), int(n_fit_samples))
     if key in _PROXY_HPO_FALLBACK_WARNED:
         return
@@ -324,6 +380,8 @@ def _warn_proxy_hpo_fallback(proxy_name: str, n_fit_samples: int) -> None:
 
 
 def _build_proxy_model(args, *, n_fit_samples: int | None = None):
+    """Handle the build proxy model step in this retained baseline."""
+
     from sklearn.model_selection import GridSearchCV
     from sklearn.tree import DecisionTreeRegressor
 
@@ -408,11 +466,15 @@ class _SuppressNativeOutput:
     """Temporarily redirects process-level stdout/stderr, including C/C++ library logs."""
 
     def __init__(self) -> None:
+        """Handle the init step in this retained baseline."""
+
         self._null_fd: int | None = None
         self._stdout_fd: int | None = None
         self._stderr_fd: int | None = None
 
     def __enter__(self) -> "_SuppressNativeOutput":
+        """Handle the enter step in this retained baseline."""
+
         sys.stdout.flush()
         sys.stderr.flush()
         self._null_fd = os.open(os.devnull, os.O_WRONLY)
@@ -428,6 +490,8 @@ class _SuppressNativeOutput:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
+        """Handle the exit step in this retained baseline."""
+
         try:
             sys.stdout.flush()
             sys.stderr.flush()
@@ -450,6 +514,8 @@ class _SuppressNativeOutput:
 
 @contextmanager
 def _maybe_suppress_native_output(enabled: bool):
+    """Handle the maybe suppress native output step in this retained baseline."""
+
     with (_SuppressNativeOutput() if enabled else nullcontext()):
         yield
 
@@ -465,6 +531,8 @@ class ProxySPEXCoalitionGame:
         target_label: int,
         value_function: str = "target_probability",
     ) -> None:
+        """Handle the init step in this retained baseline."""
+
         self.units = list(units)
         self.player_to_chunk_id = [int(x) for x in player_to_chunk_id]
         self.backbone = backbone
@@ -479,6 +547,8 @@ class ProxySPEXCoalitionGame:
         self.unique_text_count = 0
 
     def __call__(self, coalitions_matrix: np.ndarray) -> np.ndarray:
+        """Handle the call step in this retained baseline."""
+
         matrix = np.asarray(coalitions_matrix, dtype=bool)
         if matrix.ndim == 1:
             matrix = matrix.reshape(1, -1)
@@ -527,6 +597,8 @@ class ProxySPEXCoalitionGame:
         return np.asarray([self.cache[text] for text in texts], dtype=np.float64)
 
     def stats(self) -> Dict[str, Any]:
+        """Handle the stats step in this retained baseline."""
+
         return {
             "call_count": int(self.call_count),
             "row_count": int(self.row_count),
@@ -538,6 +610,8 @@ class ProxySPEXCoalitionGame:
 
 
 def _interaction_items(interaction_values) -> List[Tuple[Tuple[int, ...], float]]:
+    """Handle the interaction items step in this retained baseline."""
+
     raw = getattr(interaction_values, "dict_values", None)
     if raw is None:
         raw = getattr(interaction_values, "interactions", {})
@@ -553,6 +627,8 @@ def _project_interactions_to_chunk_scores(
     player_to_chunk_id: Sequence[int],
     total_chunk_count: int,
 ) -> List[float]:
+    """Handle the project interactions to chunk scores step in this retained baseline."""
+
     scores = [0.0] * int(total_chunk_count)
     for interaction, value in interaction_items:
         if len(interaction) == 0:
@@ -571,6 +647,8 @@ def _summarize_interactions(
     *,
     limit: int,
 ) -> Dict[str, Any]:
+    """Handle the summarize interactions step in this retained baseline."""
+
     order_counts: Dict[str, int] = {}
     order_signed_sums: Dict[str, float] = {}
     order_abs_sums: Dict[str, float] = {}
@@ -600,30 +678,15 @@ def _summarize_interactions(
 
 
 def _rank_desc_scores(scores: Sequence[float], k: int) -> tuple[List[int], List[int]]:
+    """Handle the rank desc scores step in this retained baseline."""
+
     ranking = [idx for idx, _ in sorted(enumerate(scores), key=lambda item: (-float(item[1]), item[0]))]
     return ranking, list(ranking[: max(0, int(k))])
 
 
-def _build_rank_trace(selected: Sequence[int], chunk_scores: Mapping[int, float]) -> List[ScoreTrace]:
-    zero = ScoreComponents(0.0, 0.0, 0.0, 0.0)
-    total = 0.0
-    trace: List[ScoreTrace] = []
-    for step, chunk_id in enumerate(selected):
-        gain = float(chunk_scores.get(int(chunk_id), 0.0))
-        total += gain
-        trace.append(
-            ScoreTrace(
-                step=int(step),
-                selected_chunk_id=int(chunk_id),
-                marginal_gain=gain,
-                total_score=float(total),
-                components=zero,
-            )
-        )
-    return trace
-
-
 def _counter_delta(before: Mapping[str, float | int], after: Mapping[str, float | int]) -> Dict[str, float | int]:
+    """Subtract numeric scorer counters for one attribution sample."""
+
     out: Dict[str, float | int] = {}
     for key, value in after.items():
         prev = before.get(key, 0)
@@ -641,6 +704,8 @@ def _sample_target_label(
     target_mode: str,
     value_function: str,
 ) -> tuple[int, np.ndarray, np.ndarray]:
+    """Handle the sample target label step in this retained baseline."""
+
     score_fn = getattr(backbone, "predict_label_scores", None)
     if callable(score_fn):
         label_scores = np.asarray(score_fn(sample.text, bundle.verbalizers), dtype=np.float64)
@@ -661,7 +726,8 @@ def _explain_sample(
     backbone: HFBackbone,
     args,
     ProxySPEX,
-) -> ExplanationResult:
+) -> AttributionResult:
+    """Run native ProxySPEX and adapt its output to schema v2."""
     t0 = time.time()
     timing: Dict[str, float] = {}
     counter_before = backbone.snapshot_counters()
@@ -682,7 +748,7 @@ def _explain_sample(
     adaptive_overrides = getattr(args, "adaptive_overrides", None)
     if adaptive_overrides is None and getattr(args, "adaptive_overrides_json", None):
         adaptive_overrides = load_adaptive_overrides(getattr(args, "adaptive_overrides_json"))
-    chunking = build_proxyspex_chunks(
+    chunking = build_chunks(
         text=sample.text,
         chunker=getattr(args, "chunker", "word"),
         tokenizer=backbone.tokenizer,
@@ -691,9 +757,9 @@ def _explain_sample(
     )
     units = list(chunking.chunks)
     fallback_used = bool(chunking.fallback_used)
-    segmentation_strategy = str(chunking.segmentation_strategy)
+    segmentation_strategy = str(chunking.strategy)
     chunk_diagnostics = dict(chunking.diagnostics)
-    if normalize_proxyspex_chunker(getattr(args, "chunker", "word")) == "token" and fallback_used:
+    if normalize_chunker(getattr(args, "chunker", "word")) == "token" and fallback_used:
         raise RuntimeError(
             "ProxySPEX token chunker requires tokenizer offset_mapping support. "
             "Use a fast tokenizer or choose --chunker word/adaptive."
@@ -708,8 +774,8 @@ def _explain_sample(
     )
     active_chunk_ids = _active_unit_ids_from_visible_span(
         units,
-        visible_start=int(truncation["visible_start_char"]),
-        visible_end=int(truncation["visible_end_char"]),
+        int(truncation["visible_start_char"]),
+        int(truncation["visible_end_char"]),
     )
     player_to_chunk_id = list(active_chunk_ids)
     proxy_fit_sample_count = 0
@@ -782,12 +848,19 @@ def _explain_sample(
     )
 
     chunk_scores_by_id = {idx: float(score) for idx, score in enumerate(chunk_scores)}
-    chunk_ranking, selected = _rank_desc_scores(chunk_scores, int(args.k))
-    selected_text = compose_text_from_chunk_ids(units, selected)
+    active_ranking = sorted(
+        player_to_chunk_id,
+        key=lambda chunk_id: (-float(chunk_scores[int(chunk_id)]), int(chunk_id)),
+    )
+    inactive_chunk_ids = [
+        unit.chunk_id for unit in units if unit.chunk_id not in set(player_to_chunk_id)
+    ]
+    chunk_ranking = [int(value) for value in active_ranking + inactive_chunk_ids]
+    selected = chunk_ranking[: min(int(args.k), len(player_to_chunk_id))]
+    selected_text = compose_text(units, selected)
     counter_after = backbone.snapshot_counters()
     elapsed = time.time() - t0
 
-    inactive_chunk_ids = [unit.chunk_id for unit in units if unit.chunk_id not in set(player_to_chunk_id)]
     interaction_summary = _summarize_interactions(
         interaction_items,
         limit=int(args.interaction_metadata_limit),
@@ -823,7 +896,7 @@ def _explain_sample(
         "full_label_probabilities": [float(x) for x in full_probs.tolist()],
         "full_label_scores": [float(x) for x in full_label_scores.tolist()],
         "eval_granularity": str(args.eval_granularity),
-        "proxyspex_chunker": normalize_proxyspex_chunker(getattr(args, "chunker", "word")),
+        "proxyspex_chunker": normalize_chunker(getattr(args, "chunker", "word")),
         "chunk_diagnostics": chunk_diagnostics,
         "explain_chunk_strategy": str(chunk_diagnostics.get("chunk_strategy", segmentation_strategy)),
         "explain_tokenizer_fallback_used": bool(fallback_used),
@@ -861,27 +934,36 @@ def _explain_sample(
         "elapsed_seconds": float(elapsed),
     }
 
-    return ExplanationResult(
-        explain_method=METHOD_NAME,
-        sample_id=sample.sample_id,
-        dataset=bundle.dataset_name,
-        split=bundle.split,
-        label=sample.label,
-        label_text=sample.label_text,
+    predicted_label = int(np.argmax(full_probs))
+    return AttributionResult(
+        sample_id=str(sample.sample_id),
+        gold_label=int(sample.label),
+        predicted_label=predicted_label,
+        target_label=int(target_label),
         text=sample.text,
         chunks=list(units),
-        chunk_ranking=list(chunk_ranking),
-        chunk_scores=list(chunk_scores),
-        selected_chunk_ids=list(selected),
-        selected_text=selected_text,
-        scores={
-            "total": float(sum(chunk_scores_by_id.get(int(chunk_id), 0.0) for chunk_id in selected)),
-            "confidence": 0.0,
-            "effectiveness": 0.0,
-            "consistency": 0.0,
-            "collaboration": 0.0,
-            "target_probability": float(full_probs[target_label]),
-            "label_probabilities": [float(x) for x in full_probs.tolist()],
+        node_scores=list(chunk_scores),
+        ranking=list(chunk_ranking),
+        selected_ids=list(selected),
+        attribution_cost={
+            "attribution_budget_used": int(game_stats.get("row_count", 0)),
+            "logical_unique_queries": int(game_stats.get("unique_text_count", 0)),
+            "physical_values_scored": int(game_stats.get("unique_text_count", 0)),
+            "interaction_verification_queries": 0,
+            "model_forward_calls": int(
+                attribution_forward_delta.get("model_forward_calls", 0)
+            ),
+            "batch_calls": int(attribution_forward_delta.get("batch_calls", 0)),
+            "batch_rows": int(attribution_forward_delta.get("batch_rows", 0)),
+            "model_counter_delta": attribution_forward_delta,
+            "elapsed_seconds": float(elapsed),
+        },
+        method_summary={
+            **metadata,
+            "selected_text": selected_text,
+            "selected_score": float(
+                sum(chunk_scores_by_id.get(int(chunk_id), 0.0) for chunk_id in selected)
+            ),
             "attribution_value": float(
                 attribution_values_from_label_scores(
                     full_label_scores.reshape(1, -1),
@@ -890,85 +972,29 @@ def _explain_sample(
                 )[0]
             ),
         },
-        trace=_build_rank_trace(selected=selected, chunk_scores=chunk_scores_by_id),
-        metadata=metadata,
+        diagnostics={
+            "interaction_items": [
+                {
+                    "players": [int(value) for value in interaction],
+                    "chunk_ids": [
+                        int(player_to_chunk_id[int(value)])
+                        for value in interaction
+                        if 0 <= int(value) < len(player_to_chunk_id)
+                    ],
+                    "value": float(value),
+                }
+                for interaction, value in interaction_items
+            ],
+            "game_stats": game_stats,
+        },
     )
-
-
-def _scan_resume(samples, output_root: Path, resume_mode: str):
-    pending = []
-    completed = 0
-    for sample in samples:
-        paths = sample_output_paths(output_root, sample.sample_id)
-        if is_sample_completed(paths, mode=resume_mode):
-            completed += 1
-        else:
-            pending.append(sample)
-    print(
-        f"[resume] method-root={output_root.name} mode={resume_mode} "
-        f"selected={len(samples)} completed={completed} pending={len(pending)}"
-    )
-    return pending
-
-
-def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    atomic_write_json(path, dict(payload))
-
-
-def _write_configs(output_root: Path, args, raw_argv: Sequence[str], deterministic_info: Dict[str, Any]) -> None:
-    now = time.time()
-    payload = dict(vars(args))
-    payload["method"] = METHOD_NAME
-    payload["value_function"] = normalize_attribution_value_function(
-        getattr(args, "value_function", "predicted_probability")
-    )
-    payload["comparison_contract"] = {
-        "dataset": str(args.dataset),
-        "split": str(args.split),
-        "model_path": str(args.model_path),
-        "max_length": int(args.max_length),
-        "prompt_template": f"{PROMPT_PREFIX}{{text}}{PROMPT_SUFFIX}",
-        "chunker": normalize_proxyspex_chunker(getattr(args, "chunker", "word")),
-        "adaptive_profile": str(getattr(args, "adaptive_profile", "balanced")),
-        "adaptive_overrides": getattr(args, "adaptive_overrides", None),
-        "mask_operator": "delete",
-        "empty_perturbation_text": EMPTY_PERTURBATION_TEXT,
-        "target_mode": _effective_target_mode(payload["value_function"], args.target_mode),
-        "target_mode_requested": str(args.target_mode),
-        "value_function": payload["value_function"],
-        "eval_granularity": normalize_eval_granularity(args.eval_granularity),
-        "eval_q_values": [int(value) for value in parse_q_values(args.eval_q_values)],
-        "verbalizers": [str(value) for value in getattr(args, "comparison_verbalizers", [])],
-    }
-
-    run_config_payload = dict(payload)
-    run_config_payload["provenance"] = build_provenance(
-        stage="run_config",
-        parsed_args=payload,
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=now,
-        end_time=time.time(),
-        cwd=Path.cwd(),
-    )
-
-    eval_config_payload = dict(payload)
-    eval_config_payload["provenance"] = build_provenance(
-        stage="eval_config",
-        parsed_args=payload,
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=now,
-        end_time=time.time(),
-        cwd=Path.cwd(),
-    )
-    _write_json(output_root / "run_config.json", run_config_payload)
-    _write_json(output_root / "eval_config.json", eval_config_payload)
 
 
 def _validate_args(args) -> None:
+    """Validate ProxySPEX-specific runtime and algorithm options."""
+
     normalize_eval_granularity(args.eval_granularity)
-    normalize_proxyspex_chunker(getattr(args, "chunker", "word"))
+    normalize_chunker(getattr(args, "chunker", "word"))
     value_function = normalize_attribution_value_function(
         getattr(args, "value_function", "predicted_probability")
     )
@@ -991,16 +1017,12 @@ def _validate_args(args) -> None:
 
 
 def run(args, raw_argv: Sequence[str]) -> None:
+    """Run native ProxySPEX with shared schema-v2 data and evaluation APIs."""
+
     ProxySPEX = _require_runtime_dependencies()
     _validate_args(args)
     args.adaptive_overrides = load_adaptive_overrides(getattr(args, "adaptive_overrides_json", None))
-    set_seed(int(args.seed))
-
-    output_root = _output_root(args)
-    ensure_dir(output_root)
-    ensure_dir(output_root / "samples")
-
-    deterministic_info = configure_determinism(bool(args.deterministic))
+    set_seed(int(args.seed), bool(args.deterministic))
     bundle = load_dataset_bundle(
         dataset_name=args.dataset,
         split=args.split,
@@ -1009,66 +1031,71 @@ def run(args, raw_argv: Sequence[str]) -> None:
         sst2_source=args.sst2_source,
         dataset_cache_dir=args.dataset_cache_dir,
     )
-    args.comparison_verbalizers = list(bundle.verbalizers)
-    _write_configs(
-        output_root=output_root,
-        args=args,
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
+    output_root = _output_root(args, bundle)
+    config = _result_config(args, bundle)
+    store = ResultStore(
+        output_root,
+        config,
+        output_level=str(args.output_level),
+        command=" ".join([sys.executable, __file__, *raw_argv]),
     )
     backbone = HFBackbone(
         model_path=args.model_path,
+        verbalizers=bundle.verbalizers,
         device=args.device,
         max_length=args.max_length,
-        embedding_layer_ratio=0.7,
         dtype=args.dtype,
         trust_remote_code=bool(args.trust_remote_code),
+        batch_size=16,
     )
 
-    pending_samples = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
+    pending_samples = [
+        sample for sample in bundle.samples if not store.sample_complete(sample.sample_id)
+    ]
+    print(
+        f"[resume] run={output_root.name} selected={len(bundle.samples)} "
+        f"completed={len(bundle.samples) - len(pending_samples)} pending={len(pending_samples)}"
+    )
     if pending_samples:
         start = time.time()
         for sample in tqdm(pending_samples, desc="proxyspex", dynamic_ncols=True):
-            result = _explain_sample(
-                sample=sample,
-                bundle=bundle,
-                backbone=backbone,
-                args=args,
-                ProxySPEX=ProxySPEX,
-            )
-            save_explanation(result, output_root)
+            try:
+                result = _explain_sample(
+                    sample=sample,
+                    bundle=bundle,
+                    backbone=backbone,
+                    args=args,
+                    ProxySPEX=ProxySPEX,
+                )
+                store.write_sample(result)
+            except Exception as error:
+                store.record_failure(sample.sample_id, error)
+                store.write_status("running", selected_count=len(bundle.samples))
+                raise
+            store.write_status("running", selected_count=len(bundle.samples))
         print(f"[done] method={METHOD_NAME} processed={len(pending_samples)} elapsed={time.time() - start:.2f}s")
     else:
         print(f"[resume] method={METHOD_NAME} no pending samples")
 
-    summary_path = rebuild_summary_csv(output_root)
-    print(f"[done] method={METHOD_NAME} summary={summary_path}")
-
     q_values = parse_q_values(args.eval_q_values)
-    eval_started = time.time()
-    eval_report = evaluate_saved_explanations(
-        output_root=output_root,
+    eval_report = evaluate_run(
+        output_root,
         bundle=bundle,
-        backbone=backbone,
-        verbalizers=bundle.verbalizers,
-        q_values=q_values,
-        explain_method=METHOD_NAME,
+        scorer=backbone,
+        target=_effective_target_mode(args.value_function, args.target_mode),
         eval_granularity=args.eval_granularity,
+        q_values=q_values,
     )
-    eval_report["provenance"] = build_provenance(
-        stage="eval_report",
-        parsed_args={**vars(args), "method": METHOD_NAME},
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=eval_started,
-        end_time=time.time(),
-        cwd=Path.cwd(),
+    status = store.finish(len(bundle.samples))
+    print(
+        f"[eval] method={METHOD_NAME} target={eval_report['target']} "
+        f"report={output_root / 'metrics.json'} state={status['state']}"
     )
-    _write_json(output_root / "eval_report.json", eval_report)
-    print(f"[eval] method={METHOD_NAME} report={output_root / 'eval_report.json'}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Parse CLI arguments and launch one ProxySPEX run."""
+
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     raw_argv = list(argv) if argv is not None else sys.argv[1:]

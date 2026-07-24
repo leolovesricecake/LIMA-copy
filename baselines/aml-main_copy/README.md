@@ -8,7 +8,7 @@
 
 This directory contains a local AML copy wired to the repository's mainline text-classification datasets.
 
-Canonical AML task names are now aligned with `lima_llm`:
+Canonical AML task names are aligned with the shared `mobius` data loader:
 
 - `sst2`
 - `eraser_movie_reviews`
@@ -38,7 +38,7 @@ cd baselines/aml-main_copy
 python runs/run.py <task> <explained_backbone> <interpreter_backbone> <metric>
 ```
 
-Extra dataset-source flags are available for the shared `lima_llm` loader:
+Extra dataset-source flags are available for the shared `mobius` loader:
 
 ```bash
 python runs/run.py eraser_movie_reviews BERT BERT SUFFICIENCY --eraser-root hf://eraser-benchmark/movie_rationales

@@ -1,0 +1,424 @@
+"""End-to-end modular sparse interaction attribution runner."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any, Dict, Mapping, Sequence
+
+import numpy as np
+from tqdm import tqdm
+
+from mobius.core.config import resolve_config, scientific_config
+from mobius.core.results import ResultStore, canonical_digest
+from mobius.core.runtime import counter_delta
+from mobius.core.schema import AttributionResult, DatasetBundle, TextSample
+from mobius.models.base import RawTextScorer
+from mobius.models.oracle import QueryLedger, ValueOracle, stable_digest
+from mobius.text.chunks import build_chunks, compose_text
+from mobius.text.coalitions import CoalitionGame, active_chunk_ids, visible_text_span
+from mobius.values.classification import (
+    attribution_values,
+    effective_target_mode,
+    normalize_value_function,
+    probabilities,
+)
+
+from .estimator import SparseModel, fit_sparse_model
+from .hierarchy import choose_candidates, normalize_hierarchy
+from .projector import normalize_projector, project_nodes
+from .sampler import normalize_sampler, sample_masks
+from .verification import verification_summary, verify_deletion_coefficients
+from .basis import normalize_basis
+
+
+METHOD_NAME = "sparse_mobius"
+
+
+class SampleExcludedError(ValueError):
+    """Signal a deliberate feature-count or truncation exclusion."""
+
+
+def _logical_key(
+    method: str,
+    sample_id: str,
+    players: Sequence[int],
+    mask: int,
+    category: str,
+) -> str:
+    """Build a stable method-local logical query identity."""
+
+    return stable_digest(
+        {
+            "method": method,
+            "sample_id": str(sample_id),
+            "players": [int(value) for value in players],
+            "mask": int(mask),
+            "category": str(category),
+            "operator": "keep",
+        }
+    )
+
+
+def _ranking(
+    active_chunk_ids: Sequence[int],
+    active_scores: Sequence[float],
+    all_chunk_ids: Sequence[int],
+) -> list[int]:
+    """Rank active players by descending signed score and append inactive chunks."""
+
+    active = [
+        (int(chunk_id), float(active_scores[player]))
+        for player, chunk_id in enumerate(active_chunk_ids)
+    ]
+    ranked = [
+        chunk_id
+        for chunk_id, _ in sorted(active, key=lambda item: (-item[1], item[0]))
+    ]
+    active_set = set(ranked)
+    return ranked + [
+        int(chunk_id) for chunk_id in all_chunk_ids if int(chunk_id) not in active_set
+    ]
+
+
+class SparseMobiusExplainer:
+    """Explain samples using configurable sampler, basis, hierarchy, and projector."""
+
+    def __init__(
+        self,
+        config: Mapping[str, Any],
+        scorer: RawTextScorer,
+        oracle: ValueOracle,
+        verbalizers: Sequence[str],
+    ) -> None:
+        """Resolve component configuration and retain the shared score oracle."""
+
+        self.config = resolve_config(config)
+        self.scorer = scorer
+        self.oracle = oracle
+        self.verbalizers = [str(value) for value in verbalizers]
+        self.basis = normalize_basis(str(self.config["basis"]))
+        self.hierarchy = normalize_hierarchy(str(self.config["hierarchy"]))
+        self.projector = normalize_projector(str(self.config["projector"]))
+        self.sampler_config = dict(self.config.get("sampler", {}))
+        self.sampler = normalize_sampler(str(self.sampler_config.get("name")))
+        self.estimator_config = {
+            **dict(self.config.get("fit", {})),
+            **dict(self.config.get("estimator", {})),
+        }
+
+    def _score_masks(
+        self,
+        sample_id: str,
+        game: CoalitionGame,
+        masks: Sequence[int],
+        *,
+        ledger: QueryLedger,
+        category: str,
+    ) -> np.ndarray:
+        """Score coalition masks through the global cache and local ledger."""
+
+        texts = game.texts(masks)
+        logical_keys = [
+            _logical_key(
+                METHOD_NAME,
+                sample_id,
+                game.player_to_chunk_id,
+                mask,
+                category,
+            )
+            for mask in masks
+        ]
+        return self.oracle.score_texts(
+            texts,
+            logical_keys=logical_keys,
+            ledger=ledger,
+            category=category,
+        )
+
+    def explain(self, sample: TextSample) -> AttributionResult:
+        """Run attribution, sparse recovery, projection, and targeted verification."""
+
+        started = time.perf_counter()
+        counters_before = self.scorer.snapshot_counters()
+        value_function = normalize_value_function(self.config["value_function"])
+        target_mode = effective_target_mode(
+            value_function,
+            str(self.config["target_mode"]),
+        )
+        setup_ledger = QueryLedger(f"{METHOD_NAME}/{sample.sample_id}/setup")
+        full_scores = self.oracle.score_texts(
+            [sample.text],
+            logical_keys=[
+                stable_digest(
+                    {"sample_id": sample.sample_id, "category": "full_input"}
+                )
+            ],
+            ledger=setup_ledger,
+            category="setup",
+        )[0]
+        full_probabilities = probabilities(full_scores.reshape(1, -1))[0]
+        predicted_label = int(np.argmax(full_scores))
+        target_label = predicted_label if target_mode == "predicted" else int(sample.label)
+        target_label_text = self.verbalizers[target_label]
+
+        chunking = build_chunks(
+            sample.text,
+            str(self.config["chunker"]),
+            getattr(self.scorer, "tokenizer", None),
+            adaptive_profile=str(self.config["adaptive_profile"]),
+            adaptive_overrides=self.config.get("adaptive_overrides"),
+        )
+        if str(self.config["chunker"]) == "token" and chunking.fallback_used:
+            raise RuntimeError("Token chunking requires tokenizer offset mappings.")
+        truncation = visible_text_span(
+            getattr(self.scorer, "tokenizer", None),
+            sample.text,
+            target_label_text,
+            int(dict(self.config.get("model", {})).get("max_length", 2048)),
+        )
+        players = active_chunk_ids(
+            chunking.chunks,
+            int(truncation["visible_start_char"]),
+            int(truncation["visible_end_char"]),
+        )
+        if not players:
+            raise SampleExcludedError("No explanation chunks remain after truncation.")
+        minimum = int(self.config["min_features"])
+        maximum = self.config.get("max_features")
+        if len(players) < minimum:
+            raise SampleExcludedError(
+                f"active feature count {len(players)} is below min_features={minimum}"
+            )
+        if maximum is not None and len(players) > int(maximum):
+            raise SampleExcludedError(
+                f"active feature count {len(players)} exceeds max_features={maximum}"
+            )
+
+        attribution_counters_before = self.scorer.snapshot_counters()
+        game = CoalitionGame(chunking.chunks, players)
+        sampling = sample_masks(
+            game.n_players,
+            int(self.config["budget"]),
+            seed=int(self.config["seed"]),
+            config=self.sampler_config,
+        )
+        ledger = QueryLedger(
+            f"{METHOD_NAME}/{sample.sample_id}/{self.config['budget']}/{self.config['seed']}"
+        )
+        training_scores = self._score_masks(
+            sample.sample_id,
+            game,
+            sampling.masks,
+            ledger=ledger,
+            category="training",
+        )
+        training_values = attribution_values(
+            training_scores,
+            target_class=target_label,
+            value_function=value_function,
+        )
+        candidates, hierarchy_diagnostics, _ = choose_candidates(
+            self.hierarchy,
+            sampling.masks,
+            training_values,
+            n_features=game.n_players,
+            max_degree=int(self.config["max_degree"]),
+            basis=self.basis,
+            estimator_config=self.estimator_config,
+            random_state=int(self.config["seed"]),
+        )
+        model = fit_sparse_model(
+            sampling.masks,
+            training_values,
+            n_features=game.n_players,
+            terms=candidates,
+            basis=self.basis,
+            max_degree=int(self.config["max_degree"]),
+            config=self.estimator_config,
+            random_state=int(self.config["seed"]),
+        )
+        active_scores = project_nodes(model, self.projector)
+        node_scores = [0.0] * len(chunking.chunks)
+        for player, chunk_id in enumerate(players):
+            node_scores[int(chunk_id)] = float(active_scores[player])
+        ranking = _ranking(
+            players,
+            active_scores,
+            [chunk.chunk_id for chunk in chunking.chunks],
+        )
+        selected = ranking[: min(int(self.config["k"]), len(players))]
+
+        verification = verify_deletion_coefficients(
+            model,
+            n_players=game.n_players,
+            top_k=int(self.config["targeted_top_k"]),
+            score_masks=lambda masks, ledger, category: self._score_masks(
+                sample.sample_id,
+                game,
+                masks,
+                ledger=ledger,
+                category=category,
+            ),
+            target_class=target_label,
+            value_function=value_function,
+            ledger=ledger,
+        )
+        model_payload = model.to_dict()
+        for edge in model_payload["hyperedges"]:
+            edge["chunk_ids"] = [
+                int(players[int(player)]) for player in edge["players"]
+            ]
+        elapsed = time.perf_counter() - started
+        counters_after = self.scorer.snapshot_counters()
+        attribution_counter_delta = counter_delta(
+            attribution_counters_before,
+            counters_after,
+        )
+        attribution_cost = {
+            **ledger.to_dict(),
+            "setup_physical_values_scored": setup_ledger.physical_values_scored,
+            "interaction_verification_queries": ledger.category_count(
+                "interaction_verification"
+            ),
+            "model_forward_calls": int(
+                attribution_counter_delta.get("model_forward_calls", 0)
+            ),
+            "batch_calls": int(attribution_counter_delta.get("batch_calls", 0)),
+            "batch_rows": int(attribution_counter_delta.get("batch_rows", 0)),
+            "model_counter_delta": attribution_counter_delta,
+            "total_counter_delta_including_setup": counter_delta(
+                counters_before,
+                counters_after,
+            ),
+            "elapsed_seconds": elapsed,
+        }
+        method_summary = {
+            "method": METHOD_NAME,
+            "basis": self.basis,
+            "deletion_mobius_definition": "g(D)=f(N\\D)",
+            "hierarchy": hierarchy_diagnostics,
+            "sampler": sampling.diagnostics,
+            "projector": self.projector,
+            "model": model_payload,
+            "targeted_verification": verification_summary(verification),
+            "chunking": chunking.diagnostics,
+            "truncation": {
+                **truncation,
+                "active_chunk_ids": players,
+                "active_chunk_count": len(players),
+            },
+            "player_to_chunk_id": players,
+            "value_function": value_function,
+            "target_mode": target_mode,
+            "full_label_scores": [float(value) for value in full_scores],
+            "full_label_probabilities": [
+                float(value) for value in full_probabilities
+            ],
+            "selected_text": compose_text(chunking.chunks, selected),
+        }
+        diagnostics = {
+            "masks": [int(mask) for mask in sampling.masks],
+            "values": [float(value) for value in training_values],
+            "label_scores": [
+                [float(value) for value in row] for row in training_scores
+            ],
+            "targeted_verification": verification,
+            "setup_ledger": setup_ledger.to_dict(),
+            "query_ledger": ledger.to_dict(),
+            "observation_digest": canonical_digest(
+                {
+                    "masks": sampling.masks,
+                    "values": [float(value) for value in training_values],
+                }
+            ),
+        }
+        return AttributionResult(
+            sample_id=sample.sample_id,
+            gold_label=int(sample.label),
+            predicted_label=predicted_label,
+            target_label=target_label,
+            text=sample.text,
+            chunks=chunking.chunks,
+            node_scores=node_scores,
+            ranking=ranking,
+            selected_ids=selected,
+            attribution_cost=attribution_cost,
+            method_summary=method_summary,
+            diagnostics=diagnostics,
+        )
+
+
+def run_sparse_mobius(
+    config: Mapping[str, Any],
+    bundle: DatasetBundle,
+    scorer: RawTextScorer,
+    *,
+    run_dir: str | Path,
+    cache_path: str | Path,
+    overwrite: bool = False,
+    command: str | None = None,
+    evaluate: bool = True,
+) -> Dict[str, Any]:
+    """Run schema-v2 attribution over a dataset and optionally evaluate it."""
+
+    resolved = resolve_config(config)
+    resolved["method"] = METHOD_NAME
+    resolved["dataset"] = {
+        **dict(resolved.get("dataset", {})),
+        "name": bundle.dataset_name,
+        "split": bundle.split,
+        "verbalizers": list(bundle.verbalizers),
+    }
+    store = ResultStore(
+        run_dir,
+        resolved,
+        output_level=str(resolved["output_level"]),
+        command=command,
+        overwrite=overwrite,
+    )
+    oracle = ValueOracle(
+        scorer,
+        cache_path,
+        model_fingerprint=scientific_config(
+            {"model": dict(resolved.get("model", {}))}
+        )["model"],
+        batch_size=int(resolved["batch_size"]),
+    )
+    explainer = SparseMobiusExplainer(
+        resolved,
+        scorer,
+        oracle,
+        bundle.verbalizers,
+    )
+    try:
+        for sample in tqdm(bundle.samples, desc=METHOD_NAME, dynamic_ncols=True):
+            if not overwrite and store.sample_complete(sample.sample_id):
+                if sample.sample_id not in store.completed_ids:
+                    store.completed_ids.append(sample.sample_id)
+                continue
+            try:
+                store.write_sample(explainer.explain(sample))
+            except SampleExcludedError as error:
+                store.record_failure(sample.sample_id, error, skipped=True)
+                if bool(resolved["fail_fast"]):
+                    raise
+            except Exception as error:
+                store.record_failure(sample.sample_id, error, skipped=False)
+                if bool(resolved["fail_fast"]):
+                    raise
+            store.write_status("running", selected_count=len(bundle.samples))
+    finally:
+        oracle.close()
+    if evaluate and store.completed_ids:
+        from mobius.evaluation.evaluator import evaluate_run
+
+        evaluate_run(
+            store.run_dir,
+            bundle,
+            scorer,
+            target=str(resolved["target_mode"]),
+            eval_granularity=str(resolved["eval_granularity"]),
+            q_values=[int(value) for value in resolved["eval_q_values"]],
+        )
+    return store.finish(len(bundle.samples))

@@ -1,0 +1,40 @@
+# Single-axis ablation: unique global Bernoulli-0.5 masks.
+results_dir: results/mobius-ablations
+run_suffix: sampler_bernoulli
+output_level: standard
+method: sparse_mobius
+budget: 512
+seed: 42
+max_degree: 2
+k: 8
+value_function: target_probability
+target_mode: predicted
+chunker: word
+eval_granularity: token
+eval_q_values: [1, 5, 10, 20, 50]
+min_features: 1
+max_features: null
+batch_size: 16
+targeted_top_k: 5
+basis: deletion_mobius
+hierarchy: none
+projector: signed_equal_share
+sampler:
+  name: bernoulli
+  include_empty_full: true
+estimator:
+  name: lasso_cv_ridge_refit
+  alphas: [0.0001, 0.001, 0.01, 0.1]
+  l1_ratios: [1.0]
+  cv_folds: 3
+dataset:
+  name: sst2
+  split: validation
+  dataset_cache_dir: /mnt/huawei/nsq/temp/hf
+model:
+  type: hf_causal_lm
+  model_path: /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  device: cuda:0
+  dtype: bfloat16
+  max_length: 2048
+

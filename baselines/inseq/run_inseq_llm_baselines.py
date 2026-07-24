@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Run Inseq LLM attribution baselines inside LIMA-copy's LLM-transfer pipeline.
+Run Inseq LLM attribution baselines with the shared Mobius experiment protocol.
 
 Intended location in the repository:
     baselines/inseq/run_inseq_llm_baselines.py
@@ -10,9 +10,8 @@ Supported methods:
     saliency, input_x_gradient, integrated_gradients,
     sequential_integrated_gradients, occlusion, reagent, lime
 
-The runner saves one ExplanationResult JSON per sample, rebuilds summary.csv,
-runs the existing LIMA evaluation pipeline, and stores run_config.json,
-eval_config.json, eval_report.json, plus an aggregate_metrics.csv/jsonl file.
+The runner preserves Inseq's native attribution calls and writes schema-v2
+sample, status, metrics, curve, and aggregate collection artifacts.
 """
 
 import argparse
@@ -37,29 +36,13 @@ try:
 except Exception:  # pragma: no cover - fail-fast happens in _require_runtime_dependencies
     torch = None
 
-from lima_llm.backbone.hf_backbone import HFBackbone
-from lima_llm.chunking.utils import compose_text_from_chunk_ids
-from lima_llm.data import load_dataset_bundle
-from lima_llm.eval.evaluate import evaluate_saved_explanations
-
-# Some historical versions of this branch have build_eval_units in lima_llm.eval.units,
-# while the current public tree exposes the same logic from evaluate.py. Support both.
-try:  # pragma: no cover - repository-version compatibility shim
-    from lima_llm.eval.units import build_eval_units  # type: ignore
-except Exception:  # pragma: no cover
-    from lima_llm.eval.evaluate import _build_eval_units as build_eval_units  # type: ignore
-
-from lima_llm.pipeline.io import rebuild_summary_csv, save_explanation
-from lima_llm.pipeline.resume import is_sample_completed, sample_output_paths
-from lima_llm.types import ExplanationResult, ScoreComponents, ScoreTrace, TextChunk
-from lima_llm.utils import (
-    atomic_write_json,
-    build_provenance,
-    configure_determinism,
-    ensure_dir,
-    parse_q_values,
-    set_seed,
-)
+from mobius.core.results import ResultStore, default_run_dir
+from mobius.core.runtime import ensure_dir, set_seed
+from mobius.core.schema import AttributionResult, TextChunk
+from mobius.data import load_dataset_bundle
+from mobius.evaluation.evaluator import evaluate_run
+from mobius.models.hf import HFBackbone
+from mobius.text.chunks import build_eval_units, compose_text
 
 PROMPT_PREFIX = "Text:\n"
 PROMPT_SUFFIX = "\nLabel:"
@@ -101,7 +84,15 @@ DEFAULT_DATASETS = (
 )
 
 
+def parse_q_values(raw: str) -> List[int]:
+    """Parse comma-separated evaluation percentages."""
+
+    return [int(value.strip()) for value in str(raw).split(",") if value.strip()]
+
+
 def build_parser() -> argparse.ArgumentParser:
+    """Handle the build parser step in this retained baseline."""
+
     parser = argparse.ArgumentParser(
         description="Inseq LLM attribution baselines for LIMA-copy LLM transfer experiments"
     )
@@ -200,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
     parser.add_argument("--base-save-dir", type=str, default="results")
     parser.add_argument("--save-dir", type=str, default="baselines/inseq")
+    parser.add_argument(
+        "--output-level",
+        choices=["minimal", "standard", "debug"],
+        default="standard",
+    )
     parser.add_argument("--resume-check", type=str, default="strict", choices=["strict", "exists-only"])
     parser.add_argument("--deterministic", action="store_true")
 
@@ -207,6 +203,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _require_runtime_dependencies() -> None:
+    """Handle the require runtime dependencies step in this retained baseline."""
+
     if torch is None:
         raise RuntimeError("run_inseq_llm_baselines.py requires torch, transformers and inseq.")
     try:
@@ -219,10 +217,14 @@ def _require_runtime_dependencies() -> None:
 
 
 def _parse_csv(raw: str) -> Tuple[str, ...]:
+    """Handle the parse csv step in this retained baseline."""
+
     return tuple(str(item).strip().lower() for item in raw.split(",") if str(item).strip())
 
 
 def _parse_methods(raw: str) -> Tuple[str, ...]:
+    """Handle the parse methods step in this retained baseline."""
+
     methods = _parse_csv(raw)
     if not methods:
         raise ValueError("--methods must not be empty")
@@ -233,6 +235,8 @@ def _parse_methods(raw: str) -> Tuple[str, ...]:
 
 
 def _validate_args(args) -> None:
+    """Handle the validate args step in this retained baseline."""
+
     if int(args.k) < 0:
         raise ValueError("--k must be non-negative")
     if int(args.n_steps) <= 0:
@@ -244,6 +248,8 @@ def _validate_args(args) -> None:
 
 
 def _parse_datasets(args) -> Tuple[str, ...]:
+    """Handle the parse datasets step in this retained baseline."""
+
     raw = args.dataset if args.dataset else args.datasets
     items = _parse_csv(raw)
     if len(items) == 1 and items[0] == "all":
@@ -266,32 +272,81 @@ def _parse_datasets(args) -> Tuple[str, ...]:
 
 
 def _model_slug(model_path: str) -> str:
+    """Handle the model slug step in this retained baseline."""
+
     return str(model_path).rstrip("/").split("/")[-1].replace(".", "_").replace(":", "_")
 
 
 def _collection_root(args) -> Path:
+    """Return the root shared by all requested Inseq runs."""
+
     return Path(args.base_save_dir) / str(args.save_dir)
 
 
-def _method_output_root(args, dataset_name: str, method_name: str) -> Path:
-    return (
-        _collection_root(args)
-        / str(dataset_name)
-        / f"model-{_model_slug(args.model_path)}"
-        / f"method-{method_name}_target-{args.target_mode}_k-{int(args.k)}_seed-{int(args.seed)}"
+def _method_config(args, bundle, method_name: str) -> Dict[str, Any]:
+    """Build one scientific configuration for an Inseq method run."""
+
+    return {
+        "method": f"inseq_{method_name}",
+        "output_level": str(args.output_level),
+        "dataset": {
+            "name": bundle.dataset_name,
+            "split": bundle.split,
+            "max_samples": args.max_samples,
+            "dataset_cache_dir": args.dataset_cache_dir,
+            "verbalizers": list(bundle.verbalizers),
+        },
+        "model": {
+            "type": "hf_causal_lm",
+            "model_path": str(args.model_path),
+            "device": str(args.device),
+            "dtype": str(args.dtype),
+            "max_length": int(args.max_length),
+        },
+        "budget": int(args.n_steps if method_name != "lime" else args.n_samples),
+        "seed": int(args.seed),
+        "max_order": 1,
+        "k": int(args.k),
+        "target_mode": str(args.target_mode),
+        "chunker": "token",
+        "eval_granularity": str(args.eval_granularity),
+        "eval_q_values": parse_q_values(args.eval_q_values),
+        "inseq": {
+            "method": method_name,
+            "attributed_fn": str(args.attributed_fn),
+            "score_mode": str(args.score_mode),
+            "n_steps": int(args.n_steps),
+            "internal_batch_size": int(args.internal_batch_size),
+            "n_samples": int(args.n_samples),
+        },
+    }
+
+
+def _method_output_root(args, bundle, method_name: str) -> Path:
+    """Resolve the canonical schema-v2 path for one Inseq method."""
+
+    return default_run_dir(
+        _collection_root(args),
+        _method_config(args, bundle, method_name),
     )
 
 
 def _label_target_text(label_text: str) -> str:
+    """Handle the label target text step in this retained baseline."""
+
     return " " + str(label_text)
 
 
 def _tokenize_text_only(tokenizer, text: str) -> List[int]:
+    """Handle the tokenize text only step in this retained baseline."""
+
     encoded = tokenizer(text, add_special_tokens=False, truncation=False)
     return [int(token_id) for token_id in encoded["input_ids"]]
 
 
 def _encode_target_token_ids(tokenizer, label_text: str, max_length: int) -> List[int]:
+    """Handle the encode target token ids step in this retained baseline."""
+
     target_ids = _tokenize_text_only(tokenizer, _label_target_text(label_text))
     max_total = max(2, int(max_length))
     max_label = max_total - 1
@@ -310,6 +365,8 @@ def _truncate_text_for_prompt(
     target_token_ids: Sequence[int],
     max_length: int,
 ) -> Dict[str, Any]:
+    """Handle the truncate text for prompt step in this retained baseline."""
+
     full_text_token_ids = _tokenize_text_only(tokenizer, text)
     prefix_token_ids = _tokenize_text_only(tokenizer, PROMPT_PREFIX)
     suffix_token_ids = _tokenize_text_only(tokenizer, PROMPT_SUFFIX)
@@ -340,30 +397,15 @@ def _truncate_text_for_prompt(
 
 
 def _rank_desc_scores(scores: Sequence[float], k: int) -> tuple[List[int], List[int]]:
+    """Handle the rank desc scores step in this retained baseline."""
+
     ranking = [idx for idx, _ in sorted(enumerate(scores), key=lambda item: (-float(item[1]), item[0]))]
     return ranking, list(ranking[: max(0, int(k))])
 
 
-def _build_rank_trace(selected: Sequence[int], chunk_scores: Mapping[int, float]) -> List[ScoreTrace]:
-    zero = ScoreComponents(0.0, 0.0, 0.0, 0.0)
-    total = 0.0
-    trace: List[ScoreTrace] = []
-    for step, chunk_id in enumerate(selected):
-        gain = float(chunk_scores.get(int(chunk_id), 0.0))
-        total += gain
-        trace.append(
-            ScoreTrace(
-                step=int(step),
-                selected_chunk_id=int(chunk_id),
-                marginal_gain=gain,
-                total_score=float(total),
-                components=zero,
-            )
-        )
-    return trace
-
-
 def _sample_target_label(sample, bundle, backbone: HFBackbone, target_mode: str) -> tuple[int, np.ndarray]:
+    """Choose the gold or full-input predicted attribution target."""
+
     probs = np.asarray(backbone.predict_label_probs(sample.text, bundle.verbalizers), dtype=np.float32)
     if target_mode == "predicted":
         return int(np.argmax(probs)), probs
@@ -371,20 +413,20 @@ def _sample_target_label(sample, bundle, backbone: HFBackbone, target_mode: str)
 
 
 def _chunks_for_text(tokenizer, text: str) -> tuple[List[TextChunk], str]:
-    chunks, fallback_used, segmentation_strategy = build_eval_units(
-        text=text,
-        eval_granularity="token",
-        tokenizer=tokenizer,
-    )
-    if fallback_used:
+    """Build tokenizer-aligned player chunks for Inseq attribution."""
+
+    result = build_eval_units(text, "token", tokenizer)
+    if result.fallback_used:
         raise RuntimeError(
             "Inseq baseline runner requires tokenizer offset_mapping support to preserve token/span alignment. "
             "Use a fast tokenizer compatible with return_offsets_mapping."
         )
-    return list(chunks), str(segmentation_strategy)
+    return list(result.chunks), str(result.strategy)
 
 
 def _torch_dtype_from_name(name: str):
+    """Handle the torch dtype from name step in this retained baseline."""
+
     if torch is None:
         return None
     lowered = str(name or "").lower()
@@ -400,19 +442,22 @@ def _torch_dtype_from_name(name: str):
 
 
 def _load_backbone(args) -> HFBackbone:
+    """Load the shared Hugging Face model wrapper used by Inseq."""
+
     # Keep the call aligned with the existing Captum runner. Some branch revisions may not
     # accept attn_implementation in HFBackbone, so we do not pass it here.
     return HFBackbone(
         model_path=args.model_path,
         device=args.device,
         max_length=args.max_length,
-        embedding_layer_ratio=0.7,
         dtype=args.dtype,
         trust_remote_code=bool(args.trust_remote_code),
     )
 
 
 def _reagent_load_kwargs(args) -> Dict[str, Any]:
+    """Handle the reagent load kwargs step in this retained baseline."""
+
     return {
         "keep_top_n": int(args.reagent_keep_top_n),
         "stopping_condition_top_k": int(args.reagent_stopping_condition_top_k),
@@ -423,6 +468,8 @@ def _reagent_load_kwargs(args) -> Dict[str, Any]:
 
 
 def _tensor_to_numpy_list_for_inseq_lime(value):
+    """Handle the tensor to numpy list for inseq lime step in this retained baseline."""
+
     if torch is not None and isinstance(value, torch.Tensor):
         value = value.detach().cpu()
         if value.dtype == torch.bfloat16:
@@ -453,6 +500,8 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
         mask_token: str = "unk",
         **kwargs: Any,
     ) -> tuple:
+        """Handle the perturb func step in this retained baseline."""
+
         perturbed_inputs = []
         for original_input_tensor in original_input_tuple:
             mask_value_probs = torch.tensor([mask_prob, 1 - mask_prob])
@@ -499,6 +548,8 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
 
 
 def _build_inseq_model(backbone: HFBackbone, method_name: str, args):
+    """Handle the build inseq model step in this retained baseline."""
+
     import inseq
 
     # Reuse the already-loaded HF model/tokenizer to avoid loading a second copy of the LLM.
@@ -521,6 +572,8 @@ def _build_inseq_model(backbone: HFBackbone, method_name: str, args):
 
 
 def _method_attr_kwargs(args, method_name: str) -> Dict[str, Any]:
+    """Handle the method attr kwargs step in this retained baseline."""
+
     kwargs: Dict[str, Any] = {
         "attributed_fn": str(args.attributed_fn),
         "step_scores": [str(args.attributed_fn)],
@@ -549,6 +602,8 @@ def _run_inseq_attribute(
     target_text: str,
     args,
 ):
+    """Handle the run inseq attribute step in this retained baseline."""
+
     generated_text = target_text if getattr(inseq_model, "is_encoder_decoder", False) else prompt_text + target_text
     return inseq_model.attribute(
         input_texts=prompt_text,
@@ -559,12 +614,16 @@ def _run_inseq_attribute(
 
 
 def _sequence_output(inseq_output):
+    """Handle the sequence output step in this retained baseline."""
+
     if hasattr(inseq_output, "sequence_attributions"):
         return inseq_output.sequence_attributions[0]
     return inseq_output[0]
 
 
 def _as_float_tensor(attr):
+    """Handle the as float tensor step in this retained baseline."""
+
     if hasattr(attr, "detach"):
         return attr.detach().float().cpu()
     return torch.tensor(np.asarray(attr), dtype=torch.float32)
@@ -576,6 +635,8 @@ def _aggregate_inseq_attr_tensor(
     target_token_count: int,
     score_mode: str,
 ) -> List[float]:
+    """Handle the aggregate inseq attr tensor step in this retained baseline."""
+
     attr = _as_float_tensor(attr)
 
     # Raw gradient methods often return [attributed_len, generated_len, hidden_dim].
@@ -654,6 +715,8 @@ def _scores_from_inseq_attributions(
 
 
 def _offset_mapping_candidates(tokenizer, text: str) -> List[List[Tuple[int, int]]]:
+    """Handle the offset mapping candidates step in this retained baseline."""
+
     candidates: List[List[Tuple[int, int]]] = []
     for add_special in (False, True):
         try:
@@ -672,6 +735,8 @@ def _offset_mapping_candidates(tokenizer, text: str) -> List[List[Tuple[int, int
 
 
 def _choose_offsets_for_scores(tokenizer, prompt_text: str, score_len: int) -> List[Tuple[int, int]]:
+    """Handle the choose offsets for scores step in this retained baseline."""
+
     candidates = _offset_mapping_candidates(tokenizer, prompt_text)
     if not candidates:
         # Very conservative fallback: assign empty offsets, resulting in zero text scores.
@@ -693,6 +758,8 @@ def _project_prompt_scores_to_text_chunks(
     kept_start_char: int,
     chunks: Sequence[TextChunk],
 ) -> List[float]:
+    """Handle the project prompt scores to text chunks step in this retained baseline."""
+
     scores = np.zeros(len(chunks), dtype=np.float64)
     weights = np.zeros(len(chunks), dtype=np.float64)
 
@@ -729,6 +796,8 @@ def _project_prompt_scores_to_text_chunks(
 
 
 def _summarize_inseq_output(inseq_output) -> Dict[str, Any]:
+    """Handle the summarize inseq output step in this retained baseline."""
+
     seq = _sequence_output(inseq_output)
     payload: Dict[str, Any] = {}
     try:
@@ -769,7 +838,10 @@ def _explain_sample(
     args,
     method_name: str,
     output_root: Path | None = None,
-) -> ExplanationResult:
+) -> AttributionResult:
+    """Run one native Inseq explanation and adapt it to schema v2."""
+
+    started = time.perf_counter()
     tokenizer = backbone.tokenizer
     chunks, segmentation_strategy = _chunks_for_text(tokenizer=tokenizer, text=sample.text)
 
@@ -789,13 +861,25 @@ def _explain_sample(
     kept_start_char = int(truncation["kept_start_char"])
     prompt_text = PROMPT_PREFIX + kept_text + PROMPT_SUFFIX
 
-    inseq_output = _run_inseq_attribute(
-        inseq_model=inseq_model,
-        method_name=method_name,
-        prompt_text=prompt_text,
-        target_text=target_text,
-        args=args,
-    )
+    forward_calls = 0
+
+    def count_forward(_module, _inputs, _output) -> None:
+        """Count direct model forwards made internally by Inseq."""
+
+        nonlocal forward_calls
+        forward_calls += 1
+
+    hook = backbone.model.register_forward_hook(count_forward)
+    try:
+        inseq_output = _run_inseq_attribute(
+            inseq_model=inseq_model,
+            method_name=method_name,
+            prompt_text=prompt_text,
+            target_text=target_text,
+            args=args,
+        )
+    finally:
+        hook.remove()
 
     source_scores, attribution_side = _scores_from_inseq_attributions(
         inseq_output=inseq_output,
@@ -823,9 +907,28 @@ def _explain_sample(
     if len(full_scores) != len(chunks):
         raise RuntimeError(f"Unexpected score length: got={len(full_scores)} expected={len(chunks)}")
 
-    chunk_scores_by_id = {int(chunk.chunk_id): float(full_scores[int(chunk.chunk_id)]) for chunk in chunks}
-    chunk_ranking, selected = _rank_desc_scores(full_scores, int(args.k))
-    selected_text = compose_text_from_chunk_ids(chunks, selected)
+    chunk_scores_by_id = {
+        int(chunk.chunk_id): float(full_scores[int(chunk.chunk_id)])
+        for chunk in chunks
+    }
+    active_ids = [
+        int(chunk.chunk_id)
+        for chunk in chunks
+        if int(chunk.end_char) > kept_start_char
+    ]
+    active_set = set(active_ids)
+    active_ranking = sorted(
+        active_ids,
+        key=lambda chunk_id: (-chunk_scores_by_id[chunk_id], chunk_id),
+    )
+    inactive_ids = [
+        int(chunk.chunk_id)
+        for chunk in chunks
+        if int(chunk.chunk_id) not in active_set
+    ]
+    chunk_ranking = active_ranking + inactive_ids
+    selected = chunk_ranking[: min(int(args.k), len(active_ids))]
+    selected_text = compose_text(chunks, selected)
 
     if bool(args.save_inseq_json) and output_root is not None:
         _maybe_save_raw_inseq(output_root, str(sample.sample_id), inseq_output)
@@ -846,6 +949,7 @@ def _explain_sample(
         "target_token_ids": [int(token_id) for token_id in target_token_ids],
         "full_label_probabilities": [float(x) for x in full_probs.tolist()],
         "truncation": {**truncation, "dropped_left_char_count": dropped_left_char_count},
+        "active_chunk_ids": active_ids,
         "prompt_template": "Text:\\n{text}\\nLabel:",
         "prompt_prefix": PROMPT_PREFIX,
         "prompt_suffix": PROMPT_SUFFIX,
@@ -859,97 +963,42 @@ def _explain_sample(
         "reagent_settings": _reagent_load_kwargs(args) if method_name == "reagent" else None,
     }
 
-    return ExplanationResult(
-        explain_method=method_name,
-        sample_id=sample.sample_id,
-        dataset=bundle.dataset_name,
-        split=bundle.split,
-        label=sample.label,
-        label_text=sample.label_text,
+    predicted_label = int(np.argmax(full_probs))
+    return AttributionResult(
+        sample_id=str(sample.sample_id),
+        gold_label=int(sample.label),
+        predicted_label=predicted_label,
+        target_label=int(target_label),
         text=sample.text,
         chunks=list(chunks),
-        chunk_ranking=list(chunk_ranking),
-        chunk_scores=list(full_scores),
-        selected_chunk_ids=list(selected),
-        selected_text=selected_text,
-        scores={
-            "total": float(sum(chunk_scores_by_id.get(int(chunk_id), 0.0) for chunk_id in selected)),
-            "confidence": 0.0,
-            "effectiveness": 0.0,
-            "consistency": 0.0,
-            "collaboration": 0.0,
-            "target_probability": float(full_probs[target_label]),
-            "label_probabilities": [float(x) for x in full_probs.tolist()],
+        node_scores=list(full_scores),
+        ranking=list(chunk_ranking),
+        selected_ids=list(selected),
+        attribution_cost={
+            "attribution_budget_used": int(forward_calls),
+            "logical_unique_queries": int(forward_calls),
+            "physical_values_scored": int(forward_calls),
+            "interaction_verification_queries": 0,
+            "model_forward_calls": int(forward_calls),
+            "elapsed_seconds": float(time.perf_counter() - started),
         },
-        trace=_build_rank_trace(selected=selected, chunk_scores=chunk_scores_by_id),
-        metadata=metadata,
+        method_summary={
+            **metadata,
+            "selected_text": selected_text,
+            "selected_score": float(
+                sum(chunk_scores_by_id.get(int(chunk_id), 0.0) for chunk_id in selected)
+            ),
+        },
+        diagnostics={
+            "raw_sequence_attributions": [float(value) for value in full_scores],
+            "inseq_summary": inseq_summary,
+        },
     )
-
-
-def _scan_resume(samples, output_root: Path, resume_mode: str):
-    pending = []
-    completed = 0
-    for sample in samples:
-        paths = sample_output_paths(output_root, sample.sample_id)
-        if is_sample_completed(paths, mode=resume_mode):
-            completed += 1
-        else:
-            pending.append(sample)
-    print(
-        f"[resume] method-root={output_root.name} mode={resume_mode} "
-        f"selected={len(samples)} completed={completed} pending={len(pending)}"
-    )
-    return pending
-
-
-def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    atomic_write_json(path, dict(payload))
-
-
-def _method_cli_args(args, dataset_name: str, method_name: str) -> Dict[str, Any]:
-    payload = dict(vars(args))
-    payload["dataset"] = dataset_name
-    payload["method"] = method_name
-    return payload
-
-
-def _write_configs(
-    *,
-    output_root: Path,
-    args,
-    dataset_name: str,
-    method_name: str,
-    raw_argv: Sequence[str],
-    deterministic_info: Dict[str, Any],
-) -> argparse.Namespace:
-    method_args = argparse.Namespace(**_method_cli_args(args, dataset_name, method_name))
-    now = time.time()
-    run_config_payload = dict(vars(method_args))
-    run_config_payload["provenance"] = build_provenance(
-        stage="run_config",
-        parsed_args=vars(method_args),
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=now,
-        end_time=time.time(),
-        cwd=Path.cwd(),
-    )
-    eval_config_payload = dict(vars(method_args))
-    eval_config_payload["provenance"] = build_provenance(
-        stage="eval_config",
-        parsed_args=vars(method_args),
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=now,
-        end_time=time.time(),
-        cwd=Path.cwd(),
-    )
-    _write_json(output_root / "run_config.json", run_config_payload)
-    _write_json(output_root / "eval_config.json", eval_config_payload)
-    return method_args
 
 
 def _maybe_save_raw_inseq(output_root: Path, sample_id: str, inseq_output) -> None:
+    """Optionally persist Inseq's native detailed attribution object."""
+
     raw_dir = output_root / "inseq_raw"
     ensure_dir(raw_dir)
     try:
@@ -966,22 +1015,20 @@ def _run_method_dataset(
     backbone: HFBackbone,
     method_name: str,
 ) -> Dict[str, Any]:
+    """Run one Inseq method on one dataset with schema-v2 persistence."""
+
     dataset_name = bundle.dataset_name
-    output_root = _method_output_root(args, dataset_name, method_name)
-    ensure_dir(output_root)
-    ensure_dir(output_root / "samples")
-
-    deterministic_info = configure_determinism(bool(args.deterministic))
-    method_args = _write_configs(
-        output_root=output_root,
-        args=args,
-        dataset_name=dataset_name,
-        method_name=method_name,
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
+    output_root = _method_output_root(args, bundle, method_name)
+    config = _method_config(args, bundle, method_name)
+    store = ResultStore(
+        output_root,
+        config,
+        output_level=str(args.output_level),
+        command=" ".join([sys.executable, __file__, *raw_argv]),
     )
-
-    pending_samples = _scan_resume(bundle.samples, output_root=output_root, resume_mode=args.resume_check)
+    pending_samples = [
+        sample for sample in bundle.samples if not store.sample_complete(sample.sample_id)
+    ]
     inseq_model = None
     try:
         if pending_samples:
@@ -997,7 +1044,8 @@ def _run_method_dataset(
                     method_name=method_name,
                     output_root=output_root,
                 )
-                save_explanation(result, output_root)
+                store.write_sample(result)
+                store.write_status("running", selected_count=len(bundle.samples))
             print(
                 f"[done] dataset={dataset_name} method={method_name} "
                 f"processed={len(pending_samples)} elapsed={time.time() - start:.2f}s"
@@ -1015,31 +1063,18 @@ def _run_method_dataset(
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    summary_path = rebuild_summary_csv(output_root)
-    print(f"[done] dataset={dataset_name} method={method_name} summary={summary_path}")
-
     q_values = parse_q_values(args.eval_q_values)
-    eval_started = time.time()
-    eval_report = evaluate_saved_explanations(
-        output_root=output_root,
-        bundle=bundle,
-        backbone=backbone,
-        verbalizers=bundle.verbalizers,
-        q_values=q_values,
-        explain_method=method_name,
+    backbone.verbalizers = list(bundle.verbalizers)
+    eval_report = evaluate_run(
+        output_root,
+        bundle,
+        backbone,
+        target=str(args.target_mode),
         eval_granularity=args.eval_granularity,
+        q_values=q_values,
     )
-    eval_report["provenance"] = build_provenance(
-        stage="eval_report",
-        parsed_args=vars(method_args),
-        raw_argv=raw_argv,
-        deterministic_info=deterministic_info,
-        start_time=eval_started,
-        end_time=time.time(),
-        cwd=Path.cwd(),
-    )
-    _write_json(output_root / "eval_report.json", eval_report)
-    print(f"[eval] dataset={dataset_name} method={method_name} report={output_root / 'eval_report.json'}")
+    store.finish(len(bundle.samples))
+    print(f"[eval] dataset={dataset_name} method={method_name} report={output_root / 'metrics.json'}")
     return {
         "dataset": dataset_name,
         "method": method_name,
@@ -1049,32 +1084,32 @@ def _run_method_dataset(
 
 
 def _flatten_metric_row(args, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Flatten schema-v2 aggregate means for the Inseq collection table."""
+
     report = dict(payload["eval_report"])
     row: Dict[str, Any] = {
         "dataset": payload["dataset"],
         "method": payload["method"],
         "model_path": args.model_path,
         "model_slug": _model_slug(args.model_path),
-        "split": report.get("split"),
-        "sample_count": report.get("sample_count"),
+        "split": args.split,
+        "sample_count": report.get("evaluated_count"),
+        "target": report.get("target"),
         "output_root": payload["output_root"],
     }
-    for block_name in ("metrics_primary", "metrics_secondary"):
-        block = report.get(block_name, {}) or {}
-        for key, value in block.items():
-            if isinstance(value, (int, float, str, bool)) or value is None:
-                row[f"{block_name}.{key}"] = value
-    # Convenient aliases for paper tables.
-    primary = report.get("metrics_primary", {}) or {}
-    row["LO"] = primary.get("log_odds")
-    row["Sufficiency"] = primary.get("sufficiency")
-    row["Comprehensiveness"] = primary.get("comprehensiveness")
-    row["A-S"] = primary.get("aopc_sufficiency")
-    row["A-C"] = primary.get("aopc_comprehensiveness")
+    faithfulness = report.get("faithfulness", {}) or {}
+    for key, summary in faithfulness.items():
+        row[str(key)] = summary.get("mean")
+    row["Sufficiency"] = row.get("sufficiency")
+    row["Comprehensiveness"] = row.get("comprehensiveness")
+    row["A-S"] = row.get("aopc_sufficiency")
+    row["A-C"] = row.get("aopc_comprehensiveness")
     return row
 
 
 def _write_aggregate_reports(args, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Write collection-level CSV and JSONL convenience tables."""
+
     root = _collection_root(args)
     ensure_dir(root)
     jsonl_path = root / "aggregate_metrics.jsonl"
@@ -1099,13 +1134,15 @@ def _write_aggregate_reports(args, rows: Sequence[Mapping[str, Any]]) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Run requested Inseq methods and datasets sequentially."""
+
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     methods = _parse_methods(args.methods)
     _validate_args(args)
     _require_runtime_dependencies()
     datasets = _parse_datasets(args)
-    set_seed(int(args.seed))
+    set_seed(int(args.seed), bool(args.deterministic))
 
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     print(f"[config] datasets={datasets}")

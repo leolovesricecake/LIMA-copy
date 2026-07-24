@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-from lima_llm.data import load_dataset_bundle
+from mobius.data import load_dataset_bundle
 
 
 MAINLINE_TASK_NAMES = {
@@ -22,13 +22,17 @@ MAINLINE_TASK_NAMES = {
 }
 
 
-def uses_shared_lima_loader(task) -> bool:
+def uses_shared_mobius_loader(task) -> bool:
+    """Return whether a task uses the repository-wide Mobius data loader."""
+
     return task.name in MAINLINE_TASK_NAMES
 
 
 def load_task_dataset_bundle_for_split(task, split: str, max_samples = None):
-    if not uses_shared_lima_loader(task):
-        raise ValueError(f"Task '{task.name}' does not use the shared lima_llm loader")
+    """Handle the load task dataset bundle for split step in this retained baseline."""
+
+    if not uses_shared_mobius_loader(task):
+        raise ValueError(f"Task '{task.name}' does not use the shared mobius loader")
     return load_dataset_bundle(
         dataset_name = task.name,
         split = split,
@@ -40,6 +44,8 @@ def load_task_dataset_bundle_for_split(task, split: str, max_samples = None):
 
 
 def dataset_from_bundle(task, bundle) -> Dataset:
+    """Handle the dataset from bundle step in this retained baseline."""
+
     label_names = [str(name) for name in bundle.label_names]
     features = Features(
         {
@@ -57,7 +63,9 @@ def dataset_from_bundle(task, bundle) -> Dataset:
 
 
 def load_task_split_dataset(task, split: str, max_samples = None) -> Dataset:
-    if uses_shared_lima_loader(task):
+    """Handle the load task split dataset step in this retained baseline."""
+
+    if uses_shared_mobius_loader(task):
         bundle = load_task_dataset_bundle_for_split(task, split = split, max_samples = max_samples)
         return dataset_from_bundle(task, bundle)
 

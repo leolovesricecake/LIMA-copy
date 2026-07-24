@@ -8,8 +8,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from lima_llm.chunking.utils import validate_chunk_coverage
-from lima_llm.eval.units import build_eval_units, project_chunk_ranking_to_unit_ranking
+from mobius.text.chunks import (
+    build_chunks,
+    build_eval_units,
+    project_ranking,
+    validate_coverage,
+)
 
 
 def _load_module(name: str, relative_path: str):
@@ -23,10 +27,6 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
-CHUNKING = _load_module(
-    "proxyspex_copy_chunking_under_test",
-    "baselines/shapiq-copy/proxyspex_chunking.py",
-)
 RUNNER = _load_module(
     "proxyspex_copy_runner_under_test",
     "baselines/shapiq-copy/run_proxyspex_llm_baseline.py",
@@ -94,13 +94,14 @@ def _args(**overrides):
         seed=7,
         interaction_metadata_limit=16,
         k=2,
+        value_function="predicted_probability",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
 
 def test_proxyspex_chunking_token_uses_tokenizer_offsets() -> None:
-    result = CHUNKING.build_proxyspex_chunks(
+    result = build_chunks(
         text="abc",
         chunker="token",
         tokenizer=_CharTokenizer(),
@@ -113,8 +114,8 @@ def test_proxyspex_chunking_token_uses_tokenizer_offsets() -> None:
 
 def test_proxyspex_chunking_word_preserves_coverage_and_ids() -> None:
     text = "good movie"
-    result = CHUNKING.build_proxyspex_chunks(text=text, chunker="word", tokenizer=None)
-    ok, msg = validate_chunk_coverage(text, result.chunks)
+    result = build_chunks(text=text, chunker="word", tokenizer=None)
+    ok, msg = validate_coverage(text, result.chunks)
     assert ok, msg
     assert [chunk.chunk_id for chunk in result.chunks] == [0, 1]
     assert [chunk.text for chunk in result.chunks] == ["good ", "movie"]
@@ -123,19 +124,29 @@ def test_proxyspex_chunking_word_preserves_coverage_and_ids() -> None:
 
 def test_proxyspex_chunking_adaptive_emits_diagnostics() -> None:
     text = " ".join(f"tok{i}" for i in range(24)) + "."
-    result = CHUNKING.build_proxyspex_chunks(text=text, chunker="adaptive", tokenizer=None)
-    ok, msg = validate_chunk_coverage(text, result.chunks)
+    result = build_chunks(text=text, chunker="adaptive", tokenizer=None)
+    ok, msg = validate_coverage(text, result.chunks)
     assert ok, msg
     assert result.diagnostics["chunk_strategy_requested"] == "adaptive"
     assert result.diagnostics["adaptive_profile"] == "balanced"
 
 
 def test_copy_runner_defaults_word_explanation_and_token_eval() -> None:
+    """Check the fair default target and decoupled chunk/eval granularities."""
+
     args = RUNNER.build_parser().parse_args(["--dataset", "sst2", "--model-path", "tiny-local"])
     assert args.chunker == "word"
     assert args.eval_granularity == "token"
     assert args.value_function == "predicted_probability"
     assert args.target_mode == "predicted"
+
+
+def test_short_sample_hpo_uses_feasible_cross_validation() -> None:
+    """Protect the n_samples=4 regression that previously requested five folds."""
+
+    assert RUNNER._expected_proxy_fit_sample_count(2, 512) == 4
+    assert RUNNER._proxy_hpo_cv_splits(4) == 2
+    assert RUNNER._proxy_hpo_cv_splits(3) is None
 
 
 def test_predicted_probability_forces_predicted_target() -> None:
@@ -157,9 +168,9 @@ def test_predicted_probability_forces_predicted_target() -> None:
         args=_args(value_function="predicted_probability", target_mode="gold"),
         ProxySPEX=_DummyProxySPEX,
     )
-    assert result.metadata["target_label"] == 1
-    assert result.metadata["target_mode"] == "predicted"
-    assert result.metadata["target_mode_requested"] == "gold"
+    assert result.target_label == 1
+    assert result.method_summary["target_mode"] == "predicted"
+    assert result.method_summary["target_mode_requested"] == "gold"
 
 
 def test_target_probability_can_reproduce_gold_target_behavior() -> None:
@@ -181,9 +192,9 @@ def test_target_probability_can_reproduce_gold_target_behavior() -> None:
         args=_args(value_function="target_probability", target_mode="gold"),
         ProxySPEX=_DummyProxySPEX,
     )
-    assert result.metadata["target_label"] == 0
-    assert result.metadata["target_mode"] == "gold"
-    assert np.isclose(result.scores["attribution_value"], 0.2)
+    assert result.target_label == 0
+    assert result.method_summary["target_mode"] == "gold"
+    assert np.isclose(result.method_summary["attribution_value"], 0.2)
 
 
 def test_proxy_game_supports_probability_and_margin_values() -> None:
@@ -233,10 +244,10 @@ def test_explain_sample_uses_word_chunks_as_players_even_when_eval_is_token() ->
 
     assert _DummyProxySPEX.seen_n == [2]
     assert [chunk.text for chunk in result.chunks] == ["good ", "movie"]
-    assert result.metadata["proxyspex_chunker"] == "word"
-    assert result.metadata["eval_granularity"] == "token"
-    assert result.metadata["chunk_diagnostics"]["chunk_strategy"] == "word"
-    assert result.metadata["player_to_chunk_id"] == [0, 1]
+    assert result.method_summary["proxyspex_chunker"] == "word"
+    assert result.method_summary["eval_granularity"] == "token"
+    assert result.method_summary["chunk_diagnostics"]["chunk_strategy"] == "word"
+    assert result.method_summary["player_to_chunk_id"] == [0, 1]
 
 
 def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
@@ -254,13 +265,13 @@ def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
         ProxySPEX=_DummyProxySPEX,
     )
 
-    ok, msg = validate_chunk_coverage(text, result.chunks)
+    ok, msg = validate_coverage(text, result.chunks)
     assert ok, msg
-    eval_units, _fallback, _strategy = build_eval_units(text=text, eval_granularity="token", tokenizer=backbone.tokenizer)
-    ranking_units = project_chunk_ranking_to_unit_ranking(
-        eval_units=eval_units,
+    eval_result = build_eval_units(text, "token", backbone.tokenizer)
+    ranking_units = project_ranking(
+        eval_units=eval_result.chunks,
         chunks=result.chunks,
-        chunk_ranking=result.chunk_ranking,
+        chunk_ranking=result.ranking,
     )
-    assert sorted(ranking_units) == list(range(len(eval_units)))
-    assert result.metadata["proxyspex_chunker"] == "adaptive"
+    assert sorted(ranking_units) == list(range(len(eval_result.chunks)))
+    assert result.method_summary["proxyspex_chunker"] == "adaptive"
