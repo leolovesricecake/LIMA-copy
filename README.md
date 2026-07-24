@@ -79,6 +79,16 @@ python -m mobius.cli.compare \
 
 `metrics.json` 只包含一个平铺的显式 `target` 和它对应的一套指标，不会保存多个 target block，也不再使用含义模糊的 `metrics_primary`。默认 target 是 `predicted`；用另一个 target 重新评估会覆盖 `metrics.json`。主实验应读取 `target: predicted` 下的 `faithfulness`、`per_q`、`attribution_cost` 和 `evaluation_cost`。
 
+将一个方法根目录下的所有 run 整理为 CSV：
+
+```bash
+python scripts/collect_results.py \
+  --input_dir results/mobius \
+  --o mobius_results.csv
+```
+
+省略 `--o` 时默认写入当前目录的 `results_summary.csv`。CSV 仅包含运行身份、所有 faithfulness 的 mean/std、归因模型调用及每样本值、核心实验配置、样本数和失败数。
+
 ## 消融实验
 
 六个单轴消融配置位于 `configs/ablations/`：

@@ -161,6 +161,22 @@ python -m mobius.cli.compare \
   --output docs/comparison.json
 ```
 
+整理一个方法根目录下的全部结果：
+
+```bash
+python scripts/collect_results.py \
+  --input_dir results/mobius \
+  --o mobius_results.csv
+```
+
+`--o` 缺省值为 `results_summary.csv`。脚本要求输入目录内采用 `<dataset>/<model>/<method>/<config>/metrics.json`，并读取同目录的 `run.json`。CSV 严格按以下顺序输出：
+
+- dataset、model、method、config、target；
+- 所有 `faithfulness` 的 mean/std；
+- attribution model forward 总数及每样本值；
+- budget、order、seed、value function、chunker、eval granularity、basis、hierarchy、sampler、projector；
+- sample count、failed count。
+
 ## 5. 指标方向
 
 - `comprehensiveness`：越高越好，删除 top 特征后目标概率应明显下降；
