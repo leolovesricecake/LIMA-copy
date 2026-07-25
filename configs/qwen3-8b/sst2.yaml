@@ -1,4 +1,4 @@
-# Emotion uses the same scientific method cell as SST-2.
+# Main paper cell: deletion Mobius + no hierarchy + deletion mixture + signed projection.
 results_dir: results/mobius
 run_suffix: std
 output_level: standard
@@ -10,7 +10,7 @@ k: 8
 value_function: target_probability
 target_mode: predicted
 chunker: word
-eval_granularity: token
+eval_granularity: word
 eval_q_values: [1, 5, 10, 20, 50]
 min_features: 1
 max_features: null
@@ -34,12 +34,12 @@ estimator:
   cv_folds: 3
   max_design_mb: 2048
 dataset:
-  name: emotion
+  name: sst2
   split: validation
   dataset_cache_dir: /mnt/huawei/nsq/temp/hf
 model:
   type: hf_causal_lm
-  model_path: /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  model_path: /mnt/huawei/nsq/models/Qwen/Qwen3-8B
   device: cuda:0
   dtype: bfloat16
   max_length: 2048

@@ -33,7 +33,7 @@ python -m mobius.cli.run \
 ```bash
 # SST-2
 python -m mobius.cli.run \
-  --config configs/mobius/sst2.yaml \
+  --config configs/qwen3-8b/sst2.yaml \
   --device cuda:0
 
 # Emotion

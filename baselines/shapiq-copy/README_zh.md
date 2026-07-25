@@ -42,16 +42,17 @@ pip install -e "baselines/shapiq-copy[proxy]"
 
 ## 运行
 
+### sst2
 ```bash
 python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset sst2 \
   --split validation \
   --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
   --dtype bfloat16 \
   --chunker word \
-  --eval-granularity token \
-  --value-function predicted_probability \
+  --eval-granularity word \
+  --value-function target_probability \
   --target-mode predicted \
   --index FBII \
   --max-order 2 \
@@ -66,11 +67,81 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --device cuda:0
 ```
 
-Rotten Tomatoes 只需修改：
-
+### Rotten Tomatoes
 ```bash
---dataset rotten_tomatoes
+python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
+  --dataset rotten_tomatoes \
+  --split validation \
+  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --dtype bfloat16 \
+  --chunker word \
+  --eval-granularity word \
+  --value-function target_probability \
+  --target-mode predicted \
+  --index FBII \
+  --max-order 2 \
+  --budget 512 \
+  --proxy-model lightgbm \
+  --proxy-n-jobs 1 \
+  --sampling-weight-mode uniform_coalition \
+  --k 8 \
+  --eval-q-values 1,5,10,20,50 \
+  --base-save-dir results \
+  --save-dir baselines/proxyspex-copy \
+  --device cuda:0
 ```
+
+### emotion
+```bash
+python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
+  --dataset emotion \
+  --split validation \
+  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --dtype bfloat16 \
+  --chunker word \
+  --eval-granularity word \
+  --value-function target_probability \
+  --target-mode predicted \
+  --index FBII \
+  --max-order 2 \
+  --budget 512 \
+  --proxy-model lightgbm \
+  --proxy-n-jobs 1 \
+  --sampling-weight-mode uniform_coalition \
+  --k 8 \
+  --eval-q-values 1,5,10,20,50 \
+  --base-save-dir results \
+  --save-dir baselines/proxyspex-copy \
+  --device cuda:0
+```
+
+### eraser_movie_reviews
+```bash
+python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
+  --dataset eraser_movie_reviews \
+  --split validation \
+  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --dtype bfloat16 \
+  --chunker word \
+  --eval-granularity word \
+  --value-function target_probability \
+  --target-mode predicted \
+  --index FBII \
+  --max-order 2 \
+  --budget 512 \
+  --proxy-model lightgbm \
+  --proxy-n-jobs 1 \
+  --sampling-weight-mode uniform_coalition \
+  --k 8 \
+  --eval-q-values 1,5,10,20,50 \
+  --base-save-dir results \
+  --save-dir baselines/proxyspex-copy \
+  --device cuda:0
+```
+
 
 数据 loader 会优先直接读取 `--dataset-cache-dir` 下的 Arrow split；找到完整缓存时不会先向 Hugging Face Hub 发起 metadata 请求。
 

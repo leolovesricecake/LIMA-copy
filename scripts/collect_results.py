@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import csv
 import json
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input_dir",
         "--input-dir",
+        "--i",
         required=True,
         dest="input_dir",
         help="Method result root, for example results/mobius.",
@@ -291,7 +293,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     rows = collect_results(args.input_dir)
-    destination = write_csv(rows, args.o)
+
+    dest = os.path.join(args.input_dir, args.o)
+    destination = write_csv(rows, dest)
     print(f"[collected] runs={len(rows)} output={destination}")
 
 

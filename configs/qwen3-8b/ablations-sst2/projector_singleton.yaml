@@ -1,6 +1,6 @@
-# Single-axis ablation: unique global Bernoulli-0.5 masks.
+# Single-axis ablation: discard interaction terms during node projection.
 results_dir: results/mobius-ablations
-run_suffix: sampler_bernoulli
+run_suffix: projector_singleton
 output_level: standard
 method: sparse_mobius
 budget: 512
@@ -10,7 +10,7 @@ k: 8
 value_function: target_probability
 target_mode: predicted
 chunker: word
-eval_granularity: token
+eval_granularity: word
 eval_q_values: [1, 5, 10, 20, 50]
 min_features: 1
 max_features: null
@@ -18,9 +18,12 @@ batch_size: 16
 targeted_top_k: 5
 basis: deletion_mobius
 hierarchy: none
-projector: signed_equal_share
+projector: singleton_only
 sampler:
-  name: bernoulli
+  name: deletion_mixture
+  global_fraction: 0.5
+  near_full_fraction: 0.3
+  fixed_cardinality_fraction: 0.2
   include_empty_full: true
 estimator:
   name: lasso_cv_ridge_refit
@@ -33,7 +36,7 @@ dataset:
   dataset_cache_dir: /mnt/huawei/nsq/temp/hf
 model:
   type: hf_causal_lm
-  model_path: /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct
+  model_path: /mnt/huawei/nsq/models/Qwen/Qwen3-8B
   device: cuda:0
   dtype: bfloat16
   max_length: 2048
