@@ -1,4 +1,8 @@
 datasets
+# Keep the vendored shapiq Python dataset package; its large CSV cache stays ignored.
+!baselines/shapiq-copy/src/shapiq/datasets/
+!baselines/shapiq-copy/src/shapiq/datasets/*.py
+baselines/shapiq-copy/src/shapiq/datasets/data/
 _arch
 results/
 **/OUT/

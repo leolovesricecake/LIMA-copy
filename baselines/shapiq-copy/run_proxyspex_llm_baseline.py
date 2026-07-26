@@ -230,10 +230,20 @@ def _require_runtime_dependencies():
     try:
         return _import_proxyspex()
     except Exception as first_exc:
+        missing_module = (
+            first_exc.name
+            if isinstance(first_exc, ModuleNotFoundError)
+            else None
+        )
+        missing_detail = (
+            f" Missing Python module: {missing_module!r}."
+            if missing_module
+            else ""
+        )
         raise RuntimeError(
-            "ProxySPEX runner requires shapiq and its proxy dependencies. Install with something like: "
-            "pip install -e 'baselines/shapiq-copy[proxy]'. If your local checkout misses lazy_dispatch, "
-            "install the matching shapiq release or add the lazy_dispatch package required by this checkout."
+            "Failed to import ProxySPEX from the vendored shapiq source at "
+            f"{_LOCAL_SHAPIQ_SRC}.{missing_detail} Ensure the checkout is complete, then install "
+            "its proxy dependencies with: pip install -e 'baselines/shapiq-copy[proxy]'."
         ) from first_exc
 
 
