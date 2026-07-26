@@ -50,7 +50,6 @@ EXPERIMENT_FIELDS = (
 OUTCOME_FIELDS = (
     "sample_count",
     "failed_count",
-    "accuracy",
 )
 
 
@@ -221,7 +220,6 @@ def collect_row(input_dir: Path, metrics_path: Path) -> Dict[str, Any]:
         **_scientific_fields(run),
         "sample_count": _scalar(metrics.get("sample_count")),
         "failed_count": _scalar(metrics.get("failed_count")),
-        "accuracy": _scalar(metrics.get("accuracy")),
     }
     return row
 

@@ -19,7 +19,7 @@ SAMPLERS = {"deletion_mixture", "bernoulli", "uniform_size"}
 def normalize_sampler(value: str | None) -> str:
     """Normalize sampler names and aliases."""
 
-    normalized = str(value or "deletion_mixture").strip().lower()
+    normalized = str(value or "uniform_size").strip().lower()
     aliases = {"mixture": "deletion_mixture", "global": "bernoulli"}
     normalized = aliases.get(normalized, normalized)
     if normalized not in SAMPLERS:
@@ -326,7 +326,7 @@ def sample_masks(
 ) -> SamplingResult:
     """Dispatch to the configured method-owned coalition sampler."""
 
-    name = normalize_sampler(str(config.get("name", "deletion_mixture")))
+    name = normalize_sampler(str(config.get("name", "uniform_size")))
     common = {
         "n_features": int(n_features),
         "budget": int(budget),
@@ -349,4 +349,3 @@ def sample_masks(
             "fixed_keep_fractions", [0.25, 0.5, 0.75]
         ),
     )
-

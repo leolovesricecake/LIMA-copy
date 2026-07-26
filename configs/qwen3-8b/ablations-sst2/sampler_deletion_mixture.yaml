@@ -1,6 +1,6 @@
-# Single-axis ablation: rank by absolute hyperedge mass.
+# Sampler ablation: anchors plus global, near-full, and fixed-cardinality masks.
 results_dir: results/mobius-ablations
-run_suffix: projector_absolute
+run_suffix: sampler_deletion_mixture
 output_level: standard
 method: sparse_mobius
 budget: 512
@@ -17,9 +17,14 @@ max_features: null
 batch_size: 16
 basis: deletion_mobius
 hierarchy: none
-projector: absolute_equal_share
+projector: signed_equal_share
 sampler:
-  name: uniform_size
+  name: deletion_mixture
+  global_fraction: 0.5
+  near_full_fraction: 0.3
+  fixed_cardinality_fraction: 0.2
+  near_full_deletions: [1, 2, 3, 5]
+  fixed_keep_fractions: [0.25, 0.5, 0.75]
   include_empty_full: true
 estimator:
   name: lasso_support

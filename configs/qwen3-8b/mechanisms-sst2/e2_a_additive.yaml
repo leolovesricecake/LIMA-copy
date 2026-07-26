@@ -1,11 +1,11 @@
-# Single-axis ablation: rank by absolute hyperedge mass.
-results_dir: results/mobius-ablations
-run_suffix: projector_absolute
+# E2-A: an additive degree-1 surrogate with singleton projection.
+results_dir: results/mobius-mechanisms
+run_suffix: e2-a-additive
 output_level: standard
 method: sparse_mobius
 budget: 512
 seed: 42
-max_degree: 2
+max_degree: 1
 k: 8
 value_function: target_probability
 target_mode: predicted
@@ -17,7 +17,7 @@ max_features: null
 batch_size: 16
 basis: deletion_mobius
 hierarchy: none
-projector: absolute_equal_share
+projector: singleton_only
 sampler:
   name: uniform_size
   include_empty_full: true
@@ -28,6 +28,7 @@ estimator:
   alphas: [0.0001, 0.001, 0.01, 0.1]
   l1_ratios: [1.0]
   cv_folds: 3
+  max_design_mb: 2048
 dataset:
   name: sst2
   split: validation

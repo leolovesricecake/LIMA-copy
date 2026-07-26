@@ -74,6 +74,8 @@ class AttributionResult:
     attribution_cost: Dict[str, Any]
     method_summary: Dict[str, Any] = field(default_factory=dict)
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+    observation_artifact: Optional[Dict[str, Any]] = None
+    surrogate_artifact: Optional[Dict[str, Any]] = None
 
     def to_dict(self, output_level: str = "standard") -> Dict[str, Any]:
         """Serialize fields allowed by the requested output level."""
@@ -94,4 +96,3 @@ class AttributionResult:
         if output_level in {"standard", "debug"}:
             payload["method_summary"] = dict(self.method_summary)
         return payload
-

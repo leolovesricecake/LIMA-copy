@@ -1,6 +1,6 @@
-# Single-axis ablation: rank by absolute hyperedge mass.
+# E4 ablation: prune orphan pairs after the common full-candidate selector.
 results_dir: results/mobius-ablations
-run_suffix: projector_absolute
+run_suffix: hierarchy_strict
 output_level: standard
 method: sparse_mobius
 budget: 512
@@ -16,8 +16,8 @@ min_features: 1
 max_features: null
 batch_size: 16
 basis: deletion_mobius
-hierarchy: none
-projector: absolute_equal_share
+hierarchy: strict
+projector: signed_equal_share
 sampler:
   name: uniform_size
   include_empty_full: true
@@ -28,6 +28,7 @@ estimator:
   alphas: [0.0001, 0.001, 0.01, 0.1]
   l1_ratios: [1.0]
   cv_folds: 3
+  max_design_mb: 2048
 dataset:
   name: sst2
   split: validation

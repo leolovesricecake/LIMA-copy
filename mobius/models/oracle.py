@@ -82,11 +82,6 @@ class QueryLedger:
         categories = {
             name: len(keys) for name, keys in sorted(self._category_keys.items())
         }
-        attribution_categories = {
-            name: count
-            for name, count in categories.items()
-            if name not in {"evaluation", "interaction_verification", "setup"}
-        }
         return {
             "name": self.name,
             "requested_queries": int(self.requested_queries),
@@ -95,7 +90,7 @@ class QueryLedger:
             "global_cache_hits": int(self.global_cache_hits),
             "global_cache_misses": int(self.global_cache_misses),
             "physical_values_scored": int(self.physical_values_scored),
-            "attribution_budget_used": int(sum(attribution_categories.values())),
+            "attribution_budget_used": int(categories.get("training", 0)),
             "category_unique_queries": categories,
         }
 
@@ -253,4 +248,3 @@ class ValueOracle:
             "cache_entry_count": int(row[0]) if row else 0,
             "scorer": self.scorer.snapshot_counters(),
         }
-

@@ -1,6 +1,6 @@
-# Single-axis ablation: rank by absolute hyperedge mass.
+# Legacy candidate-policy ablation: singleton selection screens pair candidates.
 results_dir: results/mobius-ablations
-run_suffix: projector_absolute
+run_suffix: hierarchy_parent_screening
 output_level: standard
 method: sparse_mobius
 budget: 512
@@ -16,8 +16,8 @@ min_features: 1
 max_features: null
 batch_size: 16
 basis: deletion_mobius
-hierarchy: none
-projector: absolute_equal_share
+hierarchy: parent_screening
+projector: signed_equal_share
 sampler:
   name: uniform_size
   include_empty_full: true

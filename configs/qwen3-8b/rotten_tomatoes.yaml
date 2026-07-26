@@ -15,20 +15,16 @@ eval_q_values: [1, 5, 10, 20, 50]
 min_features: 1
 max_features: null
 batch_size: 16
-targeted_top_k: 5
 basis: deletion_mobius
 hierarchy: none
 projector: signed_equal_share
 sampler:
-  name: deletion_mixture
-  global_fraction: 0.5
-  near_full_fraction: 0.3
-  fixed_cardinality_fraction: 0.2
-  near_full_deletions: [1, 2, 3, 5]
-  fixed_keep_fractions: [0.25, 0.5, 0.75]
+  name: uniform_size
   include_empty_full: true
 estimator:
-  name: lasso_cv_ridge_refit
+  name: lasso_support
+  refit: ridge_cv
+  selection_alpha_scale: 1.0
   alphas: [0.0001, 0.001, 0.01, 0.1]
   l1_ratios: [1.0]
   cv_folds: 3
@@ -43,4 +39,3 @@ model:
   device: cuda:0
   dtype: bfloat16
   max_length: 2048
-

@@ -8,6 +8,10 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from mobius.core.artifacts import (
+    normalize_surrogate_artifact,
+    predict_surrogate,
+)
 from mobius.text.chunks import (
     build_chunks,
     build_eval_units,
@@ -17,6 +21,8 @@ from mobius.text.chunks import (
 
 
 def _load_module(name: str, relative_path: str):
+    """Load the retained runner directly from its repository path."""
+
     module_path = Path(__file__).resolve().parents[1] / relative_path
     spec = importlib.util.spec_from_file_location(name, module_path)
     assert spec is not None
@@ -35,6 +41,8 @@ RUNNER = _load_module(
 
 class _CharTokenizer:
     def __call__(self, text, **kwargs):
+        """Return one tokenizer offset per input character."""
+
         ids = list(range(len(text)))
         payload = {"input_ids": ids}
         if kwargs.get("return_offsets_mapping"):
@@ -43,29 +51,63 @@ class _CharTokenizer:
 
 
 class _Backbone:
+    """Provide deterministic probabilities and observable batch-call counters."""
+
     def __init__(self):
+        """Initialize the character tokenizer and counters."""
+
         self.tokenizer = _CharTokenizer()
+        self.single_calls = 0
+        self.batch_calls = 0
 
     def predict_label_probs(self, _text, _verbalizers):
+        """Score one full input."""
+
+        self.single_calls += 1
         return np.asarray([0.2, 0.8], dtype=np.float32)
 
     def predict_label_probs_batch(self, texts, _verbalizers):
+        """Score one coalition batch."""
+
+        self.batch_calls += 1
         return np.asarray([[0.2, 0.8] for _ in texts], dtype=np.float32)
 
     def snapshot_counters(self):
-        return {}
+        """Expose enough counters to detect artifact-only model calls."""
+
+        return {
+            "predict_calls": self.single_calls + self.batch_calls,
+            "model_forward_calls": self.single_calls + self.batch_calls,
+            "batch_calls": self.batch_calls,
+            "batch_rows": 0,
+        }
 
 
 class _DummyProxySPEX:
+    """Provide a deterministic spectral surrogate for runner contract tests."""
+
     seen_n = []
 
     def __init__(self, **kwargs):
+        """Record the requested player count."""
+
         self.n = int(kwargs["n"])
         self.__class__.seen_n.append(self.n)
 
     def approximate(self, budget, game):
+        """Evaluate one native coalition and expose fitted ProxySPEX artifacts."""
+
         if self.n > 0:
-            game(np.ones((1, self.n), dtype=bool))
+            self.coalitions_matrix_ = np.ones((1, self.n), dtype=bool)
+            game(self.coalitions_matrix_)
+            self.unrefined_fourier_ = {
+                (): 0.25,
+                (0,): 0.5,
+            }
+            self.refined_fourier_ = {
+                (): 0.25,
+                (0,): 0.5,
+            }
         return SimpleNamespace(
             dict_values={(idx,): float(self.n - idx) for idx in range(self.n)},
             baseline_value=0.0,
@@ -73,6 +115,8 @@ class _DummyProxySPEX:
 
 
 def _args(**overrides):
+    """Build the minimal runner argument namespace used by unit tests."""
+
     defaults = dict(
         chunker="word",
         adaptive_profile="balanced",
@@ -101,6 +145,8 @@ def _args(**overrides):
 
 
 def test_proxyspex_chunking_token_uses_tokenizer_offsets() -> None:
+    """Check token chunks follow tokenizer offsets exactly."""
+
     result = build_chunks(
         text="abc",
         chunker="token",
@@ -113,6 +159,8 @@ def test_proxyspex_chunking_token_uses_tokenizer_offsets() -> None:
 
 
 def test_proxyspex_chunking_word_preserves_coverage_and_ids() -> None:
+    """Check word chunks retain whitespace and full text coverage."""
+
     text = "good movie"
     result = build_chunks(text=text, chunker="word", tokenizer=None)
     ok, msg = validate_coverage(text, result.chunks)
@@ -123,6 +171,8 @@ def test_proxyspex_chunking_word_preserves_coverage_and_ids() -> None:
 
 
 def test_proxyspex_chunking_adaptive_emits_diagnostics() -> None:
+    """Check adaptive chunks expose profile and strategy diagnostics."""
+
     text = " ".join(f"tok{i}" for i in range(24)) + "."
     result = build_chunks(text=text, chunker="adaptive", tokenizer=None)
     ok, msg = validate_coverage(text, result.chunks)
@@ -150,6 +200,8 @@ def test_short_sample_hpo_uses_feasible_cross_validation() -> None:
 
 
 def test_predicted_probability_forces_predicted_target() -> None:
+    """Check predicted probability ignores an incompatible gold request."""
+
     sample = SimpleNamespace(
         sample_id="sample-predicted",
         text="good movie",
@@ -174,6 +226,8 @@ def test_predicted_probability_forces_predicted_target() -> None:
 
 
 def test_target_probability_can_reproduce_gold_target_behavior() -> None:
+    """Check target probability preserves explicit gold-target behavior."""
+
     sample = SimpleNamespace(
         sample_id="sample-gold",
         text="good movie",
@@ -198,6 +252,8 @@ def test_target_probability_can_reproduce_gold_target_behavior() -> None:
 
 
 def test_proxy_game_supports_probability_and_margin_values() -> None:
+    """Check coalition values support both probability and margin semantics."""
+
     units = [SimpleNamespace(chunk_id=0, start_char=0, end_char=1, text="x")]
     probability_game = RUNNER.ProxySPEXCoalitionGame(
         units=units,
@@ -221,6 +277,8 @@ def test_proxy_game_supports_probability_and_margin_values() -> None:
 
 
 def test_explain_sample_uses_word_chunks_as_players_even_when_eval_is_token() -> None:
+    """Check explanation and evaluation granularities remain independent."""
+
     _DummyProxySPEX.seen_n = []
     sample = SimpleNamespace(
         sample_id="sample-1",
@@ -234,10 +292,11 @@ def test_explain_sample_uses_word_chunks_as_players_even_when_eval_is_token() ->
         split="validation",
     )
 
+    backbone = _Backbone()
     result = RUNNER._explain_sample(
         sample=sample,
         bundle=bundle,
-        backbone=_Backbone(),
+        backbone=backbone,
         args=_args(chunker="word", eval_granularity="token"),
         ProxySPEX=_DummyProxySPEX,
     )
@@ -248,9 +307,17 @@ def test_explain_sample_uses_word_chunks_as_players_even_when_eval_is_token() ->
     assert result.method_summary["eval_granularity"] == "token"
     assert result.method_summary["chunk_diagnostics"]["chunk_strategy"] == "word"
     assert result.method_summary["player_to_chunk_id"] == [0, 1]
+    assert result.observation_artifact["keep_masks"].shape == (1, 2)
+    assert result.observation_artifact["label_scores"].shape == (1, 2)
+    assert result.surrogate_artifact["predictor"]["type"] == "refined_fourier"
+    assert result.surrogate_artifact["refined_fourier"]["support_size"] == 1
+    assert backbone.single_calls == 1
+    assert backbone.batch_calls == 1
 
 
 def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
+    """Check adaptive chunk rankings project to complete token rankings."""
+
     _DummyProxySPEX.seen_n = []
     text = " ".join(f"tok{i}" for i in range(24)) + "."
     sample = SimpleNamespace(sample_id="sample-2", text=text, label=1, label_text="positive")
@@ -275,3 +342,72 @@ def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
     )
     assert sorted(ranking_units) == list(range(len(eval_result.chunks)))
     assert result.method_summary["proxyspex_chunker"] == "adaptive"
+
+
+def test_refined_fourier_artifact_matches_native_predictor() -> None:
+    """Check serialized refined Fourier predictions equal native ProxySPEX."""
+
+    local_source = str(RUNNER._LOCAL_SHAPIQ_SRC)
+    if local_source not in sys.path:
+        sys.path.insert(0, local_source)
+    from shapiq.approximator.proxy.proxyspex import ProxySPEX
+
+    seen = {}
+
+    def game(matrix):
+        """Evaluate a deterministic nonlinear function and retain native inputs."""
+
+        values = np.asarray(matrix, dtype=np.float64)
+        seen["matrix"] = values.astype(bool)
+        seen["values"] = (
+            0.2
+            + 0.5 * values[:, 0]
+            - 0.3 * values[:, 1]
+            + 0.8 * values[:, 0] * values[:, 2]
+        )
+        return seen["values"]
+
+    approximator = ProxySPEX(
+        n=3,
+        max_order=2,
+        index="FBII",
+        proxy_model="tree",
+        hpo=False,
+        random_state=9,
+    )
+    approximator.approximate(budget=8, game=game)
+    refined = RUNNER._spectral_terms_payload(
+        approximator.refined_fourier_
+    )
+    surrogate = normalize_surrogate_artifact(
+        {
+            "sample_id": "spectral",
+            "method": "proxyspex",
+            "n_features": 3,
+            "player_to_chunk_id": [0, 1, 2],
+            "predictor": {
+                "type": "refined_fourier",
+                "basis": "fourier",
+                "intercept": refined["intercept"],
+                "terms": refined["terms"],
+            },
+        }
+    )
+    masks = np.asarray(
+        [
+            [False, False, False],
+            [True, False, True],
+            [False, True, True],
+            [True, True, True],
+        ],
+        dtype=bool,
+    )
+    assert np.array_equal(
+        approximator.coalitions_matrix_,
+        seen["matrix"],
+    )
+    assert np.allclose(approximator.coalition_values_, seen["values"])
+    assert np.allclose(
+        predict_surrogate(surrogate, masks),
+        approximator.predict_refined_fourier(masks),
+    )

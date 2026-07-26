@@ -8,8 +8,9 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Sequence
 
+from .artifacts import write_observation_artifact, write_surrogate_artifact
 from .config import scientific_config
 from .runtime import atomic_write_json, ensure_dir, environment_summary, git_commit
 from .schema import AttributionResult, SCHEMA_VERSION
@@ -75,6 +76,8 @@ class ResultStore:
         output_level: str = "standard",
         command: str | None = None,
         overwrite: bool = False,
+        required_artifacts: Sequence[str] = (),
+        provenance: Mapping[str, Any] | None = None,
     ) -> None:
         """Initialize directories and validate any existing run."""
 
@@ -82,6 +85,22 @@ class ResultStore:
         self.samples_dir = ensure_dir(self.run_dir / "samples")
         self.failures_dir = ensure_dir(self.run_dir / "failures")
         self.output_level = str(output_level)
+        self.required_artifacts = frozenset(str(value) for value in required_artifacts)
+        unknown_artifacts = self.required_artifacts - {"observation", "surrogate"}
+        if unknown_artifacts:
+            raise ValueError(f"Unsupported required artifacts: {sorted(unknown_artifacts)}")
+        self.provenance = dict(provenance or {})
+        self.observations_dir = (
+            ensure_dir(self.run_dir / "observations")
+            if "observation" in self.required_artifacts
+            else self.run_dir / "observations"
+        )
+        self.surrogates_dir = (
+            ensure_dir(self.run_dir / "surrogates")
+            if "surrogate" in self.required_artifacts
+            else self.run_dir / "surrogates"
+        )
+        self.analyses_dir = ensure_dir(self.run_dir / "analyses")
         self.diagnostics_dir = (
             ensure_dir(self.run_dir / "diagnostics")
             if self.output_level == "debug"
@@ -120,10 +139,15 @@ class ResultStore:
                 "git_commit": git_commit(self.run_dir),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "environment": environment_summary(),
+                "provenance": dict(self.provenance),
             }
             atomic_write_json(run_path, run_payload)
         else:
-            self.completed_ids = sorted(path.stem for path in self.samples_dir.glob("*.json"))
+            self.completed_ids = sorted(
+                path.stem
+                for path in self.samples_dir.glob("*.json")
+                if self.sample_complete(path.stem)
+            )
             status_path = self.run_dir / "status.json"
             if status_path.is_file():
                 previous = json.loads(status_path.read_text(encoding="utf-8"))
@@ -138,6 +162,9 @@ class ResultStore:
             self.samples_dir,
             self.failures_dir,
             self.diagnostics_dir,
+            self.observations_dir,
+            self.surrogates_dir,
+            self.analyses_dir,
         ):
             if directory.is_dir():
                 for path in directory.glob("*"):
@@ -160,15 +187,52 @@ class ResultStore:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        return (
+        valid = (
             payload.get("schema_version") == SCHEMA_VERSION
             and str(payload.get("sample_id")) == str(sample_id)
             and isinstance(payload.get("ranking"), list)
         )
+        if not valid:
+            return False
+        if "observation" in self.required_artifacts:
+            valid = valid and (self.observations_dir / f"{sample_id}.npz").is_file()
+        if "surrogate" in self.required_artifacts:
+            valid = valid and (self.surrogates_dir / f"{sample_id}.json").is_file()
+        return bool(valid)
 
     def write_sample(self, result: AttributionResult) -> None:
         """Write one explanation and optional debug diagnostics."""
 
+        missing = []
+        if "observation" in self.required_artifacts and result.observation_artifact is None:
+            missing.append("observation")
+        if "surrogate" in self.required_artifacts and result.surrogate_artifact is None:
+            missing.append("surrogate")
+        if missing:
+            raise ValueError(
+                f"Sample {result.sample_id} is missing required artifacts: {missing}"
+            )
+        observation_metadata = None
+        if result.observation_artifact is not None:
+            observation_metadata = write_observation_artifact(
+                self.observations_dir / f"{result.sample_id}.npz",
+                result.observation_artifact,
+            )
+        if result.surrogate_artifact is not None:
+            surrogate_payload = dict(result.surrogate_artifact)
+            if observation_metadata is not None:
+                surrogate_payload.setdefault(
+                    "observation_file",
+                    f"../observations/{result.sample_id}.npz",
+                )
+                surrogate_payload.setdefault(
+                    "observation_digest",
+                    observation_metadata["digest"],
+                )
+            write_surrogate_artifact(
+                self.surrogates_dir / f"{result.sample_id}.json",
+                surrogate_payload,
+            )
         atomic_write_json(
             self.samples_dir / f"{result.sample_id}.json",
             result.to_dict(self.output_level),

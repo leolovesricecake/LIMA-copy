@@ -32,13 +32,13 @@ def _base_config() -> dict:
         "min_features": 1,
         "max_features": None,
         "batch_size": 8,
-        "targeted_top_k": 0,
         "basis": "deletion_mobius",
         "hierarchy": "none",
         "projector": "signed_equal_share",
         "sampler": {"name": "deletion_mixture"},
         "estimator": {
-            "name": "lasso_cv_ridge_refit",
+            "name": "lasso_support",
+            "refit": "ridge_cv",
             "alphas": [0.0001, 0.001],
             "l1_ratios": [1.0],
             "cv_folds": 2,
@@ -103,6 +103,13 @@ def test_run_id_uses_configured_suffix_before_hash_fallback() -> None:
         assert "run_suffix" in str(error)
     else:  # pragma: no cover - supports direct execution without pytest
         raise AssertionError("unsafe run_suffix should be rejected")
+
+
+def test_default_sampler_is_uniform_size() -> None:
+    """Keep the code-level default aligned with the main paper configuration."""
+
+    resolved = resolve_config({})
+    assert resolved["sampler"] == {"name": "uniform_size"}
 
 
 def test_result_store_honors_minimal_and_debug_output_levels(tmp_path: Path) -> None:
@@ -213,7 +220,8 @@ def test_every_single_axis_ablation_runs_with_mock_scorer(tmp_path: Path) -> Non
     cells = [
         ("main", {}),
         ("basis-fourier", {"basis": "fourier"}),
-        ("hierarchy-strong", {"hierarchy": "strong"}),
+        ("hierarchy-strict", {"hierarchy": "strict"}),
+        ("hierarchy-parent-screening", {"hierarchy": "parent_screening"}),
         ("sampler-bernoulli", {"sampler": {"name": "bernoulli"}}),
         ("sampler-uniform", {"sampler": {"name": "uniform_size"}}),
         ("projector-absolute", {"projector": "absolute_equal_share"}),

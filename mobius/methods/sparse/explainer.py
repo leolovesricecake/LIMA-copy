@@ -10,6 +10,10 @@ import numpy as np
 from tqdm import tqdm
 
 from mobius.core.config import resolve_config, scientific_config
+from mobius.core.artifacts import (
+    normalize_observation_artifact,
+    normalize_surrogate_artifact,
+)
 from mobius.core.results import ResultStore, canonical_digest
 from mobius.core.runtime import counter_delta
 from mobius.core.schema import AttributionResult, DatasetBundle, TextSample
@@ -28,8 +32,7 @@ from .estimator import SparseModel, fit_sparse_model
 from .hierarchy import choose_candidates, normalize_hierarchy
 from .projector import normalize_projector, project_nodes
 from .sampler import normalize_sampler, sample_masks
-from .verification import verification_summary, verify_deletion_coefficients
-from .basis import normalize_basis
+from .basis import normalize_basis, term_players
 
 
 METHOD_NAME = "sparse_mobius"
@@ -137,7 +140,7 @@ class SparseMobiusExplainer:
         )
 
     def explain(self, sample: TextSample) -> AttributionResult:
-        """Run attribution, sparse recovery, projection, and targeted verification."""
+        """Run attribution, sparse recovery, projection, and artifact export."""
 
         started = time.perf_counter()
         counters_before = self.scorer.snapshot_counters()
@@ -237,6 +240,7 @@ class SparseMobiusExplainer:
             max_degree=int(self.config["max_degree"]),
             config=self.estimator_config,
             random_state=int(self.config["seed"]),
+            hierarchy_policy=self.hierarchy,
         )
         active_scores = project_nodes(model, self.projector)
         node_scores = [0.0] * len(chunking.chunks)
@@ -249,26 +253,61 @@ class SparseMobiusExplainer:
         )
         selected = ranking[: min(int(self.config["k"]), len(players))]
 
-        verification = verify_deletion_coefficients(
-            model,
-            n_players=game.n_players,
-            top_k=int(self.config["targeted_top_k"]),
-            score_masks=lambda masks, ledger, category: self._score_masks(
-                sample.sample_id,
-                game,
-                masks,
-                ledger=ledger,
-                category=category,
-            ),
-            target_class=target_label,
-            value_function=value_function,
-            ledger=ledger,
-        )
         model_payload = model.to_dict()
         for edge in model_payload["hyperedges"]:
             edge["chunk_ids"] = [
                 int(players[int(player)]) for player in edge["players"]
             ]
+        observation_artifact = normalize_observation_artifact(
+            {
+                "sample_id": sample.sample_id,
+                "method": METHOD_NAME,
+                "n_features": game.n_players,
+                "keep_masks": sampling.masks,
+                "label_scores": training_scores,
+                "attribution_values": training_values,
+            }
+        )
+        predictor_terms = []
+        coefficient_by_term = {
+            int(term): float(coefficient)
+            for term, coefficient in zip(model.terms, model.coefficients)
+        }
+        for term in model.refit_support:
+            predictor_terms.append(
+                {
+                    "players": list(term_players(int(term))),
+                    "coefficient": coefficient_by_term[int(term)],
+                }
+            )
+        surrogate_artifact = normalize_surrogate_artifact(
+            {
+                "sample_id": sample.sample_id,
+                "method": METHOD_NAME,
+                "n_features": game.n_players,
+                "player_to_chunk_id": players,
+                "observation_file": f"../observations/{sample.sample_id}.npz",
+                "observation_digest": observation_artifact["digest"],
+                "value_function": value_function,
+                "target_mode": target_mode,
+                "target_label": target_label,
+                "predictor": {
+                    "type": "sparse_polynomial",
+                    "basis": self.basis,
+                    "intercept": float(model.intercept),
+                    "terms": predictor_terms,
+                },
+                "candidate_definition": model_payload["candidate_definition"],
+                "support": {
+                    "selection": model_payload["selection_support"],
+                    "hierarchy": model_payload["hierarchy_support"],
+                    "refit": model_payload["refit_support"],
+                    "counts": model_payload["support_counts"],
+                },
+                "fit_config": dict(self.estimator_config),
+                "fit_diagnostics": dict(model.diagnostics),
+            }
+        )
         elapsed = time.perf_counter() - started
         counters_after = self.scorer.snapshot_counters()
         attribution_counter_delta = counter_delta(
@@ -278,9 +317,7 @@ class SparseMobiusExplainer:
         attribution_cost = {
             **ledger.to_dict(),
             "setup_physical_values_scored": setup_ledger.physical_values_scored,
-            "interaction_verification_queries": ledger.category_count(
-                "interaction_verification"
-            ),
+            "interaction_verification_queries": 0,
             "model_forward_calls": int(
                 attribution_counter_delta.get("model_forward_calls", 0)
             ),
@@ -297,11 +334,13 @@ class SparseMobiusExplainer:
             "method": METHOD_NAME,
             "basis": self.basis,
             "deletion_mobius_definition": "g(D)=f(N\\D)",
-            "hierarchy": hierarchy_diagnostics,
+            "hierarchy": {
+                "candidate_policy": hierarchy_diagnostics,
+                "support_policy": dict(model.diagnostics.get("hierarchy", {})),
+            },
             "sampler": sampling.diagnostics,
             "projector": self.projector,
             "model": model_payload,
-            "targeted_verification": verification_summary(verification),
             "chunking": chunking.diagnostics,
             "truncation": {
                 **truncation,
@@ -316,6 +355,8 @@ class SparseMobiusExplainer:
                 float(value) for value in full_probabilities
             ],
             "selected_text": compose_text(chunking.chunks, selected),
+            "observation_digest": observation_artifact["digest"],
+            "surrogate_digest": surrogate_artifact["digest"],
         }
         diagnostics = {
             "masks": [int(mask) for mask in sampling.masks],
@@ -323,7 +364,6 @@ class SparseMobiusExplainer:
             "label_scores": [
                 [float(value) for value in row] for row in training_scores
             ],
-            "targeted_verification": verification,
             "setup_ledger": setup_ledger.to_dict(),
             "query_ledger": ledger.to_dict(),
             "observation_digest": canonical_digest(
@@ -346,6 +386,8 @@ class SparseMobiusExplainer:
             attribution_cost=attribution_cost,
             method_summary=method_summary,
             diagnostics=diagnostics,
+            observation_artifact=observation_artifact,
+            surrogate_artifact=surrogate_artifact,
         )
 
 
@@ -376,6 +418,7 @@ def run_sparse_mobius(
         output_level=str(resolved["output_level"]),
         command=command,
         overwrite=overwrite,
+        required_artifacts=("observation", "surrogate"),
     )
     oracle = ValueOracle(
         scorer,

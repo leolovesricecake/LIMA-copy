@@ -29,6 +29,10 @@ _MAX_PROXY_HPO_CV_SPLITS = 5
 _MIN_PROXY_HPO_TEST_FOLD_SIZE = 2
 
 from mobius.core.config import load_json_object
+from mobius.core.artifacts import (
+    normalize_observation_artifact,
+    normalize_surrogate_artifact,
+)
 from mobius.core.results import ResultStore, default_run_dir
 from mobius.core.runtime import set_seed
 from mobius.core.schema import AttributionResult, TextChunk
@@ -215,18 +219,17 @@ def _require_runtime_dependencies():
 
         return ProxySPEX
 
+    if _LOCAL_SHAPIQ_SRC.exists():
+        local_source = str(_LOCAL_SHAPIQ_SRC)
+        if local_source in sys.path:
+            sys.path.remove(local_source)
+        sys.path.insert(0, local_source)
+        for module_name in list(sys.modules):
+            if module_name == "shapiq" or module_name.startswith("shapiq."):
+                del sys.modules[module_name]
     try:
         return _import_proxyspex()
     except Exception as first_exc:
-        if _LOCAL_SHAPIQ_SRC.exists() and str(_LOCAL_SHAPIQ_SRC) not in sys.path:
-            sys.path.insert(0, str(_LOCAL_SHAPIQ_SRC))
-            for module_name in list(sys.modules):
-                if module_name == "shapiq" or module_name.startswith("shapiq."):
-                    del sys.modules[module_name]
-            try:
-                return _import_proxyspex()
-            except Exception as second_exc:
-                first_exc = second_exc
         raise RuntimeError(
             "ProxySPEX runner requires shapiq and its proxy dependencies. Install with something like: "
             "pip install -e 'baselines/shapiq-copy[proxy]'. If your local checkout misses lazy_dispatch, "
@@ -539,7 +542,8 @@ class ProxySPEXCoalitionGame:
         self.verbalizers = list(verbalizers)
         self.target_label = int(target_label)
         self.value_function = normalize_attribution_value_function(value_function)
-        self.cache: Dict[str, float] = {}
+        self.score_cache: Dict[str, np.ndarray] = {}
+        self.observed_rows: List[np.ndarray] = []
         self.call_count = 0
         self.row_count = 0
         self.cache_hits = 0
@@ -552,6 +556,7 @@ class ProxySPEXCoalitionGame:
         matrix = np.asarray(coalitions_matrix, dtype=bool)
         if matrix.ndim == 1:
             matrix = matrix.reshape(1, -1)
+        self.observed_rows.extend(np.asarray(row, dtype=bool).copy() for row in matrix)
 
         self.call_count += 1
         self.row_count += int(matrix.shape[0])
@@ -567,7 +572,7 @@ class ProxySPEXCoalitionGame:
         missing = []
         seen_missing = set()
         for text in texts:
-            if text in self.cache:
+            if text in self.score_cache:
                 self.cache_hits += 1
                 continue
             self.cache_misses += 1
@@ -591,10 +596,46 @@ class ProxySPEXCoalitionGame:
                 value_function=self.value_function,
             )
             for idx, text in enumerate(missing):
-                self.cache[text] = float(values[idx])
-            self.unique_text_count = int(len(self.cache))
+                self.score_cache[text] = np.asarray(
+                    label_scores[idx],
+                    dtype=np.float64,
+                )
+            self.unique_text_count = int(len(self.score_cache))
 
-        return np.asarray([self.cache[text] for text in texts], dtype=np.float64)
+        scores = np.vstack([self.score_cache[text] for text in texts])
+        return attribution_values_from_label_scores(
+            scores,
+            target_class=self.target_label,
+            value_function=self.value_function,
+        )
+
+    def label_scores_for(self, coalitions_matrix: np.ndarray) -> np.ndarray:
+        """Return cached all-class scores for already evaluated coalitions."""
+
+        matrix = np.asarray(coalitions_matrix, dtype=bool)
+        if matrix.ndim == 1:
+            matrix = matrix.reshape(1, -1)
+        texts = [
+            _compose_coalition_text(
+                units=self.units,
+                player_to_chunk_id=self.player_to_chunk_id,
+                coalition_row=row,
+            )
+            for row in matrix
+        ]
+        missing = [text for text in texts if text not in self.score_cache]
+        if missing:
+            raise RuntimeError(
+                "ProxySPEX observation export requested coalitions that were not scored."
+            )
+        return np.vstack([self.score_cache[text] for text in texts])
+
+    def observed_matrix(self) -> np.ndarray:
+        """Return coalition rows requested from the game in their original order."""
+
+        if not self.observed_rows:
+            return np.zeros((0, len(self.player_to_chunk_id)), dtype=bool)
+        return np.vstack(self.observed_rows).astype(bool, copy=False)
 
     def stats(self) -> Dict[str, Any]:
         """Handle the stats step in this retained baseline."""
@@ -604,7 +645,7 @@ class ProxySPEXCoalitionGame:
             "row_count": int(self.row_count),
             "cache_hits": int(self.cache_hits),
             "cache_misses": int(self.cache_misses),
-            "unique_text_count": int(len(self.cache)),
+            "unique_text_count": int(len(self.score_cache)),
             "value_function": self.value_function,
         }
 
@@ -674,6 +715,29 @@ def _summarize_interactions(
             for interaction, value in top
         ],
         "top_by_abs_value_limit": int(limit),
+    }
+
+
+def _spectral_terms_payload(
+    coefficients: Mapping[Tuple[int, ...], float] | None,
+) -> Dict[str, Any]:
+    """Serialize one Fourier dictionary with its baseline separated."""
+
+    values = dict(coefficients or {})
+    return {
+        "intercept": float(values.get((), 0.0)),
+        "terms": [
+            {
+                "players": [int(player) for player in interaction],
+                "coefficient": float(value),
+            }
+            for interaction, value in sorted(
+                values.items(),
+                key=lambda item: (len(item[0]), item[0]),
+            )
+            if interaction
+        ],
+        "support_size": int(sum(bool(interaction) for interaction in values)),
     }
 
 
@@ -795,6 +859,14 @@ def _explain_sample(
         }
         chunk_scores = [0.0] * len(units)
         timing["proxyspex_seconds"] = 0.0
+        training_matrix = np.zeros((0, 0), dtype=bool)
+        training_label_scores = np.zeros(
+            (0, len(bundle.verbalizers)),
+            dtype=np.float64,
+        )
+        training_values = np.zeros(0, dtype=np.float64)
+        unrefined_fourier: Dict[Tuple[int, ...], float] = {}
+        refined_fourier: Dict[Tuple[int, ...], float] = {}
     else:
         game = ProxySPEXCoalitionGame(
             units=units,
@@ -841,6 +913,36 @@ def _explain_sample(
             player_to_chunk_id=player_to_chunk_id,
             total_chunk_count=len(units),
         )
+        raw_training_matrix = getattr(approximator, "coalitions_matrix_", None)
+        raw_unrefined_fourier = getattr(
+            approximator,
+            "unrefined_fourier_",
+            None,
+        )
+        raw_refined_fourier = getattr(
+            approximator,
+            "refined_fourier_",
+            None,
+        )
+        if (
+            raw_training_matrix is None
+            or raw_unrefined_fourier is None
+            or raw_refined_fourier is None
+        ):
+            raise RuntimeError(
+                "The loaded ProxySPEX implementation does not expose the "
+                "training coalitions and refined Fourier representation required "
+                "by the paper artifact protocol. Install the local shapiq-copy."
+            )
+        training_matrix = np.asarray(raw_training_matrix, dtype=bool)
+        training_label_scores = game.label_scores_for(training_matrix)
+        training_values = attribution_values_from_label_scores(
+            training_label_scores,
+            target_class=target_label,
+            value_function=value_function,
+        )
+        unrefined_fourier = dict(raw_unrefined_fourier)
+        refined_fourier = dict(raw_refined_fourier)
     attribution_counter_after = backbone.snapshot_counters()
     attribution_forward_delta = _counter_delta(
         attribution_counter_before,
@@ -864,6 +966,56 @@ def _explain_sample(
     interaction_summary = _summarize_interactions(
         interaction_items,
         limit=int(args.interaction_metadata_limit),
+    )
+    observation_artifact = normalize_observation_artifact(
+        {
+            "sample_id": sample.sample_id,
+            "method": METHOD_NAME,
+            "n_features": len(player_to_chunk_id),
+            "keep_masks": training_matrix,
+            "label_scores": training_label_scores,
+            "attribution_values": training_values,
+        }
+    )
+    unrefined_payload = _spectral_terms_payload(unrefined_fourier)
+    refined_payload = _spectral_terms_payload(refined_fourier)
+    surrogate_artifact = normalize_surrogate_artifact(
+        {
+            "sample_id": sample.sample_id,
+            "method": METHOD_NAME,
+            "n_features": len(player_to_chunk_id),
+            "player_to_chunk_id": player_to_chunk_id,
+            "observation_file": f"../observations/{sample.sample_id}.npz",
+            "observation_digest": observation_artifact["digest"],
+            "value_function": value_function,
+            "target_mode": _effective_target_mode(
+                value_function,
+                args.target_mode,
+            ),
+            "target_label": target_label,
+            "predictor": {
+                "type": "refined_fourier",
+                "basis": "fourier",
+                "intercept": refined_payload["intercept"],
+                "terms": refined_payload["terms"],
+            },
+            "unrefined_fourier": unrefined_payload,
+            "refined_fourier": refined_payload,
+            "final_interactions": [
+                {
+                    "players": [int(player) for player in interaction],
+                    "coefficient": float(value),
+                }
+                for interaction, value in interaction_items
+            ],
+            "fit_config": {
+                "proxy_model": str(args.proxy_model),
+                "hpo": bool(args.hpo),
+                "max_order": int(args.max_order),
+                "index": str(args.index),
+                "sampling_weight_mode": str(args.sampling_weight_mode),
+            },
+        }
     )
 
     metadata = {
@@ -918,6 +1070,8 @@ def _explain_sample(
         "forward_counters_delta": _counter_delta(counter_before, counter_after),
         "explain_timing_breakdown": timing,
         "elapsed_seconds": float(elapsed),
+        "observation_digest": observation_artifact["digest"],
+        "surrogate_digest": surrogate_artifact["digest"],
     }
     metadata["query_accounting"] = {
         "logical_attribution_queries": int(game_stats.get("row_count", 0)),
@@ -987,6 +1141,8 @@ def _explain_sample(
             ],
             "game_stats": game_stats,
         },
+        observation_artifact=observation_artifact,
+        surrogate_artifact=surrogate_artifact,
     )
 
 
@@ -1038,6 +1194,7 @@ def run(args, raw_argv: Sequence[str]) -> None:
         config,
         output_level=str(args.output_level),
         command=" ".join([sys.executable, __file__, *raw_argv]),
+        required_artifacts=("observation", "surrogate"),
     )
     backbone = HFBackbone(
         model_path=args.model_path,

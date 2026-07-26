@@ -30,7 +30,6 @@ TOP_LEVEL_FIELDS = {
     "min_features",
     "max_features",
     "batch_size",
-    "targeted_top_k",
     "fail_fast",
     "deterministic",
     "dataset",
@@ -88,6 +87,9 @@ NESTED_FIELDS = {
         "cv_folds",
         "coefficient_tolerance",
         "ridge_alphas",
+        "refit",
+        "selection_alpha_scale",
+        "ridge_alpha",
         "max_design_mb",
     },
     "fit": {
@@ -96,6 +98,9 @@ NESTED_FIELDS = {
         "cv_folds",
         "coefficient_tolerance",
         "ridge_alphas",
+        "refit",
+        "selection_alpha_scale",
+        "ridge_alpha",
         "max_design_mb",
     },
 }
@@ -167,14 +172,16 @@ def resolve_config(config: Mapping[str, Any]) -> Dict[str, Any]:
     output.setdefault("min_features", 1)
     output.setdefault("max_features", None)
     output.setdefault("batch_size", 16)
-    output.setdefault("targeted_top_k", 5)
     output.setdefault("fail_fast", False)
     output.setdefault("deterministic", False)
     output.setdefault("basis", "deletion_mobius")
     output.setdefault("hierarchy", "none")
     output.setdefault("projector", "signed_equal_share")
-    output.setdefault("sampler", {"name": "deletion_mixture"})
-    output.setdefault("estimator", {"name": "lasso_cv_ridge_refit"})
+    output.setdefault("sampler", {"name": "uniform_size"})
+    output.setdefault(
+        "estimator",
+        {"name": "lasso_support", "refit": "ridge_cv"},
+    )
     output.setdefault("dataset", {})
     output.setdefault("model", {})
     if output["output_level"] not in {"minimal", "standard", "debug"}:

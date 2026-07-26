@@ -67,8 +67,10 @@ configs/
 │   └── smoke.yaml
 └── ablations/
     ├── basis_fourier.yaml
-    ├── hierarchy_strong.yaml
+    ├── hierarchy_parent_screening.yaml
+    ├── hierarchy_strict.yaml
     ├── sampler_bernoulli.yaml
+    ├── sampler_deletion_mixture.yaml
     ├── sampler_uniform_size.yaml
     ├── projector_absolute.yaml
     └── projector_singleton.yaml
@@ -197,7 +199,7 @@ basis: fourier
 
 ```yaml
 hierarchy: none
-hierarchy: strong
+hierarchy: parent_screening
 ```
 
 - `none`：当前行为，全部一阶和二阶候选共同进入稀疏选择。
@@ -222,9 +224,9 @@ sampler:
   name: uniform_size
 ```
 
-- `deletion_mixture`：当前方法，full/empty anchors + Bernoulli 全局 + near-full + fixed-cardinality。
+- `deletion_mixture`：sampler 消融，full/empty anchors + Bernoulli 全局 + near-full + fixed-cardinality。
 - `bernoulli`：除 anchors 外，每个 player 以 0.5 独立保留。
-- `uniform_size`：先均匀采样 coalition size，再在该 size 内均匀采样 coalition。
+- `uniform_size`：先均匀采样 coalition size，再在该 size 内均匀采样 coalition；当前主配置与代码默认值。
 
 三者都必须：
 
@@ -261,7 +263,7 @@ Estimator 不是本轮正式消融轴，但实现为独立模块，以便后续�
 
 ### 6.1 Sparse deletion-Möbius 主结果
 
-当前 SST-2、Emotion、Rotten Tomatoes 的 probability run 对应：
+重跑后的 SST-2、Emotion、Rotten Tomatoes 主配置对应：
 
 ```yaml
 method: sparse
@@ -269,10 +271,7 @@ basis: deletion_mobius
 max_degree: 2
 hierarchy: none
 sampler:
-  name: deletion_mixture
-  global_fraction: 0.5
-  near_full_fraction: 0.3
-  fixed_cardinality_fraction: 0.2
+  name: uniform_size
 projector: signed_equal_share
 estimator: lasso_cv_ridge_refit
 budget: 512
@@ -282,7 +281,7 @@ eval_granularity: token
 value_function: target_probability
 target_mode: predicted
 k: 8
-targeted_top_k: 5
+# 交互验证已迁移到 scripts/verify_interactions.py。
 ```
 
 SST-2 和 Emotion 另有 sensitivity run，仅把：
@@ -296,7 +295,7 @@ value_function: predicted_class_margin
 所以当前已有结果就是新消融空间中的 baseline cell：
 
 ```text
-deletion_mobius × hierarchy_none × deletion_mixture × signed_equal_share
+deletion_mobius × hierarchy_none × uniform_size × signed_equal_share
 ```
 
 ### 6.2 ProxySPEX 主结果
