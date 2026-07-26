@@ -128,6 +128,8 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
         self.unrefined_fourier_: dict[tuple[int, ...], float] | None = None
         self.refined_fourier_: dict[tuple[int, ...], float] | None = None
         self.moebius_transform_: dict[tuple[int, ...], float] | None = None
+        self.tree_conversion_backends_: tuple[str, ...] | None = None
+        self.tree_fourier_validation_max_abs_error_: float | None = None
 
     def approximate(
         self,
@@ -213,9 +215,22 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
         tree_models = convert_tree_model(final_model)
         if not isinstance(tree_models, list):
             tree_models = [tree_models]
+        self.tree_conversion_backends_ = tuple(
+            sorted(
+                {
+                    str(getattr(tree_model, "conversion_backend", "native"))
+                    for tree_model in tree_models
+                }
+            )
+        )
         # Obtain fourier coefficients
         unrefined_fourier = self._sklearn_to_fourier(tree_models=tree_models)
         self.unrefined_fourier_ = dict(unrefined_fourier)
+        self.tree_fourier_validation_max_abs_error_ = self._validate_tree_fourier_conversion(
+            proxy_model=final_model,
+            fourier_coefficients=unrefined_fourier,
+            coalitions_matrix=matrix,
+        )
         # Refine the Fourier coefficients using the training data
         refined_fourier = self._refine(
             unrefined_fourier,
@@ -261,14 +276,66 @@ class ProxySPEX(Approximator[ValidProxySPEXIndices]):
                 f"expected second dimension {self.n}, got {matrix.shape}."
             )
             raise ValueError(msg)
+        return self._predict_fourier(self.refined_fourier_, matrix)
+
+    @staticmethod
+    def _predict_fourier(
+        fourier_coefficients: dict[tuple[int, ...], float],
+        coalitions_matrix: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate a sparse parity-Fourier dictionary on binary coalition rows."""
+
+        matrix = np.asarray(coalitions_matrix, dtype=bool)
         predictions = np.zeros(matrix.shape[0], dtype=float)
-        for interaction, coefficient in self.refined_fourier_.items():
+        for interaction, coefficient in fourier_coefficients.items():
             if len(interaction) == 0:
                 predictions += float(coefficient)
                 continue
             parity = np.sum(matrix[:, list(interaction)], axis=1) % 2
             predictions += float(coefficient) * np.where(parity == 0, 1.0, -1.0)
         return predictions
+
+    def _validate_tree_fourier_conversion(
+        self,
+        *,
+        proxy_model: Model,
+        fourier_coefficients: dict[tuple[int, ...], float],
+        coalitions_matrix: np.ndarray,
+    ) -> float:
+        """Fail if converted trees and extracted Fourier terms change proxy predictions."""
+
+        proxy_predictions = np.asarray(
+            proxy_model.predict(coalitions_matrix),
+            dtype=float,
+        ).reshape(-1)
+        fourier_predictions = self._predict_fourier(
+            fourier_coefficients,
+            coalitions_matrix,
+        )
+        if proxy_predictions.shape != fourier_predictions.shape:
+            msg = (
+                "ProxySPEX tree conversion produced an incompatible prediction shape: "
+                f"proxy={proxy_predictions.shape}, Fourier={fourier_predictions.shape}."
+            )
+            raise RuntimeError(msg)
+
+        max_abs_error = float(
+            np.max(np.abs(proxy_predictions - fourier_predictions), initial=0.0)
+        )
+        if not np.allclose(
+            proxy_predictions,
+            fourier_predictions,
+            rtol=1e-6,
+            atol=1e-8,
+        ):
+            backends = self.tree_conversion_backends_ or ("unknown",)
+            msg = (
+                "ProxySPEX tree-to-Fourier validation failed: the converted tree ensemble "
+                "does not reproduce the fitted proxy on its training coalitions "
+                f"(backends={backends}, max_abs_error={max_abs_error:.6g})."
+            )
+            raise RuntimeError(msg)
+        return max_abs_error
 
     def fourier_to_moebius(
         self, four_dict: dict[tuple[int, ...], float]

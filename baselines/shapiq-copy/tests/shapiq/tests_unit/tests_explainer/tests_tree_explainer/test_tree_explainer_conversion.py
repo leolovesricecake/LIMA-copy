@@ -401,6 +401,10 @@ def test_lightgbm_regressor_and_booster_conversion_predict_raw_score():
     )
     converted_model = convert_tree_model(model)
     converted_booster = convert_tree_model(booster)
+    from shapiq.tree.conversion._lightgbm_dump import convert_lightgbm_dump_model
+
+    python_converted_model = convert_lightgbm_dump_model(model)
+    python_converted_booster = convert_lightgbm_dump_model(booster)
 
     assert converted_model[0].thresholds.dtype == np.float64
     assert converted_model[0].values.dtype == np.float64
@@ -414,6 +418,20 @@ def test_lightgbm_regressor_and_booster_conversion_predict_raw_score():
         _predict_tree_ensemble(converted_booster, X[:10]),
         booster.predict(X[:10], raw_score=True),
         rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        _predict_tree_ensemble(python_converted_model, X[:10]),
+        model.predict(X[:10], raw_score=True),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        _predict_tree_ensemble(python_converted_booster, X[:10]),
+        booster.predict(X[:10], raw_score=True),
+        rtol=1e-5,
+    )
+    assert all(
+        tree.conversion_backend == "lightgbm_python_dump"
+        for tree in python_converted_model
     )
 
 

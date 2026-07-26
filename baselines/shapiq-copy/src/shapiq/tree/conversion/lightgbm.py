@@ -7,10 +7,15 @@ from typing import TYPE_CHECKING
 from lightgbm import LGBMClassifier, LGBMRegressor
 from lightgbm.basic import Booster as LightGBMBooster
 
-from .cext import (
-    parse_lightgbm_string_treemodels,  # ty: ignore[unresolved-import]
-)
+from ._lightgbm_dump import convert_lightgbm_dump_model
 from .common import register
+
+try:
+    from .cext import (
+        parse_lightgbm_string_treemodels,  # ty: ignore[unresolved-import]
+    )
+except ImportError:
+    parse_lightgbm_string_treemodels = None
 
 if TYPE_CHECKING:
     from shapiq.tree.base import TreeModel
@@ -61,8 +66,17 @@ def convert_lightgbm_model(model: LightGBMModel, class_label: int | None = None)
     Returns:
         A list of ``TreeModel`` instances, one per boosting round for the selected class.
     """
+    if parse_lightgbm_string_treemodels is None:
+        return convert_lightgbm_dump_model(model, class_label=class_label)
+
     byte_array = _lightgbm_model_to_bytes(model)
-    return parse_lightgbm_string_treemodels(byte_array, -1 if class_label is None else class_label)
+    converted = parse_lightgbm_string_treemodels(
+        byte_array,
+        -1 if class_label is None else class_label,
+    )
+    for tree_model in converted:
+        tree_model.conversion_backend = "lightgbm_cext"
+    return converted
 
 
 register(LGBMRegressor, convert_lightgbm_model)

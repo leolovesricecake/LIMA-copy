@@ -344,6 +344,96 @@ def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
     assert result.method_summary["proxyspex_chunker"] == "adaptive"
 
 
+def test_lightgbm_python_dump_converter_preserves_proxy_tree_function() -> None:
+    """Ensure the no-extension converter preserves tree outputs and Fourier extraction."""
+
+    local_source = str(RUNNER._LOCAL_SHAPIQ_SRC)
+    if local_source not in sys.path:
+        sys.path.insert(0, local_source)
+    from shapiq.approximator.proxy.proxyspex import ProxySPEX
+    from shapiq.tree.conversion._lightgbm_dump import convert_lightgbm_dump_model
+
+    class _FakeBooster:
+        """Expose a deterministic LightGBM-compatible structured model dump."""
+
+        def dump_model(self):
+            """Return one branching tree and one constant tree."""
+
+            return {
+                "num_tree_per_iteration": 1,
+                "tree_info": [
+                    {
+                        "tree_structure": {
+                            "split_index": 0,
+                            "split_feature": 0,
+                            "threshold": 0.5,
+                            "decision_type": "<=",
+                            "default_left": True,
+                            "internal_count": 8,
+                            "left_child": {
+                                "leaf_index": 0,
+                                "leaf_value": 1.0,
+                                "leaf_count": 4,
+                            },
+                            "right_child": {
+                                "split_index": 1,
+                                "split_feature": 1,
+                                "threshold": 0.5,
+                                "decision_type": "<=",
+                                "default_left": False,
+                                "internal_count": 4,
+                                "left_child": {
+                                    "leaf_index": 1,
+                                    "leaf_value": 2.0,
+                                    "leaf_count": 2,
+                                },
+                                "right_child": {
+                                    "leaf_index": 2,
+                                    "leaf_value": 3.0,
+                                    "leaf_count": 2,
+                                },
+                            },
+                        }
+                    },
+                    {
+                        "tree_structure": {
+                            "leaf_index": 0,
+                            "leaf_value": -0.5,
+                            "leaf_count": 8,
+                        }
+                    },
+                ],
+            }
+
+    trees = convert_lightgbm_dump_model(_FakeBooster())
+    masks = np.asarray(
+        [[False, False], [False, True], [True, False], [True, True]],
+        dtype=bool,
+    )
+    tree_predictions = np.asarray(
+        [sum(tree.predict_one(row) for tree in trees) for row in masks],
+        dtype=np.float64,
+    )
+    assert np.allclose(tree_predictions, [0.5, 0.5, 1.5, 2.5])
+    assert {tree.conversion_backend for tree in trees} == {
+        "lightgbm_python_dump"
+    }
+
+    approximator = ProxySPEX(
+        n=2,
+        max_order=2,
+        index="FBII",
+        proxy_model="tree",
+        hpo=False,
+        random_state=9,
+    )
+    approximator.refined_fourier_ = approximator._sklearn_to_fourier(trees)
+    assert np.allclose(
+        approximator.predict_refined_fourier(masks),
+        tree_predictions,
+    )
+
+
 def test_refined_fourier_artifact_matches_native_predictor() -> None:
     """Check serialized refined Fourier predictions equal native ProxySPEX."""
 

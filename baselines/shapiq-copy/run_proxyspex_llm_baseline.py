@@ -219,6 +219,8 @@ def _require_runtime_dependencies():
 
         return ProxySPEX
 
+    # The paper artifact protocol depends on fields added to this vendored ProxySPEX,
+    # so an unrelated site-packages release must not be selected silently.
     if _LOCAL_SHAPIQ_SRC.exists():
         local_source = str(_LOCAL_SHAPIQ_SRC)
         if local_source in sys.path:
@@ -855,6 +857,8 @@ def _explain_sample(
     proxy_fit_sample_count = 0
     effective_proxy_hpo = False
     proxy_hpo_cv_splits = None
+    tree_conversion_backends: List[str] = []
+    tree_fourier_validation_max_abs_error = None
     attribution_counter_before = backbone.snapshot_counters()
 
     if len(player_to_chunk_id) == 0:
@@ -916,6 +920,17 @@ def _explain_sample(
         with _maybe_suppress_native_output(bool(args.quiet_proxy)):
             interaction_values = approximator.approximate(budget=int(args.budget), game=game)
         timing["proxyspex_seconds"] = time.time() - t_proxy
+        tree_conversion_backends = [
+            str(value)
+            for value in (getattr(approximator, "tree_conversion_backends_", None) or ())
+        ]
+        raw_validation_error = getattr(
+            approximator,
+            "tree_fourier_validation_max_abs_error_",
+            None,
+        )
+        if raw_validation_error is not None:
+            tree_fourier_validation_max_abs_error = float(raw_validation_error)
         interaction_items = _interaction_items(interaction_values)
         game_stats = game.stats()
         chunk_scores = _project_interactions_to_chunk_scores(
@@ -1024,6 +1039,10 @@ def _explain_sample(
                 "max_order": int(args.max_order),
                 "index": str(args.index),
                 "sampling_weight_mode": str(args.sampling_weight_mode),
+                "tree_conversion_backends": tree_conversion_backends,
+                "tree_fourier_validation_max_abs_error": (
+                    tree_fourier_validation_max_abs_error
+                ),
             },
         }
     )
@@ -1047,6 +1066,10 @@ def _explain_sample(
         "proxyspex_proxy_hpo_cv_splits": int(proxy_hpo_cv_splits)
         if proxy_hpo_cv_splits is not None
         else None,
+        "proxyspex_tree_conversion_backends": tree_conversion_backends,
+        "proxyspex_tree_fourier_validation_max_abs_error": (
+            tree_fourier_validation_max_abs_error
+        ),
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
         "value_function": value_function,

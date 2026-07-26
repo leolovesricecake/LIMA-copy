@@ -251,5 +251,7 @@ def test_fixed_observations_reuse_native_fit_extract_path():
     assert native.refined_fourier_ == pytest.approx(controlled.refined_fourier_)
     assert native.moebius_transform_ == pytest.approx(controlled.moebius_transform_)
     assert native_result.dict_values == pytest.approx(controlled_result.dict_values)
+    assert native.tree_fourier_validation_max_abs_error_ == pytest.approx(0.0)
+    assert controlled.tree_fourier_validation_max_abs_error_ == pytest.approx(0.0)
     prediction = controlled.predict_refined_fourier(native.coalitions_matrix_)
     assert prediction.shape == native.coalition_values_.shape

@@ -40,6 +40,20 @@ pip install torch transformers datasets
 pip install -e "baselines/shapiq-copy[proxy]"
 ```
 
+LightGBM 树转换优先使用 shapiq 的 C++ extension。若当前源码 checkout
+没有构建该 extension，则自动使用 LightGBM `dump_model()` 的结构化输出构造相同的
+`TreeModel` 拓扑、split feature 和 leaf value；这只替换反序列化后端，不改变
+ProxySPEX 的 proxy、Fourier 提取或 refinement。每个样本会在
+`proxyspex_tree_conversion_backends` 中记录实际使用的
+`lightgbm_cext` 或 `lightgbm_python_dump`。转换完成后，runner 会在该样本的全部
+训练 coalition 上比较 LightGBM proxy 与未精炼 Fourier 的预测；若两者不等价则
+立即终止，最大绝对误差记录在
+`proxyspex_tree_fourier_validation_max_abs_error`。
+
+> 注意：runner 会固定加载本目录的 `src/shapiq`，因为论文结果协议依赖该版本导出的
+> coalition observations 和 refinement 前后的 Fourier 系数。它不会回退到环境中
+> 另一个已安装的 `shapiq` 版本。
+
 ## 运行
 
 ### sst2
