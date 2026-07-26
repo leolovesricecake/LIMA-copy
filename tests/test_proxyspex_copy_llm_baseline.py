@@ -397,7 +397,6 @@ def test_lightgbm_python_dump_converter_preserves_proxy_tree_function() -> None:
                     },
                     {
                         "tree_structure": {
-                            "leaf_index": 0,
                             "leaf_value": -0.5,
                             "leaf_count": 8,
                         }

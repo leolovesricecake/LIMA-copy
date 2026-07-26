@@ -16,6 +16,12 @@ def _is_split_node(node: Mapping[str, Any]) -> bool:
     return "split_index" in node
 
 
+def _is_leaf_node(node: Mapping[str, Any]) -> bool:
+    """Return whether one dump node is a leaf, including an unindexed root leaf."""
+
+    return "leaf_value" in node and not _is_split_node(node)
+
+
 def _collect_nodes(
     node: Mapping[str, Any],
     *,
@@ -37,9 +43,13 @@ def _collect_nodes(
             leaf_nodes=leaf_nodes,
         )
         return
-    if "leaf_index" not in node:
-        raise ValueError("LightGBM tree dump contains a node without split_index or leaf_index.")
-    leaf_nodes.append(node)
+    if _is_leaf_node(node):
+        leaf_nodes.append(node)
+        return
+    raise ValueError(
+        "LightGBM tree dump contains a node that is neither a split nor a leaf; "
+        f"available keys are {sorted(str(key) for key in node)}."
+    )
 
 
 def _validate_contiguous_indexes(
@@ -57,12 +67,47 @@ def _validate_contiguous_indexes(
         )
 
 
-def _dump_node_id(node: Mapping[str, Any], *, n_internal: int) -> int:
+def _resolve_leaf_indexes(
+    leaf_nodes: list[Mapping[str, Any]],
+) -> dict[int, int]:
+    """Assign contiguous indexes when LightGBM omits one for a root-only leaf."""
+
+    n_leaves = len(leaf_nodes)
+    indexes_by_identity: dict[int, int] = {}
+    claimed_indexes: set[int] = set()
+    for node in leaf_nodes:
+        if "leaf_index" not in node:
+            continue
+        leaf_index = int(node["leaf_index"])
+        if not 0 <= leaf_index < n_leaves:
+            raise ValueError(
+                f"LightGBM leaf_index {leaf_index} is outside [0, {n_leaves})."
+            )
+        if leaf_index in claimed_indexes:
+            raise ValueError(f"LightGBM leaf_index {leaf_index} is duplicated.")
+        indexes_by_identity[id(node)] = leaf_index
+        claimed_indexes.add(leaf_index)
+
+    available_indexes = iter(sorted(set(range(n_leaves)) - claimed_indexes))
+    for node in leaf_nodes:
+        if id(node) not in indexes_by_identity:
+            indexes_by_identity[id(node)] = next(available_indexes)
+    return indexes_by_identity
+
+
+def _dump_node_id(
+    node: Mapping[str, Any],
+    *,
+    n_internal: int,
+    leaf_indexes: Mapping[int, int],
+) -> int:
     """Map LightGBM split/leaf indexes to the native converter node ordering."""
 
     if _is_split_node(node):
         return int(node["split_index"])
-    return int(n_internal) + int(node["leaf_index"])
+    if not _is_leaf_node(node):
+        raise ValueError("Cannot assign a node id to an invalid LightGBM dump node.")
+    return int(n_internal) + int(leaf_indexes[id(node)])
 
 
 def _sample_count(node: Mapping[str, Any], *, leaf: bool) -> float:
@@ -88,7 +133,7 @@ def tree_model_from_lightgbm_dump(tree_structure: Mapping[str, Any]) -> TreeMode
         leaf_nodes=leaf_nodes,
     )
     _validate_contiguous_indexes(split_nodes, key="split_index")
-    _validate_contiguous_indexes(leaf_nodes, key="leaf_index")
+    leaf_indexes = _resolve_leaf_indexes(leaf_nodes)
 
     n_internal = len(split_nodes)
     n_nodes = n_internal + len(leaf_nodes)
@@ -108,8 +153,16 @@ def tree_model_from_lightgbm_dump(tree_structure: Mapping[str, Any]) -> TreeMode
                 "ProxySPEX LightGBM conversion supports numerical '<=' splits only; "
                 f"received decision_type={decision_type!r}."
             )
-        left_id = _dump_node_id(node["left_child"], n_internal=n_internal)
-        right_id = _dump_node_id(node["right_child"], n_internal=n_internal)
+        left_id = _dump_node_id(
+            node["left_child"],
+            n_internal=n_internal,
+            leaf_indexes=leaf_indexes,
+        )
+        right_id = _dump_node_id(
+            node["right_child"],
+            n_internal=n_internal,
+            leaf_indexes=leaf_indexes,
+        )
         children_left[node_id] = left_id
         children_right[node_id] = right_id
         children_missing[node_id] = left_id if bool(node.get("default_left", True)) else right_id
@@ -118,7 +171,7 @@ def tree_model_from_lightgbm_dump(tree_structure: Mapping[str, Any]) -> TreeMode
         node_sample_weight[node_id] = _sample_count(node, leaf=False)
 
     for node in leaf_nodes:
-        node_id = n_internal + int(node["leaf_index"])
+        node_id = n_internal + int(leaf_indexes[id(node)])
         values[node_id] = float(node["leaf_value"])
         node_sample_weight[node_id] = _sample_count(node, leaf=True)
 
