@@ -90,7 +90,7 @@ done
 
 ```bash
 python scripts/derive_projection_run.py \
-  --input-run <C-run-dir> \
+  --input-run results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
   --projector singleton_only \
   --output-root results/mobius-mechanisms \
   --run-suffix e2-b-fit-only
@@ -100,7 +100,7 @@ python scripts/derive_projection_run.py \
 
 ```bash
 python -m mobius.cli.evaluate \
-  --run-dir <B-run-dir> \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --target predicted \
   --device cuda:0
 ```
@@ -111,14 +111,14 @@ python -m mobius.cli.evaluate \
 
 ```bash
 python scripts/build_surrogate_holdout.py \
-  --run-dir <A-run-dir> \
-  --run-dir <B-run-dir> \
-  --run-dir <C-run-dir> \
-  --run-dir <strict-run-dir> \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
   --output-dir results/audits/surrogate-heldout/s42 \
   --count-per-distribution 64 \
   --min-count 16 \
-  --seed 260726 \
+  --seed 42 \
   --device cuda:0
 
 python scripts/evaluate_surrogates.py \
@@ -144,12 +144,10 @@ python scripts/build_surrogate_holdout.py \
 
 ```bash
 python scripts/verify_interactions.py \
-  --run-dir <C-seed42-run> \
-  --run-dir <C-seed43-run> \
-  --run-dir <C-seed44-run> \
+  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
   --top-k 5 \
   --top-k-per-parent-group 3 \
-  --seed 260726 \
+  --seed 42 \
   --device cuda:0
 ```
 
@@ -207,7 +205,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --seed 42 \
   --device cuda:0 \
   --base-save-dir results \
-  --save-dir baselines/proxyspex-copy
+  --save-dir baselines/proxyspex
 ```
 
 ProxySPEX 也保存原生 training coalitions、全部 label scores、unrefined/refined Fourier support 和最终 interactions。shared held-out 的 surrogate 预测固定使用 `refined_fourier`。
