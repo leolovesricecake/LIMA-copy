@@ -1,0 +1,140 @@
+{
+  "accuracy": 0.8727064220183486,
+  "attribution_cost": {
+    "attribution_budget_used": 412000.0,
+    "batch_calls": 0.0,
+    "batch_rows": 0.0,
+    "elapsed_seconds": 6152.84909724677,
+    "interaction_verification_queries": 0.0,
+    "logical_unique_queries": 412000.0,
+    "model_forward_calls": 0.0,
+    "physical_values_scored": 0.0
+  },
+  "curve_artifact": "curves-predicted.jsonl",
+  "evaluated_count": 872,
+  "evaluation_cost": {
+    "elapsed_seconds": 172.43471539160237,
+    "model_counter_delta": {
+      "batch_calls": 1709,
+      "batch_rows": 20818,
+      "model_forward_calls": 3418,
+      "oom_shrink_events": 0,
+      "scoring_seconds": 164.59197360789403
+    }
+  },
+  "failed_count": 0,
+  "failures": [],
+  "faithfulness": {
+    "aopc": {
+      "count": 872,
+      "mean": 0.3253402539816284,
+      "std": 0.16884094882463122
+    },
+    "aopc_comprehensiveness": {
+      "count": 872,
+      "mean": 0.17743099167555873,
+      "std": 0.10349451928835185
+    },
+    "aopc_sufficiency": {
+      "count": 872,
+      "mean": 0.09820851602695435,
+      "std": 0.1088707876722803
+    },
+    "aupc": {
+      "count": 872,
+      "mean": 0.4813893700445289,
+      "std": 0.1430467678510534
+    },
+    "comprehensiveness": {
+      "count": 872,
+      "mean": 0.35654004169845027,
+      "std": 0.21189463434717026
+    },
+    "sufficiency": {
+      "count": 872,
+      "mean": 0.1868923630312601,
+      "std": 0.22776393198629322
+    }
+  },
+  "per_q": {
+    "1": {
+      "comprehensiveness": {
+        "count": 872,
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "sufficiency": {
+        "count": 872,
+        "mean": 0.0,
+        "std": 0.0
+      }
+    },
+    "10": {
+      "comprehensiveness": {
+        "count": 872,
+        "mean": 0.24055850084040628,
+        "std": 0.2141865399535043
+      },
+      "sufficiency": {
+        "count": 872,
+        "mean": 0.22308750554740678,
+        "std": 0.24981256050799153
+      }
+    },
+    "20": {
+      "comprehensiveness": {
+        "count": 872,
+        "mean": 0.35654004169845027,
+        "std": 0.21189463434717026
+      },
+      "sufficiency": {
+        "count": 872,
+        "mean": 0.1868923630312601,
+        "std": 0.22776393198629322
+      }
+    },
+    "5": {
+      "comprehensiveness": {
+        "count": 872,
+        "mean": 0.09504840176151022,
+        "std": 0.16323366134850611
+      },
+      "sufficiency": {
+        "count": 872,
+        "mean": 0.14121377484518954,
+        "std": 0.2315178412905208
+      }
+    },
+    "50": {
+      "comprehensiveness": {
+        "count": 872,
+        "mean": 0.3724390057529856,
+        "std": 0.21026389720970926
+      },
+      "sufficiency": {
+        "count": 872,
+        "mean": 0.03805745273786972,
+        "std": 0.15387178439572638
+      }
+    }
+  },
+  "protocol": {
+    "aopc_grid_denominator": "len(q_values)+1",
+    "aupc_definition": "normalized trapezoidal area under the complete deletion target-probability curve",
+    "aupc_direction": "lower_is_better",
+    "aupc_extra_model_calls": 0,
+    "eval_granularity": "word",
+    "percentage_rounding": "floor",
+    "primary_q": 20,
+    "q_values": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ]
+  },
+  "sample_count": 872,
+  "schema_version": "2.0",
+  "target": "predicted"
+}
