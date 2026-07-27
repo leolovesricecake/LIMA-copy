@@ -24,18 +24,18 @@
     }
   },
   "attribution_cost_includes_audit": false,
-  "audit_id": "a1ca805bd2ff",
+  "audit_id": "ef32e2201397",
   "audit_query_cost": {
     "attribution_budget_used": 0,
     "category_unique_queries": {
       "surrogate_audit_bernoulli": 47936
     },
     "duplicate_logical_requests": 0,
-    "global_cache_hits": 5,
-    "global_cache_misses": 47931,
+    "global_cache_hits": 47936,
+    "global_cache_misses": 0,
     "logical_unique_queries": 47936,
-    "name": "surrogate-heldout/a1ca805bd2ff",
-    "physical_values_scored": 47931,
+    "name": "surrogate-heldout/ef32e2201397",
+    "physical_values_scored": 0,
     "requested_queries": 47936
   },
   "evaluated_count": 749,

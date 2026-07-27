@@ -66,7 +66,7 @@ python -m mobius.cli.run \
 ### 1. 运行 A 和 strict
 
 A 是 degree-1 additive；
-C 是主方法（degree-2 signed interaction）；B 不重新训练，而是从 C 离线派生。
+C 是主方法（degree-2 signed interaction），不必重新训练；B 也不重新训练，而是从 C 离线派生。
 
 ```bash
 for seed in 42 43 44; do
@@ -82,7 +82,7 @@ for seed in 42 43 44; do
 done
 ```
 
-### 2. 从 C 派生 B
+### 2. 从 C 派生 B 并评估
 
 ```bash
 python scripts/derive_projection_run.py \
@@ -146,7 +146,7 @@ python scripts/verify_interactions.py \
 python scripts/analyze_hierarchy.py \
   --none-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --strict-run results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --verification-dir results/audits/interactions/0dc2c2addb67 \
+  --verification-dir results/audits/interactions/af59f32b4ef3 \
   --heldout-audit results/audits/surrogate-heldout/s42 \
   --seed 42 \
   --device cuda:0
@@ -206,7 +206,7 @@ ProxySPEX 也保存原生 training coalitions、全部 label scores、unrefined/
 
 ```bash
 python scripts/collect_results.py \
-  --input_dir results/mobius \
+  --i results/mobius \
   --o results_summary.csv
 ```
 
