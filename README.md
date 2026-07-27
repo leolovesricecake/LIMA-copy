@@ -63,19 +63,15 @@ python -m mobius.cli.run \
 
 ## P1 运行顺序
 
-### 1. 运行 A、C 和 strict
+### 1. 运行 A 和 strict
 
-A 是 degree-1 additive；C 是 degree-2 signed interaction。B 不重新训练，而是从 C 离线派生。
+A 是 degree-1 additive；
+C 是主方法（degree-2 signed interaction）；B 不重新训练，而是从 C 离线派生。
 
 ```bash
 for seed in 42 43 44; do
   python -m mobius.cli.run \
     --config configs/qwen3-8b/mechanisms-sst2/e2_a_additive.yaml \
-    --seed "$seed" \
-    --device cuda:0
-
-  python -m mobius.cli.run \
-    --config configs/qwen3-8b/mechanisms-sst2/e2_c_interaction.yaml \
     --seed "$seed" \
     --device cuda:0
 
@@ -90,7 +86,7 @@ done
 
 ```bash
 python scripts/derive_projection_run.py \
-  --input-run results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
+  --input-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --projector singleton_only \
   --output-root results/mobius-mechanisms \
   --run-suffix e2-b-fit-only
@@ -113,7 +109,7 @@ python -m mobius.cli.evaluate \
 python scripts/build_surrogate_holdout.py \
   --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
   --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
   --output-dir results/audits/surrogate-heldout/s42 \
   --count-per-distribution 64 \
@@ -127,31 +123,20 @@ python scripts/evaluate_surrogates.py \
 
 held-out masks 会排除所有输入 run 的 attribution training masks。默认 `bernoulli` 对每个词独立执行 0.5 概率的保留采样，因此对全部 coalition 等概率；它不同于训练配置中的 `uniform_size`。若共同未见空间不足，则使用全部可用 masks；少于 16 个时样本标记为 `insufficient`。
 
-需要额外检查完整输入附近的删除行为时，可同时启用 `near_full`；它先从删除数 `{1,2,3,5}` 中均匀选一层，再在该层均匀选被删除词：
-
-```bash
-python scripts/build_surrogate_holdout.py \
-  --run-dir <run-1> \
-  --run-dir <run-2> \
-  --distributions bernoulli,near_full \
-  --near-full-deletions 1,2,3,5 \
-  --device cuda:0
-```
-
 `manifest.json` 的 `metadata` 会记录全部输入 run 目录、run ID、method、dataset、model、chunker 和 value semantics；`settings` 记录 held-out 分布、数量与 seed。
 
 ### 4. E3 精确验证
 
 ```bash
 python scripts/verify_interactions.py \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-c-interaction \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --top-k 5 \
   --top-k-per-parent-group 3 \
   --seed 42 \
   --device cuda:0
 ```
 
-该 audit 对 selected pair 和距离匹配的 random pair 查询四个完整输入附近的删除组合，精确计算 deletion-Möbius 二阶系数。查询不计入 attribution cost。
+该 audit 对主方法 selected pair 和距离匹配的 random pair 查询四个完整输入附近的删除组合，精确计算 deletion-Möbius 二阶系数。查询不计入 attribution cost。
 
 ### 5. E4 hierarchy 分析
 
@@ -159,12 +144,17 @@ python scripts/verify_interactions.py \
 
 ```bash
 python scripts/analyze_hierarchy.py \
-  --none-run <C-run-dir> \
-  --strict-run <strict-run-dir> \
-  --verification-dir <interaction-audit-dir> \
-  --heldout-audit <heldout-audit-dir> \
-  --seed 260726 \
+  --none-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
+  --strict-run results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
+  --verification-dir results/audits/interactions/0dc2c2addb67 \
+  --heldout-audit results/audits/surrogate-heldout/s42 \
+  --seed 42 \
   --device cuda:0
+
+# --none-run：主方法，也就是 hierarchy=none 的完整 run。
+# --strict-run：仅 hierarchy 改为 strict 的完整 run。
+# --verification-dir：E3 audit 根目录，脚本实际需要其中的 rows.jsonl。
+# --heldout-audit：shared held-out 根目录，需要 evaluation-index.json 和其引用的 metrics reports。
 ```
 
 脚本比较 none/strict support、held-out 和原始 faithfulness，并将 none 的 pair 按 0/1/2 个 singleton parent 分组。离线删边后的 ranking evaluation 会产生独立 analysis query cost。

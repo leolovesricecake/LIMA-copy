@@ -4,8 +4,7 @@ datasets
 !baselines/shapiq-copy/src/shapiq/datasets/*.py
 baselines/shapiq-copy/src/shapiq/datasets/data/
 _arch
-results/*
-!results/**/metrics**
+results/
 **/OUT/
 *samples*
 **/OUT**
