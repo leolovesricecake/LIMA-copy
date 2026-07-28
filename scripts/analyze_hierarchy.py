@@ -23,7 +23,7 @@ from mobius.core.artifacts import (
     load_observation_artifact,
     load_surrogate_artifact,
 )
-from mobius.core.results import canonical_digest
+from mobius.core.results import canonical_digest, default_audit_dir
 from mobius.core.runtime import atomic_write_json, ensure_dir
 from mobius.core.schema import TextChunk
 from mobius.evaluation.evaluator import _sample_perturbations
@@ -352,7 +352,11 @@ def analyze_hierarchy(
     destination = (
         Path(output_dir)
         if output_dir is not None
-        else Path("results/audits/hierarchy") / audit_id
+        else default_audit_dir(
+            dict(none_config["dataset"]),
+            "hierarchy",
+            audit_id,
+        )
     )
     ensure_dir(destination)
     model_config = dict(none_config["model"])

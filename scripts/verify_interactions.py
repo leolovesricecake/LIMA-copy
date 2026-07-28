@@ -22,7 +22,7 @@ from mobius.analysis.statistics import (
     paired_cluster_summary,
 )
 from mobius.core.artifacts import load_surrogate_artifact
-from mobius.core.results import canonical_digest
+from mobius.core.results import canonical_digest, default_audit_dir
 from mobius.core.runtime import atomic_write_json, ensure_dir
 from mobius.core.schema import TextChunk
 from mobius.models.hf import build_scorer
@@ -309,7 +309,7 @@ def verify_runs(
     destination = (
         Path(output_dir)
         if output_dir is not None
-        else Path("results/audits/interactions") / audit_id
+        else default_audit_dir(first_dataset, "interactions", audit_id)
     )
     ensure_dir(destination)
     if device is not None:

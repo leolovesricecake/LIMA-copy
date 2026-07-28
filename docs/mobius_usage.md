@@ -155,14 +155,14 @@ python -m mobius.cli.evaluate \
 python scripts/build_surrogate_holdout.py \
   --run-dir <run-1> \
   --run-dir <run-2> \
-  --output-dir results/audits/surrogate-heldout/<audit-name> \
+  --output-dir results/audits/<dataset>/surrogate-heldout/<audit-name> \
   --count-per-distribution 64 \
   --min-count 16 \
   --seed 260726 \
   --device cuda:0
 
 python scripts/evaluate_surrogates.py \
-  --audit-dir results/audits/surrogate-heldout/<audit-name>
+  --audit-dir results/audits/<dataset>/surrogate-heldout/<audit-name>
 ```
 
 脚本严格校验 dataset、model、value semantics、text、chunks 和 active-player 映射。它合并所有 training masks 后抽取共同未见 masks，不做跨 run target-label 检查。
@@ -170,6 +170,8 @@ python scripts/evaluate_surrogates.py \
 默认 `--distributions bernoulli`：每个 player 独立以 0.5 概率保留，所以每个 coalition 等概率。它是 held-out 采样策略，不是训练侧的 `uniform_size` sampler。可用 `--distributions bernoulli,near_full` 加入局部敏感性分布；`near_full` 按 `--near-full-deletions` 指定的删除数靠近完整输入采样。
 
 审计目录的 `manifest.json` 在 `metadata` 中记录全部输入 run 目录、run ID、method、dataset、model、chunker 和 value semantics，在 `settings` 中记录分布、样本数、seed 与 mask 语义。
+省略 `--output-dir` 时，默认目录为
+`results/audits/<dataset>/surrogate-heldout/<audit-id>`。
 
 每个分布输出每样本：
 
@@ -211,6 +213,8 @@ python scripts/verify_interactions.py \
 ```
 
 默认验证最终 refit 绝对系数最大的 5 条 pair，并为 0/1/2-parent 组各验证 top-3。随机对照在非 selected pairs 中精确匹配 player-index 距离；无精确候选时使用最近距离并记录 fallback。
+省略 `--output-dir` 时，默认目录为
+`results/audits/<dataset>/interactions/<audit-id>`。
 
 ## 9. E4 分析
 
@@ -225,6 +229,8 @@ python scripts/analyze_hierarchy.py \
 ```
 
 脚本要求两者除 hierarchy 外所有科学配置一致，并硬校验每个样本的 observation digest。输出 support、held-out、原始 faithfulness、0/1/2-parent edge 组，以及移除每组边后的 faithfulness。新增模型调用仅写入 analysis query ledger。
+省略 `--output-dir` 时，默认目录为
+`results/audits/<dataset>/hierarchy/<audit-id>`。
 
 ## 10. 指标方向
 

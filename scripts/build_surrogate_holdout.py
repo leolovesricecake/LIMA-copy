@@ -22,7 +22,7 @@ from mobius.core.artifacts import (
     load_observation_artifact,
     masks_to_bool_matrix,
 )
-from mobius.core.results import canonical_digest
+from mobius.core.results import canonical_digest, default_audit_dir
 from mobius.core.runtime import atomic_write_json, ensure_dir
 from mobius.evaluation.surrogate import (
     HELDOUT_DISTRIBUTIONS,
@@ -242,7 +242,11 @@ def build_shared_holdout(
     destination = (
         Path(output_dir)
         if output_dir is not None
-        else Path("results/audits/surrogate-heldout") / audit_id
+        else default_audit_dir(
+            dict(configs[0]["dataset"]),
+            "surrogate-heldout",
+            audit_id,
+        )
     )
     samples_dir = ensure_dir(destination / "samples")
     model_config = dict(configs[0]["model"])

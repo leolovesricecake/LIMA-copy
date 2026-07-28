@@ -103,7 +103,10 @@ python -m mobius.cli.evaluate \
 
 ### 3. 构建 shared held-out
 
-建议每个 attribution seed 分别将 A/B/C/strict 放入同一 audit：
+建议每个 attribution seed 将 A/B/C/strict 与 ProxySPEX 放入同一 audit。A/B/C/strict
+使用相同的训练 masks，因此相对只输入 C 与 ProxySPEX，这不会进一步缩小 held-out
+空间或增加真实模型查询；把所有 runs 都登记进 manifest，可以一次生成全部 surrogate
+报告。
 
 ```bash
 python scripts/build_surrogate_holdout.py \
@@ -111,19 +114,22 @@ python scripts/build_surrogate_holdout.py \
   --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --output-dir results/audits/surrogate-heldout/sst2-s42 \
+  --run-dir results/baselines/proxyspex/sst2/Qwen3-8B/proxyspex/b512-o2-s42-5d19d686 \
+  --output-dir results/audits/sst2/surrogate-heldout/s42 \
   --count-per-distribution 64 \
   --min-count 16 \
   --seed 42 \
   --device cuda:0
 
 python scripts/evaluate_surrogates.py \
-  --audit-dir results/audits/surrogate-heldout/sst2-s42
+  --audit-dir results/audits/sst2/surrogate-heldout/s42
 ```
 
 held-out masks 会排除所有输入 run 的 attribution training masks。默认 `bernoulli` 对每个词独立执行 0.5 概率的保留采样，因此对全部 coalition 等概率；它不同于训练配置中的 `uniform_size`。若共同未见空间不足，则使用全部可用 masks；少于 16 个时样本标记为 `insufficient`。
 
 `manifest.json` 的 `metadata` 会记录全部输入 run 目录、run ID、method、dataset、model、chunker 和 value semantics；`settings` 记录 held-out 分布、数量与 seed。
+如果只需要比较主方法与 ProxySPEX，也可以仅传这两个 run；此时
+`evaluate_surrogates.py` 只会输出这两个 manifest runs 的报告。
 
 ### 4. E3 精确验证
 
@@ -137,6 +143,8 @@ python scripts/verify_interactions.py \
 ```
 
 该 audit 对主方法 selected pair 和距离匹配的 random pair 查询四个完整输入附近的删除组合，精确计算 deletion-Möbius 二阶系数。查询不计入 attribution cost。
+省略 `--output-dir` 时默认写入
+`results/audits/<dataset>/interactions/<audit-id>`。
 
 ### 5. E4 hierarchy 分析
 
@@ -146,8 +154,8 @@ python scripts/verify_interactions.py \
 python scripts/analyze_hierarchy.py \
   --none-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --strict-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --verification-dir results/audits/interactions/sst2-af59f32b4ef3 \
-  --heldout-audit results/audits/surrogate-heldout/sst2-s42 \
+  --verification-dir results/audits/sst2/interactions/af59f32b4ef3 \
+  --heldout-audit results/audits/sst2/surrogate-heldout/s42 \
   --seed 42 \
   --device cuda:0
 
@@ -158,6 +166,8 @@ python scripts/analyze_hierarchy.py \
 ```
 
 脚本比较 none/strict support、held-out 和原始 faithfulness，并将 none 的 pair 按 0/1/2 个 singleton parent 分组。离线删边后的 ranking evaluation 会产生独立 analysis query cost。
+省略 `--output-dir` 时默认写入
+`results/audits/<dataset>/hierarchy/<audit-id>`。
 
 ### 6. 生成论文长表
 
@@ -193,9 +203,9 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --budget 512 \
   --max-order 2 \
   --seed 42 \
-  --device cuda:0 \
   --base-save-dir results \
-  --save-dir baselines/proxyspex
+  --save-dir baselines/proxyspex \
+  --device cuda:0
 ```
 
 ProxySPEX 也保存原生 training coalitions、全部 label scores、unrefined/refined Fourier support 和最终 interactions。shared held-out 的 surrogate 预测固定使用 `refined_fourier`。

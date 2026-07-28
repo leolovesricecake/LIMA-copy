@@ -7,7 +7,12 @@ import inspect
 from pathlib import Path
 
 from mobius.core.config import resolve_config
-from mobius.core.results import ResultStore, build_run_id
+from mobius.core.results import (
+    ResultStore,
+    build_run_id,
+    dataset_slug,
+    default_audit_dir,
+)
 from mobius.core.schema import AttributionResult, DatasetBundle, TextChunk, TextSample
 from mobius.evaluation.evaluator import evaluate_run
 from mobius.methods.sparse.explainer import run_sparse_mobius
@@ -76,6 +81,16 @@ def test_run_id_ignores_runtime_device_but_changes_scientific_axis() -> None:
     assert build_run_id(left) == build_run_id(right)
     right["basis"] = "fourier"
     assert build_run_id(left) != build_run_id(right)
+
+
+def test_default_audit_dir_groups_results_by_dataset() -> None:
+    """Keep every audit kind below one filesystem-safe dataset directory."""
+
+    dataset = {"name": "cornell/rotten tomatoes"}
+    assert dataset_slug(dataset) == "cornell_rotten_tomatoes"
+    assert default_audit_dir(dataset, "interactions", "abc123") == Path(
+        "results/audits/cornell_rotten_tomatoes/interactions/abc123"
+    )
 
 
 def test_run_id_uses_configured_suffix_before_hash_fallback() -> None:

@@ -56,10 +56,37 @@ def model_slug(model_config: Mapping[str, Any]) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "_" for char in name)
 
 
+def dataset_slug(dataset_config: Mapping[str, Any]) -> str:
+    """Create a filesystem-safe dataset identifier."""
+
+    raw = str(dataset_config.get("name", "dataset")).strip() or "dataset"
+    slug = "".join(
+        char if char.isalnum() or char in "-_" else "_" for char in raw
+    )
+    return slug or "dataset"
+
+
+def default_audit_dir(
+    dataset_config: Mapping[str, Any],
+    audit_kind: str,
+    audit_id: str,
+) -> Path:
+    """Resolve ``results/audits/<dataset>/<kind>/<audit-id>`` safely."""
+
+    kind = str(audit_kind).strip()
+    identifier = str(audit_id).strip()
+    safe_pattern = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+    if not re.fullmatch(safe_pattern, kind):
+        raise ValueError(f"Invalid audit kind path component: {audit_kind!r}.")
+    if not re.fullmatch(safe_pattern, identifier):
+        raise ValueError(f"Invalid audit ID path component: {audit_id!r}.")
+    return Path("results/audits") / dataset_slug(dataset_config) / kind / identifier
+
+
 def default_run_dir(results_dir: str | Path, config: Mapping[str, Any]) -> Path:
     """Resolve the canonical v2 directory for a run."""
 
-    dataset = str(dict(config.get("dataset", {})).get("name", "dataset"))
+    dataset = dataset_slug(dict(config.get("dataset", {})))
     method = str(config.get("method", "method"))
     model = model_slug(dict(config.get("model", {})))
     return Path(results_dir) / dataset / model / method / build_run_id(config)
