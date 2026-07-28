@@ -1,5 +1,5 @@
 # E2-A: an additive degree-1 surrogate with singleton projection.
-results_dir: results/mobius-mechanisms
+results_dir: results/mobius
 run_suffix: e2-a-additive
 output_level: standard
 method: sparse_mobius

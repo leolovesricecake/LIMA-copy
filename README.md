@@ -88,7 +88,7 @@ done
 python scripts/derive_projection_run.py \
   --input-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --projector singleton_only \
-  --output-root results/mobius-mechanisms \
+  --output-root results/mobius \
   --run-suffix e2-b-fit-only
 ```
 
@@ -96,7 +96,7 @@ python scripts/derive_projection_run.py \
 
 ```bash
 python -m mobius.cli.evaluate \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --target predicted \
   --device cuda:0
 ```
@@ -107,18 +107,18 @@ python -m mobius.cli.evaluate \
 
 ```bash
 python scripts/build_surrogate_holdout.py \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --run-dir results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --output-dir results/audits/surrogate-heldout/s42 \
+  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
+  --output-dir results/audits/surrogate-heldout/sst2-s42 \
   --count-per-distribution 64 \
   --min-count 16 \
   --seed 42 \
   --device cuda:0
 
 python scripts/evaluate_surrogates.py \
-  --audit-dir results/audits/surrogate-heldout/s42
+  --audit-dir results/audits/surrogate-heldout/sst2-s42
 ```
 
 held-out masks 会排除所有输入 run 的 attribution training masks。默认 `bernoulli` 对每个词独立执行 0.5 概率的保留采样，因此对全部 coalition 等概率；它不同于训练配置中的 `uniform_size`。若共同未见空间不足，则使用全部可用 masks；少于 16 个时样本标记为 `insufficient`。
@@ -145,9 +145,9 @@ python scripts/verify_interactions.py \
 ```bash
 python scripts/analyze_hierarchy.py \
   --none-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --strict-run results/mobius-mechanisms/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --verification-dir results/audits/interactions/af59f32b4ef3 \
-  --heldout-audit results/audits/surrogate-heldout/s42 \
+  --strict-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
+  --verification-dir results/audits/interactions/sst2-af59f32b4ef3 \
+  --heldout-audit results/audits/surrogate-heldout/sst2-s42 \
   --seed 42 \
   --device cuda:0
 

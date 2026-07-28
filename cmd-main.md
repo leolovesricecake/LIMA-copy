@@ -37,7 +37,7 @@ done
 python scripts/derive_projection_run.py \
   --input-run results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
   --projector singleton_only \
-  --output-root results/mobius-mechanisms \
+  --output-root results/mobius \
   --run-suffix e2-b-fit-only
 ```
 
@@ -45,7 +45,7 @@ python scripts/derive_projection_run.py \
 
 ```bash
 python -m mobius.cli.evaluate \
-  --run-dir results/mobius-mechanisms/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
+  --run-dir results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --target predicted \
   --device cuda:0
 ```
@@ -56,18 +56,18 @@ python -m mobius.cli.evaluate \
 
 ```bash
 python scripts/build_surrogate_holdout.py \
-  --run-dir results/mobius-mechanisms/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
-  --run-dir results/mobius-mechanisms/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
+  --run-dir results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
+  --run-dir results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
   --run-dir results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --run-dir results/mobius-mechanisms/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --output-dir results/audits/rotten_tomatoes/surrogate-heldout/s42 \
+  --run-dir results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
+  --output-dir results/audits/surrogate-heldout/rtn-s42 \
   --count-per-distribution 64 \
   --min-count 16 \
   --seed 42 \
   --device cuda:0
 
 python scripts/evaluate_surrogates.py \
-  --audit-dir results/audits/rotten_tomatoes/surrogate-heldout/s42
+  --audit-dir results/audits/surrogate-heldout/rtn-s42
 ```
 
 ### 4. E3 精确验证
@@ -90,9 +90,9 @@ python scripts/verify_interactions.py \
 ```bash
 python scripts/analyze_hierarchy.py \
   --none-run results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --strict-run results/mobius-mechanisms/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --verification-dir results/audits/rotten_tomatoes/interactions/0dc2c2addb67 \
-  --heldout-audit results/audits/rotten_tomatoes/surrogate-heldout/s42 \
+  --strict-run results/mobius/rotten_tomatoes/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
+  --verification-dir results/audits/interactions/rtn-3c63dad0d84c \
+  --heldout-audit results/audits/surrogate-heldout/rtn-s42 \
   --seed 42 \
   --device cuda:0
 

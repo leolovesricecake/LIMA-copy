@@ -1,5 +1,5 @@
 # E4-strict: same degree-2 selector as E2-C, followed by orphan-pair pruning.
-results_dir: results/mobius-mechanisms
+results_dir: results/mobius
 run_suffix: e4-strict
 output_level: standard
 method: sparse_mobius
