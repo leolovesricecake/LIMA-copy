@@ -56,7 +56,7 @@ class HFVerbalizerScorer(RawTextScorer):
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            dtype=resolved_dtype,
+            torch_dtype=resolved_dtype,
             low_cpu_mem_usage=True,
             trust_remote_code=bool(trust_remote_code),
         )

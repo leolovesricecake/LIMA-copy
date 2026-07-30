@@ -16,35 +16,44 @@ Runner `run_inseq_llm_baselines.py` 保留 Inseq 原生 attribution 调用，并
 pip install inseq transformers captum
 ```
 
-## 运行
+## sst2
 
 ```bash
-python baselines/inseq/run_inseq_llm_baselines.py \
+CUDA_VISIBLE_DEVICES=0 python baselines/inseq/run_inseq_llm_baselines.py \
   --dataset sst2 \
   --split validation \
   --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-  --methods integrated_gradients,lime \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --methods saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime \
   --dtype bfloat16 \
   --max-length 2048 \
   --target-mode predicted \
-  --eval-granularity token \
+  --eval-granularity word \
   --eval-q-values 1,5,10,20,50 \
   --base-save-dir results \
   --save-dir baselines/inseq \
-  --device cuda:0
+  --device cuda
 ```
 
-只运行 LIME：
+## rtn
 
 ```bash
-python baselines/inseq/run_inseq_llm_baselines.py \
-  --dataset sst2 \
-  --methods lime \
-  --n-samples 32 \
-  --model-path <model-path> \
-  --device cuda:0
+CUDA_VISIBLE_DEVICES=3 python baselines/inseq/run_inseq_llm_baselines.py \
+  --dataset rotten_tomatoes \
+  --split validation \
+  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
+  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --methods saliency,input_x_gradient,integrated_gradients,sequential_integrated_gradients,occlusion,lime \
+  --dtype bfloat16 \
+  --max-length 2048 \
+  --target-mode predicted \
+  --eval-granularity word \
+  --eval-q-values 1,5,10,20,50 \
+  --base-save-dir results \
+  --save-dir baselines/inseq \
+  --device cuda
 ```
+
 
 ## 结果与成本
 

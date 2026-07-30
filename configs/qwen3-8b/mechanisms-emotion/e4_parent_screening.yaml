@@ -1,0 +1,41 @@
+# Legacy contrast: singleton-selected parents screen degree-2 candidates.
+results_dir: results/mobius
+run_suffix: e4-parent-screening
+output_level: standard
+method: sparse_mobius
+budget: 512
+seed: 42
+max_degree: 2
+k: 8
+value_function: target_probability
+target_mode: predicted
+chunker: word
+eval_granularity: word
+eval_q_values: [1, 5, 10, 20, 50]
+min_features: 1
+max_features: null
+batch_size: 16
+basis: deletion_mobius
+hierarchy: parent_screening
+projector: signed_equal_share
+sampler:
+  name: uniform_size
+  include_empty_full: true
+estimator:
+  name: lasso_support
+  refit: ridge_cv
+  selection_alpha_scale: 1.0
+  alphas: [0.0001, 0.001, 0.01, 0.1]
+  l1_ratios: [1.0]
+  cv_folds: 3
+  max_design_mb: 2048
+dataset:
+  name: emotion
+  split: validation
+  dataset_cache_dir: /mnt/huawei/nsq/temp/hf
+model:
+  type: hf_causal_lm
+  model_path: /mnt/huawei/nsq/models/Qwen/Qwen3-8B
+  device: cuda:0
+  dtype: bfloat16
+  max_length: 2048
