@@ -49,7 +49,7 @@ def strong_heredity_terms(
     players = sorted(
         term_players(term)[0]
         for term in selected_singletons
-        if int(term).bit_count() == 1
+        if bin(int(term)).count("1") == 1
     )
     terms: List[int] = []
     for degree in range(1, min(len(players), int(max_degree)) + 1):
@@ -70,7 +70,9 @@ def strict_support_terms(
     if int(max_degree) > 2:
         raise ValueError("hierarchy='strict' currently supports max_degree <= 2.")
     selected = sorted({int(term) for term in selected_terms})
-    singletons = {term for term in selected if term.bit_count() == 1}
+    singletons = {
+        term for term in selected if bin(int(term)).count("1") == 1
+    }
     retained: List[int] = []
     removed: List[Dict[str, Any]] = []
     for term in selected:

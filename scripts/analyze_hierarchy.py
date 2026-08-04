@@ -129,8 +129,12 @@ def _support_counts(terms: set[int]) -> Dict[str, int]:
 
     return {
         "total_support_size": len(terms),
-        "singleton_support_size": sum(term.bit_count() == 1 for term in terms),
-        "pair_support_size": sum(term.bit_count() == 2 for term in terms),
+        "singleton_support_size": sum(
+            bin(int(term)).count("1") == 1 for term in terms
+        ),
+        "pair_support_size": sum(
+            bin(int(term)).count("1") == 2 for term in terms
+        ),
     }
 
 
@@ -169,7 +173,7 @@ def _without_parent_group(
     singleton_support = {
         term
         for term in _support_terms(surrogate, "selection")
-        if term.bit_count() == 1
+        if bin(int(term)).count("1") == 1
     }
     terms = []
     for row in dict(output["predictor"]).get("terms", []):
@@ -202,7 +206,7 @@ def _evaluate_ranking(
     )
     unit_ranking = project_ranking(eval_result.chunks, chunks, ranking)
     q_values = [
-        int(value) for value in config.get("eval_q_values", [1, 5, 10, 20, 50])
+        int(value) for value in config.get("eval_q_values", [5, 10, 20, 50])
     ]
     texts, plan = _sample_perturbations(
         str(sample["text"]),
@@ -370,6 +374,8 @@ def analyze_hierarchy(
         model_config,
         verbalizers,
         batch_size=int(none_config.get("batch_size", 16)),
+        dataset_name=str(dict(none_config["dataset"]).get("name", "dataset")),
+        prompt_config=dict(none_config.get("prompt", {})),
     )
     oracle = ValueOracle(
         scorer,
@@ -425,7 +431,9 @@ def analyze_hierarchy(
                     )
                 selection = _support_terms(none_surrogate, "selection")
                 singletons = {
-                    term for term in selection if term.bit_count() == 1
+                    term
+                    for term in selection
+                    if bin(int(term)).count("1") == 1
                 }
                 group_terms: Dict[int, list[Dict[str, Any]]] = {
                     0: [],

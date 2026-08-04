@@ -125,7 +125,7 @@ class SparseModel:
                 {
                     "term": int(term),
                     "players": list(term_players(term)),
-                    "degree": int(term.bit_count()),
+                    "degree": bin(int(term)).count("1"),
                     "coefficient": float(coefficient),
                     "selection_coefficient": float(selection),
                     "selected": int(term) in selected,
@@ -166,7 +166,7 @@ def _support_payload(terms: Sequence[int]) -> List[Dict[str, Any]]:
         {
             "term": int(term),
             "players": list(term_players(int(term))),
-            "degree": int(term).bit_count(),
+            "degree": bin(int(term)).count("1"),
         }
         for term in sorted({int(value) for value in terms})
     ]
@@ -178,7 +178,7 @@ def _support_counts(terms: Sequence[int]) -> Dict[str, int]:
     values = [int(term) for term in terms]
     counts: Dict[str, int] = {"total": len(values)}
     for term in values:
-        key = f"order_{term.bit_count()}"
+        key = f"order_{bin(int(term)).count('1')}"
         counts[key] = counts.get(key, 0) + 1
     return counts
 

@@ -15,6 +15,7 @@ from mobius.core.schema import DatasetBundle, TextSample
 from mobius.data.loader import load_dataset_bundle
 from mobius.methods.sparse.explainer import run_sparse_mobius
 from mobius.models.hf import build_scorer
+from mobius.models.prompting import build_classification_prompt
 from mobius.values.classification import effective_target_mode
 
 
@@ -31,6 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--budget", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--max-degree", type=int)
+    parser.add_argument(
+        "--hierarchy",
+        choices=("none", "parent_screening", "strict"),
+    )
+    parser.add_argument(
+        "--projector",
+        choices=("singleton_only", "signed_equal_share", "absolute_equal_share"),
+    )
+    parser.add_argument("--run-suffix")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-eval", action="store_true")
     return parser
@@ -52,6 +63,14 @@ def _apply_overrides(config: Mapping[str, Any], args) -> Dict[str, Any]:
         output["budget"] = args.budget
     if args.seed is not None:
         output["seed"] = args.seed
+    if args.max_degree is not None:
+        output["max_degree"] = args.max_degree
+    if args.hierarchy is not None:
+        output["hierarchy"] = args.hierarchy
+    if args.projector is not None:
+        output["projector"] = args.projector
+    if args.run_suffix is not None:
+        output["run_suffix"] = args.run_suffix
     return resolve_config(output)
 
 
@@ -117,10 +136,18 @@ def main(argv: list[str] | None = None) -> None:
         str(config["value_function"]),
         str(config["target_mode"]),
     )
+    prompt_spec = build_classification_prompt(
+        dataset_name=bundle.dataset_name,
+        verbalizers=bundle.verbalizers,
+        prompt_config=dict(config.get("prompt", {})),
+    )
+    config["prompt"] = prompt_spec.to_config()
     scorer = build_scorer(
         dict(config["model"]),
         bundle.verbalizers,
         batch_size=int(config["batch_size"]),
+        dataset_name=bundle.dataset_name,
+        prompt_config=config["prompt"],
     )
     results_dir = Path(config.get("results_dir", "results/mobius"))
     run_dir = (
@@ -148,4 +175,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

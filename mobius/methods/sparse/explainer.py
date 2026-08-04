@@ -19,6 +19,7 @@ from mobius.core.runtime import counter_delta
 from mobius.core.schema import AttributionResult, DatasetBundle, TextSample
 from mobius.models.base import RawTextScorer
 from mobius.models.oracle import QueryLedger, ValueOracle, stable_digest
+from mobius.models.prompting import build_classification_prompt
 from mobius.text.chunks import build_chunks, compose_text
 from mobius.text.coalitions import CoalitionGame, active_chunk_ids, visible_text_span
 from mobius.values.classification import (
@@ -179,6 +180,14 @@ class SparseMobiusExplainer:
             sample.text,
             target_label_text,
             int(dict(self.config.get("model", {})).get("max_length", 2048)),
+            prompt_prefix=str(getattr(self.scorer, "prompt_prefix", "Text:\n")),
+            prompt_suffix=str(getattr(self.scorer, "prompt_suffix", "\nLabel:")),
+            label_token_reserve=(
+                int(self.scorer.label_token_reserve())
+                if callable(getattr(self.scorer, "label_token_reserve", None))
+                else None
+            ),
+            label_prefix=str(getattr(self.scorer, "label_prefix", " ")),
         )
         players = active_chunk_ids(
             chunking.chunks,
@@ -412,6 +421,18 @@ def run_sparse_mobius(
         "split": bundle.split,
         "verbalizers": list(bundle.verbalizers),
     }
+    resolved["prompt"] = build_classification_prompt(
+        dataset_name=bundle.dataset_name,
+        verbalizers=bundle.verbalizers,
+        prompt_config=dict(resolved.get("prompt", {})),
+    ).to_config()
+    configure_task = getattr(scorer, "configure_task", None)
+    if callable(configure_task):
+        configure_task(
+            verbalizers=bundle.verbalizers,
+            dataset_name=bundle.dataset_name,
+            prompt_config=resolved["prompt"],
+        )
     store = ResultStore(
         run_dir,
         resolved,

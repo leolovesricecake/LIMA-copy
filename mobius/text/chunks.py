@@ -39,7 +39,7 @@ def normalize_chunker(value: str | None) -> str:
 def normalize_eval_granularity(value: str | None) -> str:
     """Validate an evaluation perturbation unit name."""
 
-    normalized = str(value or "token").strip().lower()
+    normalized = str(value or "word").strip().lower()
     if normalized not in EVAL_GRANULARITIES:
         raise ValueError(
             f"Unsupported eval granularity {value!r}; expected {sorted(EVAL_GRANULARITIES)}"
@@ -254,4 +254,3 @@ def project_ranking(
         rank = weighted / overlap_total if overlap_total else fallback + int(unit.chunk_id)
         projected.append((int(unit.chunk_id), float(rank)))
     return [unit_id for unit_id, _ in sorted(projected, key=lambda item: (item[1], item[0]))]
-

@@ -1,4 +1,12 @@
-"""Hyperedge-to-node projection policies used to construct rankings."""
+"""Hyperedge-to-node policies, including deletion-game Shapley allocation.
+
+For a deletion polynomial ``g(D)=theta_0+sum_T theta_T 1[T subset D]``,
+the Shapley value of deletion player ``i`` is ``sum_{T contains i}
+theta_T/|T|``. Feature presence has the opposite direction, so
+``signed_equal_share`` returns its negative. This allocation is the canonical
+Harsanyi-dividend allocation satisfying efficiency, symmetry, linearity, and
+the dummy-player property; it is not claimed to optimize a faithfulness metric.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +51,7 @@ def _signed_coefficients(model: SparseModel) -> tuple[Dict[int, float], float]:
 
 
 def project_nodes(model: SparseModel, projector: str) -> np.ndarray:
-    """Allocate fitted hyperedge coefficients to incident players."""
+    """Allocate hyperedges, using negated deletion-Shapley for signed mode."""
 
     mode = normalize_projector(projector)
     scores = np.zeros(model.n_features, dtype=np.float64)
@@ -67,4 +75,3 @@ def project_nodes(model: SparseModel, projector: str) -> np.ndarray:
         for player in players:
             scores[player] += share
     return scores
-

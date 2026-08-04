@@ -34,12 +34,14 @@ TOP_LEVEL_FIELDS = {
     "deterministic",
     "dataset",
     "model",
+    "prompt",
     "sampler",
     "basis",
     "hierarchy",
     "projector",
     "estimator",
     "fit",
+    "first_order",
 }
 
 RUNTIME_ONLY_FIELDS = {
@@ -70,6 +72,10 @@ NESTED_FIELDS = {
         "dtype",
         "max_length",
         "trust_remote_code",
+    },
+    "prompt": {
+        "version",
+        "task_description",
     },
     "sampler": {
         "name",
@@ -102,6 +108,10 @@ NESTED_FIELDS = {
         "selection_alpha_scale",
         "ridge_alpha",
         "max_design_mb",
+    },
+    "first_order": {
+        "lime_kernel_width",
+        "lime_ridge_alpha",
     },
 }
 
@@ -163,12 +173,12 @@ def resolve_config(config: Mapping[str, Any]) -> Dict[str, Any]:
     output.setdefault("seed", 42)
     output.setdefault("max_degree", 2)
     output.setdefault("k", 8)
-    output.setdefault("value_function", "target_probability")
+    output.setdefault("value_function", "predicted_probability")
     output.setdefault("target_mode", "predicted")
     output.setdefault("chunker", "word")
     output.setdefault("adaptive_profile", "balanced")
-    output.setdefault("eval_granularity", "token")
-    output.setdefault("eval_q_values", [1, 5, 10, 20, 50])
+    output.setdefault("eval_granularity", "word")
+    output.setdefault("eval_q_values", [5, 10, 20, 50])
     output.setdefault("min_features", 1)
     output.setdefault("max_features", None)
     output.setdefault("batch_size", 16)
@@ -184,6 +194,11 @@ def resolve_config(config: Mapping[str, Any]) -> Dict[str, Any]:
     )
     output.setdefault("dataset", {})
     output.setdefault("model", {})
+    output.setdefault("prompt", {})
+    output.setdefault(
+        "first_order",
+        {"lime_kernel_width": 25.0, "lime_ridge_alpha": 1.0},
+    )
     if output["output_level"] not in {"minimal", "standard", "debug"}:
         raise ValueError("output_level must be minimal, standard, or debug.")
     if output.get("adaptive_overrides") is None:

@@ -1,201 +1,81 @@
 # 低阶稀疏 Möbius LLM 归因
 
-本项目研究低阶稀疏 deletion-Möbius 超图能否作为一种可恢复、可验证且有竞争力的 LLM 交互归因表示。主方法位于 `mobius/`；ProxySPEX、Inseq 和 AML 保留为独立 baseline。
+本项目研究低阶稀疏 deletion-Möbius 超图能否成为一种可恢复、可验证且有竞争力的 LLM 交互归因表示。主方法位于 `mobius/`；ProxySPEX、Inseq 和 AML 保留为独立 baseline。
 
-当前实现覆盖论文计划的 P0 协议基础和 P1 SST-2 核心机制实验，即 E2 交互必要性、E3 精确交互验证和 E4 hierarchy 分析。E5 可压缩性、跨数据集扩展及敏感性实验尚未实现。
+当前论文协议与完整命令见：
+
+- [论文实验中文使用指引](docs/paper_experiment_usage.md)
+- [论文实验执行计划 v2.3](docs/paper-execution-plan-v2.3.md)
+- [论文大纲 v2.3](docs/paper-outline-v2.3.md)
 
 ## 安装
 
 ```bash
 pip install -e .
-pip install torch transformers datasets
+pip install torch transformers datasets scikit-learn scipy
 pip install -e "baselines/shapiq-copy[proxy]"
-pip install inseq captum
 ```
 
-主协议默认使用：
+ProxySPEX 的本地 `shapiq-copy` 要求 Python 3.12 或更高版本。
 
-- word explanation chunks；
-- word faithfulness evaluation；
-- `target_mode=predicted`；
-- predicted-class probability；
-- attribution budget 512；
-- degree 2 deletion-Möbius；
-- `uniform_size` attribution sampler；
-- 3 个 attribution seeds。
+## 正式协议
 
-## 主方法
+- 数据集：SST-2 validation、Rotten Tomatoes validation、AG News test；
+- 模型：Qwen3-8B、Llama-3.1-8B-Instruct；
+- word explanation / word evaluation；
+- 完整输入 predicted class，扰动期间固定；
+- predicted-class probability value function；
+- 主方法 degree 2、`uniform_size`、无 hierarchy、signed projection；
+- seeds 42/43/44，主预算 512；E2 预算 64/128/256/512；
+- 正式 split 全集评估，不设置分类准确率门槛。
 
-运行 SST-2 主配置：
+所有方法使用 `task_classification_v1` prompt：明确任务、列出候选标签，并只扰动 prompt 中的原始文本区域。prompt 写入 run contract 与 value-cache 指纹，旧 prompt 结果不会被误复用。
+
+## 最短运行示例
+
+先修改配置中的模型和缓存路径。
 
 ```bash
-python -m mobius.cli.run \
-  --config configs/qwen3-8b/sst2.yaml \
+# 分类诊断，不作为筛选门槛
+python scripts/check_classifier.py \
+  --config configs/paper-v2.3/qwen3-8b/sst2.yaml \
   --device cuda:0
-```
 
-临时覆盖 seed、预算或样本数：
-
-```bash
+# 主方法 C
 python -m mobius.cli.run \
-  --config configs/qwen3-8b/sst2.yaml \
-  --seed 43 \
+  --config configs/paper-v2.3/qwen3-8b/sst2.yaml \
   --budget 512 \
-  --max-samples 20 \
+  --seed 42 \
+  --run-suffix paper-v2.3-main \
   --device cuda:0
-```
 
-每个 Sparse Möbius 样本必须同时写入：
-
-```text
-<run>/
-├── run.json
-├── status.json
-├── metrics.json
-├── curves-predicted.jsonl
-├── samples/<sample-id>.json
-├── observations/<sample-id>.npz
-├── surrogates/<sample-id>.json
-└── analyses/
-```
-
-`observations/` 保存 attribution training keep masks、全部类别 label scores 和 attribution values；`surrogates/` 保存 active-player 映射、support、系数、拟合协议和可对任意 mask 预测的表示。Sparse Möbius 和 ProxySPEX 缺少任一 sidecar 时，该样本不会被 resume 为已完成。
-
-## P1 运行顺序
-
-### 1. 运行 A 和 strict
-
-A 是 degree-1 additive；
-C 是主方法（degree-2 signed interaction），不必重新训练；B 也不重新训练，而是从 C 离线派生。
-
-```bash
-for seed in 42 43 44; do
-  python -m mobius.cli.run \
-    --config configs/qwen3-8b/mechanisms-sst2/e2_a_additive.yaml \
-    --seed "$seed" \
-    --device cuda:0
-
-  python -m mobius.cli.run \
-    --config configs/qwen3-8b/mechanisms-sst2/e4_strict.yaml \
-    --seed "$seed" \
-    --device cuda:0
-done
-```
-
-### 2. 从 C 派生 B 并评估
-
-```bash
-python scripts/derive_projection_run.py \
-  --input-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
+# Additive Deletion A
+python -m mobius.cli.run \
+  --config configs/paper-v2.3/qwen3-8b/sst2.yaml \
+  --budget 512 \
+  --seed 42 \
+  --max-degree 1 \
   --projector singleton_only \
-  --output-root results/mobius \
-  --run-suffix e2-b-fit-only
-```
-
-派生步骤复用 C 的 observations 和 surrogate，不产生模型调用，并保留 C 的 attribution cost。B 的 ranking faithfulness 需要单独评估，调用计入 evaluation cost：
-
-```bash
-python -m mobius.cli.evaluate \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
-  --target predicted \
-  --device cuda:0
-```
-
-### 3. 构建 shared held-out
-
-建议每个 attribution seed 将 A/B/C/strict 与 ProxySPEX 放入同一 audit。A/B/C/strict
-使用相同的训练 masks，因此相对只输入 C 与 ProxySPEX，这不会进一步缩小 held-out
-空间或增加真实模型查询；把所有 runs 都登记进 manifest，可以一次生成全部 surrogate
-报告。
-
-```bash
-python scripts/build_surrogate_holdout.py \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o1-s42-e2-a-additive \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e2-b-fit-only \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --run-dir results/baselines/proxyspex/sst2/Qwen3-8B/proxyspex/b512-o2-s42-5d19d686 \
-  --output-dir results/audits/sst2/surrogate-heldout/s42 \
-  --count-per-distribution 64 \
-  --min-count 16 \
-  --seed 42 \
+  --run-suffix paper-v2.3-additive \
   --device cuda:0
 
-python scripts/evaluate_surrogates.py \
-  --audit-dir results/audits/sst2/surrogate-heldout/s42
-```
-
-held-out masks 会排除所有输入 run 的 attribution training masks。默认 `bernoulli` 对每个词独立执行 0.5 概率的保留采样，因此对全部 coalition 等概率；它不同于训练配置中的 `uniform_size`。若共同未见空间不足，则使用全部可用 masks；少于 16 个时样本标记为 `insufficient`。
-
-`manifest.json` 的 `metadata` 会记录全部输入 run 目录、run ID、method、dataset、model、chunker 和 value semantics；`settings` 记录 held-out 分布、数量与 seed。
-如果只需要比较主方法与 ProxySPEX，也可以仅传这两个 run；此时
-`evaluate_surrogates.py` 只会输出这两个 manifest runs 的报告。
-
-### 4. E3 精确验证
-
-```bash
-python scripts/verify_interactions.py \
-  --run-dir results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --top-k 5 \
-  --top-k-per-parent-group 3 \
+# 共享 value function 的 word LIME
+python scripts/run_first_order_llm.py \
+  --config configs/paper-v2.3/first-order/lime-sst2.yaml \
+  --model-path <Qwen3-8B-path> \
+  --budget 512 \
   --seed 42 \
   --device cuda:0
 ```
 
-该 audit 对主方法 selected pair 和距离匹配的 random pair 查询四个完整输入附近的删除组合，精确计算 deletion-Möbius 二阶系数。查询不计入 attribution cost。
-省略 `--output-dir` 时默认写入
-`results/audits/<dataset>/interactions/<audit-id>`。
-
-### 5. E4 hierarchy 分析
-
-对每个 seed 分别运行：
-
-```bash
-python scripts/analyze_hierarchy.py \
-  --none-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-std \
-  --strict-run results/mobius/sst2/Qwen3-8B/sparse_mobius/b512-o2-s42-e4-strict \
-  --verification-dir results/audits/sst2/interactions/af59f32b4ef3 \
-  --heldout-audit results/audits/sst2/surrogate-heldout/s42 \
-  --seed 42 \
-  --device cuda:0
-
-# --none-run：主方法，也就是 hierarchy=none 的完整 run。
-# --strict-run：仅 hierarchy 改为 strict 的完整 run。
-# --verification-dir：E3 audit 根目录，脚本实际需要其中的 rows.jsonl。
-# --heldout-audit：shared held-out 根目录，需要 evaluation-index.json 和其引用的 metrics reports。
-```
-
-脚本比较 none/strict support、held-out 和原始 faithfulness，并将 none 的 pair 按 0/1/2 个 singleton parent 分组。离线删边后的 ranking evaluation 会产生独立 analysis query cost。
-省略 `--output-dir` 时默认写入
-`results/audits/<dataset>/hierarchy/<audit-id>`。
-
-### 6. 生成论文长表
-
-```bash
-python scripts/collect_paper_results.py \
-  --run A=<A-seed42-run> \
-  --run B=<B-seed42-run> \
-  --run C=<C-seed42-run> \
-  --run none=<C-seed42-run> \
-  --run strict=<strict-seed42-run> \
-  --audit-dir <heldout-audit-dir> \
-  --audit-dir <interaction-audit-dir> \
-  --audit-dir <hierarchy-audit-dir> \
-  --output-dir docs/paper-results
-```
-
-三个 seed 的同一 role 可重复传入。输出包括 `paper_metrics_long.csv`、`paper_comparisons.csv` 和 `integrity_checks.json`。收集器会硬校验同 seed A/C 的 observation digest 相同，以及 B/C 的 surrogate digest 相同。
-
-## ProxySPEX
-
-ProxySPEX 保留其原生 sampler、tree proxy、Fourier 提取、refinement 和 FBII 转换，只统一文本粒度、value function 与 ranking evaluator：
+ProxySPEX：
 
 ```bash
 python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dataset sst2 \
   --split validation \
-  --dataset-cache-dir /mnt/huawei/nsq/temp/hf \
-  --model-path /mnt/huawei/nsq/models/Qwen/Qwen3-8B \
+  --dataset-cache-dir <hf-cache> \
+  --model-path <Qwen3-8B-path> \
   --chunker word \
   --eval-granularity word \
   --value-function predicted_probability \
@@ -208,18 +88,38 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --device cuda:0
 ```
 
-ProxySPEX 也保存原生 training coalitions、全部 label scores、unrefined/refined Fourier support 和最终 interactions。shared held-out 的 surrogate 预测固定使用 `refined_fourier`。
+## 结果协议
 
-## 常规结果整理
+每个可审计 attribution run 至少包含：
 
-将一个方法根目录整理为紧凑 CSV：
-
-```bash
-python scripts/collect_results.py \
-  --i results/mobius \
-  --o results_summary.csv
+```text
+<run>/
+├── run.json
+├── status.json
+├── metrics.json
+├── curves-predicted.jsonl
+├── samples/<sample-id>.json
+├── observations/<sample-id>.npz
+└── surrogates/<sample-id>.json
 ```
 
-`--o` 默认值为 `results_summary.csv`。该脚本用于普通 run 汇总；论文样本级配对分析使用 `collect_paper_results.py`。
+`observations/` 保存训练 keep masks、全部类别 scores 和 attribution values；`surrogates/` 保存可离线预测任意 mask 的模型。论文 collector 输出到：
 
-完整配置语义、消融解释、指标方向和查询分账见 [使用与论文实验说明](docs/mobius_usage.md)。
+```text
+results/paper/paper-v2.3/
+├── cells/<dataset-split>/<model-id>/budget-<B>/seed-<seed>/
+└── aggregate/
+```
+
+主表指标是 AUPC 与 AOPC-Sufficiency；E2 使用 held-out R² 与 NRMSE-range；E3 使用 NDCG@10、Recall@10 与 Sign Agreement@10。attribution、evaluation 和 audit 查询成本分别记录。
+
+## 测试
+
+```bash
+python -m pytest -q \
+  tests/test_first_order_baselines.py \
+  tests/test_paper_analysis.py \
+  tests/test_paper_protocol.py \
+  tests/test_proxyspex_copy_llm_baseline.py \
+  tests/test_task_prompt.py
+```

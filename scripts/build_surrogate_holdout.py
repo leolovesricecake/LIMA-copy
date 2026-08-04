@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--run-dir", action="append", required=True)
     parser.add_argument("--output-dir")
+    parser.add_argument(
+        "--cache-path",
+        default="results/.cache/value_oracle.sqlite3",
+    )
     parser.add_argument("--device")
     parser.add_argument("--count-per-distribution", type=int, default=64)
     parser.add_argument(
@@ -208,6 +212,38 @@ def _audit_id(run_payloads: Sequence[Mapping[str, Any]], settings: Mapping[str, 
     )[:12]
 
 
+def _run_query_metadata(
+    root: Path,
+    payload: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Summarize requested and realized attribution queries for one input run."""
+
+    config = dict(payload.get("scientific_config", {}))
+    logical_unique = 0
+    forward_calls = 0
+    sample_count = 0
+    for sample_path in sorted((root / "samples").glob("*.json")):
+        sample = _load_json(sample_path)
+        cost = dict(sample.get("attribution_cost", {}))
+        logical_unique += int(cost.get("logical_unique_queries", 0) or 0)
+        forward_calls += int(cost.get("model_forward_calls", 0) or 0)
+        sample_count += 1
+    return {
+        "path": str(root),
+        "run_id": payload.get("run_id"),
+        "config_fingerprint": payload.get("config_fingerprint"),
+        "method": config.get("method"),
+        "requested_budget": config.get("budget"),
+        "attribution_seed": config.get("seed"),
+        "completed_sample_count": sample_count,
+        "realized_logical_unique_queries": logical_unique,
+        "realized_logical_unique_queries_per_sample": (
+            float(logical_unique / sample_count) if sample_count else None
+        ),
+        "attribution_model_forward_calls": forward_calls,
+    }
+
+
 def build_shared_holdout(
     run_dirs: Sequence[str | Path],
     *,
@@ -218,6 +254,7 @@ def build_shared_holdout(
     near_full_deletions: Sequence[int],
     min_count: int,
     distributions: Sequence[str] = ("bernoulli",),
+    cache_path: str | Path = "results/.cache/value_oracle.sqlite3",
 ) -> Path:
     """Align runs, query shared masks, and persist one reusable audit."""
 
@@ -260,11 +297,13 @@ def build_shared_holdout(
         model_config,
         verbalizers,
         batch_size=int(configs[0].get("batch_size", 16)),
+        dataset_name=str(dict(configs[0]["dataset"]).get("name", "dataset")),
+        prompt_config=dict(configs[0].get("prompt", {})),
     )
     oracle = ValueOracle(
         scorer,
-        destination / ".cache" / "value_oracle.sqlite3",
-        model_fingerprint=model_config,
+        cache_path,
+        model_fingerprint=contracts[0]["model"],
         batch_size=int(configs[0].get("batch_size", 16)),
     )
     sample_sets = [
@@ -297,14 +336,17 @@ def build_shared_holdout(
                 n_features = int(sample_contracts[0]["n_features"])
                 excluded: set[int] = set()
                 observation_digests = []
+                excluded_by_run: Dict[str, int] = {}
                 for root in roots:
                     observation = load_observation_artifact(
                         root / "observations" / f"{sample_id}.npz"
                     )
-                    excluded.update(
+                    run_masks = set(
                         bool_matrix_to_masks(observation["keep_masks"])
                     )
+                    excluded.update(run_masks)
                     observation_digests.append(observation["digest"])
+                    excluded_by_run[str(root)] = len(run_masks)
                 sampled = sample_shared_heldout_masks(
                     n_features,
                     count_per_distribution=count_per_distribution,
@@ -359,6 +401,7 @@ def build_shared_holdout(
                         "status": status,
                         "counts": counts,
                         "excluded_training_mask_count": len(excluded),
+                        "excluded_training_mask_count_by_run": excluded_by_run,
                         "observation_digests": observation_digests,
                         "audit_id": audit_id,
                         "distributions": list(heldout_distributions),
@@ -370,6 +413,7 @@ def build_shared_holdout(
                         "status": status,
                         "counts": counts,
                         "excluded_training_mask_count": len(excluded),
+                        "excluded_training_mask_count_by_run": excluded_by_run,
                         "artifact": f"samples/{sample_id}.npz",
                     }
                 )
@@ -385,12 +429,7 @@ def build_shared_holdout(
     finally:
         oracle.close()
     run_metadata = [
-        {
-            "path": str(root),
-            "run_id": payload.get("run_id"),
-            "config_fingerprint": payload.get("config_fingerprint"),
-            "method": dict(payload.get("scientific_config", {})).get("method"),
-        }
+        _run_query_metadata(root, payload)
         for root, payload in zip(roots, run_payloads)
     ]
     manifest = {
@@ -402,7 +441,9 @@ def build_shared_holdout(
             "runs": run_metadata,
             "dataset": dict(contracts[0]["dataset"]),
             "model": dict(contracts[0]["model"]),
+            "prompt": dict(contracts[0].get("prompt", {})),
             "chunker": contracts[0].get("chunker"),
+            "eval_granularity": contracts[0].get("eval_granularity"),
             "value_function": contracts[0].get("value_function"),
             "target_mode": contracts[0].get("target_mode"),
         },
@@ -440,6 +481,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         near_full_deletions=deletions,
         min_count=args.min_count,
         distributions=_normalize_distributions(args.distributions),
+        cache_path=args.cache_path,
     )
     print(f"[heldout-built] audit={destination}")
 

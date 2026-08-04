@@ -1,5 +1,8 @@
 # Möbius 使用与论文实验说明
 
+> 本文档说明通用方法接口。论文 v2.3 的冻结数据、模型、指标、审计顺序与
+> 完整命令以 `docs/paper_experiment_usage.md` 为准。
+
 ## 1. 方法与 value function
 
 文本先被切成 word chunks，active chunks 作为 players。keep mask `S` 表示保留哪些 players，模型的局部 masked function 为 `f(S)`。
@@ -26,6 +29,23 @@ theta(T) = sum_{U subseteq T} (-1)^(|T|-|U|) g(U)
 9. evaluator 按 word ranking 计算 faithfulness。
 
 主配置中的 `value_function: target_probability` 与 `target_mode: predicted` 表示完整输入预测类别的概率，等价于 ProxySPEX 的 `predicted_probability`。
+
+### 任务 prompt
+
+`task_classification_v1` 使用如下协议，其中任务描述由数据集确定，候选标签来自 dataset verbalizers：
+
+```text
+Task: {task_description}
+Candidate labels: label_1 | label_2 | ...
+Return exactly one candidate label without quotation marks or explanation.
+Text:
+{text}
+Label: {class_verbalizer}
+```
+
+label score 是 class verbalizer tokens 的平均条件 log probability，随后在全部候选标签间做 softmax。超过 `max_length` 时固定保留任务说明、候选标签、assistant/`Label:` prefix 和 verbalizer，只从原文左侧截断。实验前使用 `python scripts/check_classifier.py --config <config> --device <device>` 检查任务准确率；没有通过预先规定的准确率标准时，不应继续解释或报告 faithfulness。
+
+对于带 `chat_template` 的 instruction model，上述内容作为 user message，并通过 tokenizer 的原生 chat template 生成 assistant prefix；Qwen3 显式设置 `enable_thinking=False`，使被评分的第一个输出就是类别 verbalizer。没有 chat template 的模型才使用包含 `Label:` 的 plain-text fallback。实际采用的完整布局、`use_chat_template` 和 thinking 开关写入 classifier report 与 `metrics.json`。
 
 ## 2. 三类 masks 与查询分账
 
@@ -143,7 +163,8 @@ python -m mobius.cli.evaluate \
 
 ### Projector
 
-- `signed_equal_share`：把 deletion 系数的带符号贡献均分给边成员；
+- `signed_equal_share`：对 deletion Harsanyi dividend 做 Shapley 等分并取反，
+  对应完整输入中的 feature-presence 方向；
 - `absolute_equal_share`：均分绝对系数；
 - `singleton_only`：只使用一阶项，忽略 pair 对 ranking 的贡献。
 
@@ -156,6 +177,7 @@ python scripts/build_surrogate_holdout.py \
   --run-dir <run-1> \
   --run-dir <run-2> \
   --output-dir results/audits/<dataset>/surrogate-heldout/<audit-name> \
+  --cache-path results/.cache/value_oracle.sqlite3 \
   --count-per-distribution 64 \
   --min-count 16 \
   --seed 260726 \
@@ -183,6 +205,26 @@ python scripts/evaluate_surrogates.py \
 当 value range 退化时 R2 和 NRMSE 为 `null`。run 的 `analyses/heldout-<audit-id>.json` 只保存指标摘要和公共 audit 引用。
 
 ## 8. E3 精确交互验证
+
+### 8.1 普通长度 all-pair oracle
+
+```bash
+python scripts/audit_exact_pairs.py \
+  --mobius-run <C-run> \
+  --proxyspex-run <proxyspex-run> \
+  --cache-path results/.cache/value_oracle.sqlite3 \
+  --min-features 10 \
+  --max-features 32 \
+  --max-samples 50 \
+  --seed 42 \
+  --device cuda:0
+```
+
+每个样本统一查询 full、全部 singleton deletion 和全部 pair deletion，共
+`1+n+C(n,2)` 个唯一 masks。输出 C/ProxySPEX/random/oracle 的完整 pair
+ranking 与 coefficient error，论文中标记为 `pair_oracle`。
+
+### 8.2 Targeted selected/random 诊断
 
 对 pair `{i,j}` 查询：
 
@@ -249,23 +291,38 @@ AUPC 复用完整 deletion trajectory，不增加模型调用。
 
 ```bash
 python scripts/collect_paper_results.py \
+  --paper-version paper-v2.3 \
   --run A=<A-run> \
   --run B=<B-run> \
   --run C=<C-run> \
-  --run none=<C-run> \
-  --run strict=<strict-run> \
+  --run PROXYSPEX=<proxyspex-run> \
+  --run STRICT=<strict-run> \
+  --audit-dir <representation-audit> \
   --audit-dir <heldout-audit> \
+  --audit-dir <exact-pair-audit> \
   --audit-dir <interaction-audit> \
   --audit-dir <hierarchy-audit> \
-  --output-dir docs/paper-results \
   --bootstrap 2000
+
+python scripts/collect_paper_results.py \
+  --paper-version paper-v2.3 \
+  --summarize
 ```
 
 输出：
 
-- `paper_metrics_long.csv`：样本级长表；
-- `paper_comparisons.csv`：left/right mean、right-left mean difference、95% sample-cluster bootstrap CI、paired effect size 和配对检验；
-- `integrity_checks.json`：A/C observation 与 B/C predictor 控制检查。
+- `overall-attribution.csv`：各方法 faithfulness mean/std；
+- `paired-effects.csv`：C 对其他方法的逐样本配对统计；
+- `costs.csv`：attribution 查询与 forward 成本；
+- `audit-costs.csv`：held-out、pair oracle 等分析查询成本；
+- `surrogate-heldout.csv`：shared held-out 重构与 C 对基线的配对统计；
+- `representation-recovery.csv`：Möbius/Fourier 恢复与 compression；
+- `exact-structure.csv`：完整 value table 的 degree/top-k 结构；
+- `exact-interactions.csv`：区分 full-table/pair-oracle 的 interaction 指标；
+- `projection-ablation.csv`：C vs B/ABSOLUTE；
+- `integrity-checks.json`：受控 masks 与 derived surrogate 检查。
+
+详细路径与字段见 `docs/paper_experiment_usage.md`。
 
 常规紧凑 run 汇总仍使用：
 

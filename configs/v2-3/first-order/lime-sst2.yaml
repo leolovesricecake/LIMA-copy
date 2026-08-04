@@ -1,0 +1,30 @@
+# Shared-value word LIME template; override dataset/model for other cells.
+results_dir: results/baselines/first-order
+# run_suffix: v2-3-lime
+output_level: standard
+method: word_lime
+budget: 512
+seed: 42
+max_degree: 1
+k: 8
+value_function: predicted_probability
+target_mode: predicted
+chunker: word
+eval_granularity: word
+eval_q_values: [5, 10, 20, 50]
+min_features: 1
+max_features: null
+batch_size: 16
+first_order:
+  lime_kernel_width: 25.0
+  lime_ridge_alpha: 1.0
+dataset:
+  name: sst2
+  split: validation
+  dataset_cache_dir: /mnt/huawei/nsq/temp/hf
+model:
+  type: hf_causal_lm
+  model_path: /mnt/huawei/nsq/models/Qwen/Qwen3-8B
+  device: cuda:0
+  dtype: bfloat16
+  max_length: 2048

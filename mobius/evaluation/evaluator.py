@@ -150,8 +150,8 @@ def evaluate_run(
     scorer: RawTextScorer,
     *,
     target: str = "predicted",
-    eval_granularity: str = "token",
-    q_values: Sequence[int] = (1, 5, 10, 20, 50),
+    eval_granularity: str = "word",
+    q_values: Sequence[int] = (5, 10, 20, 50),
 ) -> Dict[str, Any]:
     """Evaluate all completed samples and write target-explicit metrics.json."""
 
@@ -307,6 +307,7 @@ def evaluate_run(
             for q, metric_map in per_q_values.items()
         },
         "protocol": {
+            "prompt": scorer.scoring_contract().get("prompt"),
             "eval_granularity": str(eval_granularity),
             "q_values": [int(value) for value in q_values],
             "primary_q": PRIMARY_Q,

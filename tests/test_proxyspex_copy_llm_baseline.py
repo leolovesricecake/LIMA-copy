@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from mobius.core.artifacts import (
     normalize_surrogate_artifact,
@@ -113,6 +114,19 @@ class _DummyProxySPEX:
             baseline_value=0.0,
         )
 
+    def predict_refined_fourier(self, coalitions_matrix):
+        """Evaluate the deterministic parity surrogate used by the test double."""
+
+        matrix = np.asarray(coalitions_matrix, dtype=bool)
+        predictions = np.zeros(matrix.shape[0], dtype=np.float64)
+        for interaction, coefficient in self.refined_fourier_.items():
+            if not interaction:
+                predictions += float(coefficient)
+                continue
+            parity = np.sum(matrix[:, list(interaction)], axis=1) % 2
+            predictions += float(coefficient) * np.where(parity == 0, 1.0, -1.0)
+        return predictions
+
 
 def _args(**overrides):
     """Build the minimal runner argument namespace used by unit tests."""
@@ -181,12 +195,12 @@ def test_proxyspex_chunking_adaptive_emits_diagnostics() -> None:
     assert result.diagnostics["adaptive_profile"] == "balanced"
 
 
-def test_copy_runner_defaults_word_explanation_and_token_eval() -> None:
-    """Check the fair default target and decoupled chunk/eval granularities."""
+def test_copy_runner_defaults_to_word_explanation_and_evaluation() -> None:
+    """Check the paper default target and word-level granularities."""
 
     args = RUNNER.build_parser().parse_args(["--dataset", "sst2", "--model-path", "tiny-local"])
     assert args.chunker == "word"
-    assert args.eval_granularity == "token"
+    assert args.eval_granularity == "word"
     assert args.value_function == "predicted_probability"
     assert args.target_mode == "predicted"
 
@@ -347,6 +361,9 @@ def test_adaptive_chunks_can_project_to_token_eval_units() -> None:
 def test_lightgbm_python_dump_converter_preserves_proxy_tree_function() -> None:
     """Ensure the no-extension converter preserves tree outputs and Fourier extraction."""
 
+    if sys.version_info < (3, 12):
+        pytest.skip("The retained shapiq-copy package requires Python >= 3.12.")
+
     local_source = str(RUNNER._LOCAL_SHAPIQ_SRC)
     if local_source not in sys.path:
         sys.path.insert(0, local_source)
@@ -435,6 +452,9 @@ def test_lightgbm_python_dump_converter_preserves_proxy_tree_function() -> None:
 
 def test_refined_fourier_artifact_matches_native_predictor() -> None:
     """Check serialized refined Fourier predictions equal native ProxySPEX."""
+
+    if sys.version_info < (3, 12):
+        pytest.skip("The retained shapiq-copy package requires Python >= 3.12.")
 
     local_source = str(RUNNER._LOCAL_SHAPIQ_SRC)
     if local_source not in sys.path:

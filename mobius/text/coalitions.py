@@ -26,6 +26,11 @@ def visible_text_span(
     text: str,
     label_text: str,
     max_length: int,
+    *,
+    prompt_prefix: str = PROMPT_PREFIX,
+    prompt_suffix: str = PROMPT_SUFFIX,
+    label_token_reserve: int | None = None,
+    label_prefix: str = " ",
 ) -> Dict[str, Any]:
     """Map left prompt truncation back to a visible source-character span."""
 
@@ -37,29 +42,42 @@ def visible_text_span(
             "dropped_prompt_token_count": 0,
             "strategy": "no_tokenizer_assume_full_visibility",
         }
-    prompt = f"{PROMPT_PREFIX}{text}{PROMPT_SUFFIX}"
-    label_ids = _token_ids(tokenizer, " " + str(label_text))[-max(1, max_length - 1) :]
+    label_ids = _token_ids(tokenizer, label_prefix + str(label_text))[
+        -max(1, max_length - 1) :
+    ]
+    reserved_label_tokens = max(
+        len(label_ids),
+        int(label_token_reserve or 0),
+    )
     try:
         encoded = tokenizer(
-            prompt,
+            text,
             return_offsets_mapping=True,
             add_special_tokens=False,
             truncation=False,
         )
     except Exception as error:
         raise RuntimeError("Tokenizer offsets are required for truncation alignment.") from error
-    prompt_ids = list(encoded["input_ids"])
+    text_ids = list(encoded["input_ids"])
     offsets = list(encoded.get("offset_mapping") or [])
-    if len(prompt_ids) != len(offsets):
+    if len(text_ids) != len(offsets):
         raise RuntimeError("Tokenizer returned mismatched IDs and offsets.")
-    prompt_budget = max(0, int(max_length) - len(label_ids))
-    kept = offsets[-prompt_budget:] if prompt_budget else []
-    source_start = len(PROMPT_PREFIX)
-    source_end = source_start + len(text)
+    prefix_ids = _token_ids(tokenizer, prompt_prefix)
+    suffix_ids = _token_ids(tokenizer, prompt_suffix)
+    fixed_token_count = reserved_label_tokens + len(prefix_ids) + len(suffix_ids)
+    if fixed_token_count > int(max_length):
+        raise ValueError(
+            "max_length is too small for the task prompt, candidate labels, and verbalizer."
+        )
+    text_budget = max(
+        0,
+        int(max_length) - fixed_token_count,
+    )
+    kept = offsets[-text_budget:] if text_budget else []
     spans = [
-        (max(int(start), source_start) - source_start, min(int(end), source_end) - source_start)
+        (int(start), int(end))
         for start, end in kept
-        if min(int(end), source_end) > max(int(start), source_start)
+        if int(end) > int(start)
     ]
     visible_start = min((span[0] for span in spans), default=len(text))
     visible_end = max((span[1] for span in spans), default=len(text))
@@ -67,11 +85,13 @@ def visible_text_span(
         "visible_start_char": int(visible_start),
         "visible_end_char": int(visible_end),
         "visible_char_count": int(max(0, visible_end - visible_start)),
-        "prompt_token_count": len(prompt_ids),
-        "kept_prompt_token_count": len(kept),
-        "dropped_prompt_token_count": max(0, len(prompt_ids) - len(kept)),
+        "prompt_token_count": len(prefix_ids) + len(text_ids) + len(suffix_ids),
+        "fixed_prompt_token_count": len(prefix_ids) + len(suffix_ids),
+        "kept_prompt_token_count": len(prefix_ids) + len(kept) + len(suffix_ids),
+        "dropped_prompt_token_count": max(0, len(text_ids) - len(kept)),
         "target_token_count": len(label_ids),
-        "strategy": "prompt_offset_left_truncation",
+        "reserved_target_token_count": reserved_label_tokens,
+        "strategy": "preserve_task_prompt_left_truncate_text",
     }
 
 
@@ -124,4 +144,3 @@ class CoalitionGame:
         """Compose texts for a sequence of keep masks."""
 
         return [self.text(int(mask)) for mask in masks]
-

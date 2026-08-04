@@ -11,7 +11,7 @@ value_function: target_probability
 target_mode: predicted
 chunker: word
 eval_granularity: word
-eval_q_values: [1, 5, 10, 20, 50]
+eval_q_values: [5, 10, 20, 50]
 min_features: 1
 max_features: null
 batch_size: 16

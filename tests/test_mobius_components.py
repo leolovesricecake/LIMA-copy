@@ -113,6 +113,50 @@ def test_projectors_change_only_hyperedge_allocation() -> None:
     assert np.isclose(np.sum(absolute), np.sum(np.abs(_model().coefficients)))
 
 
+def test_signed_projection_is_negated_deletion_shapley_allocation() -> None:
+    """Check efficiency, symmetry, linearity, and the dummy-player property."""
+
+    left = SparseModel(
+        basis="deletion_mobius",
+        n_features=3,
+        max_degree=2,
+        intercept=0.4,
+        terms=[1, 3],
+        coefficients=np.asarray([-0.3, 0.2]),
+        selection_coefficients=np.asarray([-0.3, 0.2]),
+        diagnostics={},
+    )
+    right = SparseModel(
+        basis="deletion_mobius",
+        n_features=3,
+        max_degree=2,
+        intercept=-0.1,
+        terms=[1, 3],
+        coefficients=np.asarray([0.1, -0.4]),
+        selection_coefficients=np.asarray([0.1, -0.4]),
+        diagnostics={},
+    )
+    combined = SparseModel(
+        basis="deletion_mobius",
+        n_features=3,
+        max_degree=2,
+        intercept=0.3,
+        terms=[1, 3],
+        coefficients=left.coefficients + right.coefficients,
+        selection_coefficients=(
+            left.selection_coefficients + right.selection_coefficients
+        ),
+        diagnostics={},
+    )
+    left_scores = project_nodes(left, "signed_equal_share")
+    right_scores = project_nodes(right, "signed_equal_share")
+    combined_scores = project_nodes(combined, "signed_equal_share")
+    assert np.allclose(left_scores, [0.2, -0.1, 0.0])
+    assert np.isclose(np.sum(left_scores), -np.sum(left.coefficients))
+    assert left_scores[2] == 0.0
+    assert np.allclose(combined_scores, left_scores + right_scores)
+
+
 def test_low_degree_candidate_count_matches_order_two_formula() -> None:
     """Check candidate enumeration for the normal degree-two experiment."""
 

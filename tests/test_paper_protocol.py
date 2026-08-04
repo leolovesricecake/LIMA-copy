@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import csv
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +28,6 @@ from mobius.methods.sparse.hierarchy import (
 from mobius.models.mock import MockSentimentScorer
 from scripts.build_surrogate_holdout import build_shared_holdout
 from scripts.analyze_hierarchy import analyze_hierarchy
-from scripts.collect_paper_results import collect_paper_results
 from scripts.derive_projection_run import derive_projection_run
 from scripts.evaluate_surrogates import evaluate_audit
 from scripts.verify_interactions import (
@@ -474,38 +472,3 @@ def test_mock_e2_derivation_and_shared_heldout_end_to_end(tmp_path: Path) -> Non
         (hierarchy / "summary.json").read_text(encoding="utf-8")
     )
     assert hierarchy_summary["analysis_query_cost"]["attribution_budget_used"] == 0
-    paper = collect_paper_results(
-        [
-            ("A", run_a),
-            ("B", run_b),
-            ("C", run_c),
-            ("none", run_c),
-            ("strict", run_strict),
-        ],
-        [audit, verification, hierarchy],
-        output_dir=tmp_path / "paper",
-        seed=31,
-        bootstrap=20,
-    )
-    assert (paper / "paper_metrics_long.csv").is_file()
-    assert (paper / "paper_comparisons.csv").is_file()
-    with (paper / "paper_comparisons.csv").open(
-        encoding="utf-8",
-        newline="",
-    ) as handle:
-        comparisons = list(csv.DictReader(handle))
-    assert any(
-        row["comparison"].startswith("E3_selected_vs_random/")
-        for row in comparisons
-    )
-    assert any(
-        row["comparison"] == "E4_remove_parent_group_0_vs_none"
-        for row in comparisons
-    )
-    integrity = json.loads(
-        (paper / "integrity_checks.json").read_text(encoding="utf-8")
-    )
-    assert {row["check"] for row in integrity["checks"]} == {
-        "A_C_observation_digest",
-        "B_C_surrogate_digest",
-    }

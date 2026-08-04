@@ -65,23 +65,24 @@ full_probs = [0.18, 0.82]
 
 ## 3. LLM 如何给一个文本打分类分
 
-`HFBackbone` 使用固定 prompt：
+`HFBackbone` 使用带任务语义和封闭候选空间的固定 prompt。以情感分类为例：
 
 ```text
+Task: Determine whether the sentiment of the text is negative or positive.
+Candidate labels: negative | positive
+Return exactly one candidate label without quotation marks or explanation.
 Text:
 {text}
-Label:
+Label: {class_verbalizer}
 ```
 
-对每个 verbalizer，实际计算的是 label token 的条件平均 log probability。例如二分类会分别构造：
+上面展示的是逻辑内容。对于 Qwen3 等 instruction model，runner 会用 tokenizer 原生 chat template 将其放入 user message，并设置 `enable_thinking=False`，随后在 assistant generation prefix 后直接评分 class verbalizer；`Label:` 形式仅是无 chat template 时的 fallback。
+
+对每个 verbalizer，实际计算的是 label token 的条件平均 log probability。任务说明、候选标签和文本部分完全相同，二分类只分别续写：
 
 ```text
-Text:
-a funny , sharply observed comedy
 Label: negative
 
-Text:
-a funny , sharply observed comedy
 Label: positive
 ```
 
@@ -121,7 +122,7 @@ units = [
 
 ## 5. 处理左截断：哪些单元真正参与博弈
 
-`HFBackbone` 在超过 `--max-length` 时会保留 label token，并从 prompt 左侧截断。因此 runner 会复刻这个逻辑，计算原文中实际可见的字符区间：
+`HFBackbone` 在超过 `--max-length` 时固定保留任务说明、候选标签、`Label:` 和 label token，只从原文左侧截断。因此 runner 会复刻这个逻辑，计算原文中实际可见的字符区间：
 
 ```text
 truncation = {

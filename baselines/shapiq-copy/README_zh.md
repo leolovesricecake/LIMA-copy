@@ -14,7 +14,7 @@
 
 ```text
 chunker=word
-eval_granularity=token
+eval_granularity=word
 value_function=predicted_probability
 target_mode=predicted
 index=FBII
@@ -33,12 +33,24 @@ score_i += interaction(T) / |T|, if i in T
 
 解释 players 与评估 units 相互独立：`--chunker` 控制 ProxySPEX players，`--eval-granularity` 控制 faithfulness 扰动单元。
 
+Runner 与主方法共享 `task_classification_v1` prompt：明确数据集任务、列出全部候选 verbalizers，并要求只输出一个标签。ProxySPEX 仍然只负责选择 coalition masks 和拟合 proxy；每个 coalition text 由共享 scorer 自动放入固定任务 prompt，因此这项修改不改变 ProxySPEX 的采样、树模型或 Fourier/FBII 核心流程。prompt 版本写入 run 配置，旧无任务 prompt 的结果不会被断点续跑。
+
+正式运行前先用对应主配置执行分类预检，例如：
+
+```bash
+python scripts/check_classifier.py \
+  --config configs/paper-v2.3/qwen3-8b/rotten_tomatoes.yaml \
+  --device cuda:0
+```
+
 ## 安装
 
 ```bash
 pip install torch transformers datasets
 pip install -e "baselines/shapiq-copy[proxy]"
 ```
+
+本地 `shapiq-copy` 要求 Python 3.12 或更高版本。
 
 LightGBM 树转换优先使用 shapiq 的 C++ extension。若当前源码 checkout
 没有构建该 extension，则自动使用 LightGBM `dump_model()` 的结构化输出构造相同的
@@ -66,7 +78,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dtype bfloat16 \
   --chunker word \
   --eval-granularity word \
-  --value-function target_probability \
+  --value-function predicted_probability \
   --target-mode predicted \
   --index FBII \
   --max-order 2 \
@@ -75,7 +87,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --proxy-n-jobs 1 \
   --sampling-weight-mode uniform_coalition \
   --k 8 \
-  --eval-q-values 1,5,10,20,50 \
+  --eval-q-values 5,10,20,50 \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
   --device cuda:0
@@ -91,7 +103,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dtype bfloat16 \
   --chunker word \
   --eval-granularity word \
-  --value-function target_probability \
+  --value-function predicted_probability \
   --target-mode predicted \
   --index FBII \
   --max-order 2 \
@@ -100,7 +112,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --proxy-n-jobs 1 \
   --sampling-weight-mode uniform_coalition \
   --k 8 \
-  --eval-q-values 1,5,10,20,50 \
+  --eval-q-values 5,10,20,50 \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
   --device cuda:0
@@ -116,7 +128,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dtype bfloat16 \
   --chunker word \
   --eval-granularity word \
-  --value-function target_probability \
+  --value-function predicted_probability \
   --target-mode predicted \
   --index FBII \
   --max-order 2 \
@@ -125,7 +137,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --proxy-n-jobs 1 \
   --sampling-weight-mode uniform_coalition \
   --k 8 \
-  --eval-q-values 1,5,10,20,50 \
+  --eval-q-values 5,10,20,50 \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
   --device cuda:0
@@ -141,7 +153,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --dtype bfloat16 \
   --chunker word \
   --eval-granularity word \
-  --value-function target_probability \
+  --value-function predicted_probability \
   --target-mode predicted \
   --index FBII \
   --max-order 2 \
@@ -150,7 +162,7 @@ python baselines/shapiq-copy/run_proxyspex_llm_baseline.py \
   --proxy-n-jobs 1 \
   --sampling-weight-mode uniform_coalition \
   --k 8 \
-  --eval-q-values 1,5,10,20,50 \
+  --eval-q-values 5,10,20,50 \
   --base-save-dir results \
   --save-dir baselines/proxyspex-copy \
   --device cuda:0
@@ -199,6 +211,8 @@ results/baselines/proxyspex-copy/<dataset>/<model>/proxyspex/<run-id>/
 ├── metrics.json
 ├── curves-<target>.jsonl
 ├── samples/
+├── observations/
+├── surrogates/
 └── diagnostics/       # output-level=debug
 ```
 
@@ -208,5 +222,10 @@ results/baselines/proxyspex-copy/<dataset>/<model>/proxyspex/<run-id>/
 - `method_summary.interaction_summary` 是高阶交互摘要；
 - `method_summary.player_to_chunk_id` 是 ProxySPEX player 到文本 chunk 的映射；
 - `attribution_cost` 记录原生 mask 查询、唯一扰动文本、model forwards 和耗时。
+
+`surrogates/*.json` 保存 refinement 后的 Fourier predictor，供 held-out 与 E3
+离线评价。runner 会在训练 masks、empty/full 与 singleton-deletion masks 上比较
+该序列化 predictor 和原生 `predict_refined_fourier()`；误差超过 `1e-9` 会终止，
+因此 E3 的四点差分不会静默改变 ProxySPEX 学到的函数。
 
 `metrics.json` 的 `target` 必须与待比较的 Möbius run 一致。

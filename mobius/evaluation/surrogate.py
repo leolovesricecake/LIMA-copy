@@ -235,7 +235,11 @@ def aggregate_reconstruction(
         output[metric] = {
             "count": int(len(values)),
             "mean": float(np.mean(values)) if len(values) else None,
-            "std": float(np.std(values)) if len(values) else None,
+            "std": (
+                float(np.std(values, ddof=1))
+                if len(values) > 1
+                else (0.0 if len(values) == 1 else None)
+            ),
             "median": float(np.median(values)) if len(values) else None,
         }
     output["sample_count"] = len(rows)

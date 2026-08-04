@@ -42,10 +42,8 @@ from mobius.core.schema import AttributionResult, TextChunk
 from mobius.data import load_dataset_bundle
 from mobius.evaluation.evaluator import evaluate_run
 from mobius.models.hf import HFBackbone
+from mobius.models.prompting import build_classification_prompt
 from mobius.text.chunks import build_eval_units, compose_text
-
-PROMPT_PREFIX = "Text:\n"
-PROMPT_SUFFIX = "\nLabel:"
 
 DEFAULT_METHODS = (
     "saliency",
@@ -187,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reagent-num-probes", type=int, default=8)
 
     # Evaluation/output.
-    parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
+    parser.add_argument("--eval-q-values", type=str, default="5,10,20,50")
     parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
     parser.add_argument("--base-save-dir", type=str, default="results")
     parser.add_argument("--save-dir", type=str, default="baselines/inseq")
@@ -286,6 +284,10 @@ def _collection_root(args) -> Path:
 def _method_config(args, bundle, method_name: str) -> Dict[str, Any]:
     """Build one scientific configuration for an Inseq method run."""
 
+    prompt = build_classification_prompt(
+        dataset_name=bundle.dataset_name,
+        verbalizers=bundle.verbalizers,
+    ).to_config()
     return {
         "method": f"inseq_{method_name}",
         "output_level": str(args.output_level),
@@ -303,6 +305,7 @@ def _method_config(args, bundle, method_name: str) -> Dict[str, Any]:
             "dtype": str(args.dtype),
             "max_length": int(args.max_length),
         },
+        "prompt": prompt,
         "budget": int(args.n_steps if method_name != "lime" else args.n_samples),
         "seed": int(args.seed),
         "max_order": 1,
@@ -331,10 +334,10 @@ def _method_output_root(args, bundle, method_name: str) -> Path:
     )
 
 
-def _label_target_text(label_text: str) -> str:
+def _label_target_text(label_text: str, label_prefix: str = " ") -> str:
     """Handle the label target text step in this retained baseline."""
 
-    return " " + str(label_text)
+    return str(label_prefix) + str(label_text)
 
 
 def _tokenize_text_only(tokenizer, text: str) -> List[int]:
@@ -344,10 +347,18 @@ def _tokenize_text_only(tokenizer, text: str) -> List[int]:
     return [int(token_id) for token_id in encoded["input_ids"]]
 
 
-def _encode_target_token_ids(tokenizer, label_text: str, max_length: int) -> List[int]:
+def _encode_target_token_ids(
+    tokenizer,
+    label_text: str,
+    max_length: int,
+    label_prefix: str = " ",
+) -> List[int]:
     """Handle the encode target token ids step in this retained baseline."""
 
-    target_ids = _tokenize_text_only(tokenizer, _label_target_text(label_text))
+    target_ids = _tokenize_text_only(
+        tokenizer,
+        _label_target_text(label_text, label_prefix),
+    )
     max_total = max(2, int(max_length))
     max_label = max_total - 1
     if len(target_ids) > max_label:
@@ -364,14 +375,28 @@ def _truncate_text_for_prompt(
     chunks: Sequence[TextChunk],
     target_token_ids: Sequence[int],
     max_length: int,
+    prompt_prefix: str,
+    prompt_suffix: str,
+    label_token_reserve: int,
 ) -> Dict[str, Any]:
-    """Handle the truncate text for prompt step in this retained baseline."""
+    """Left-truncate only source text while preserving the task prompt and label."""
 
     full_text_token_ids = _tokenize_text_only(tokenizer, text)
-    prefix_token_ids = _tokenize_text_only(tokenizer, PROMPT_PREFIX)
-    suffix_token_ids = _tokenize_text_only(tokenizer, PROMPT_SUFFIX)
+    prefix_token_ids = _tokenize_text_only(tokenizer, prompt_prefix)
+    suffix_token_ids = _tokenize_text_only(tokenizer, prompt_suffix)
     max_total = max(2, int(max_length))
-    available_text = max(0, max_total - len(prefix_token_ids) - len(suffix_token_ids) - len(target_token_ids))
+    reserved_target_tokens = max(len(target_token_ids), int(label_token_reserve))
+    fixed_token_count = (
+        len(prefix_token_ids) + len(suffix_token_ids) + reserved_target_tokens
+    )
+    if fixed_token_count > max_total:
+        raise ValueError(
+            "max_length is too small for the task prompt, candidate labels, and verbalizer."
+        )
+    available_text = max(
+        0,
+        max_total - fixed_token_count,
+    )
     kept_text_token_count = min(len(full_text_token_ids), available_text)
     dropped_left = max(0, len(full_text_token_ids) - kept_text_token_count)
 
@@ -393,6 +418,7 @@ def _truncate_text_for_prompt(
         "prefix_token_count": int(len(prefix_token_ids)),
         "suffix_token_count": int(len(suffix_token_ids)),
         "target_token_count": int(len(target_token_ids)),
+        "reserved_target_token_count": int(reserved_target_tokens),
     }
 
 
@@ -441,17 +467,23 @@ def _torch_dtype_from_name(name: str):
     return mapping.get(lowered, None)
 
 
-def _load_backbone(args) -> HFBackbone:
+def _load_backbone(args, bundle) -> HFBackbone:
     """Load the shared Hugging Face model wrapper used by Inseq."""
 
     # Keep the call aligned with the existing Captum runner. Some branch revisions may not
     # accept attn_implementation in HFBackbone, so we do not pass it here.
     return HFBackbone(
         model_path=args.model_path,
+        verbalizers=bundle.verbalizers,
         device=args.device,
         max_length=args.max_length,
         dtype=args.dtype,
         trust_remote_code=bool(args.trust_remote_code),
+        dataset_name=bundle.dataset_name,
+        prompt_config=build_classification_prompt(
+            dataset_name=bundle.dataset_name,
+            verbalizers=bundle.verbalizers,
+        ).to_config(),
     )
 
 
@@ -478,6 +510,71 @@ def _tensor_to_numpy_list_for_inseq_lime(value):
     return value
 
 
+def _subsequence_start(values: Sequence[int], pattern: Sequence[int]) -> int | None:
+    """Find one exact token subsequence used to align Inseq's causal prefix."""
+
+    needle = [int(value) for value in pattern]
+    haystack = [int(value) for value in values]
+    if not needle:
+        return None
+    for start in range(0, len(haystack) - len(needle) + 1):
+        if haystack[start : start + len(needle)] == needle:
+            return start
+    return None
+
+
+def _lime_perturbable_positions(attribution_model, input_ids: Sequence[int]) -> set[int]:
+    """Resolve raw-text token positions while keeping task and label context fixed."""
+
+    contract = getattr(attribution_model, "_lima_text_perturbation_contract", None)
+    if not isinstance(contract, dict):
+        raise RuntimeError(
+            "Task-aware Inseq LIME requires a text perturbation contract."
+        )
+    prompt_ids = [int(value) for value in contract["prompt_token_ids"]]
+    prompt_start = _subsequence_start(input_ids, prompt_ids)
+    if prompt_start is None:
+        raise RuntimeError(
+            "Could not align Inseq LIME inputs to the task-aware prompt tokens."
+        )
+    return {
+        prompt_start + int(position)
+        for position in contract["text_token_positions"]
+    }
+
+
+def _configure_lime_text_perturbations(
+    inseq_model,
+    tokenizer,
+    prompt_text: str,
+    text_start: int,
+    text_end: int,
+) -> None:
+    """Freeze task-template tokens so LIME perturbs only the source text."""
+
+    encoded = tokenizer(
+        prompt_text,
+        add_special_tokens=False,
+        truncation=False,
+        return_offsets_mapping=True,
+    )
+    offsets = list(encoded.get("offset_mapping") or [])
+    token_ids = [int(value) for value in encoded["input_ids"]]
+    if len(token_ids) != len(offsets):
+        raise RuntimeError("Tokenizer offsets are required for text-only LIME perturbations.")
+    positions = [
+        index
+        for index, (start, end) in enumerate(offsets)
+        if min(int(end), int(text_end)) > max(int(start), int(text_start))
+    ]
+    if not positions:
+        raise RuntimeError("No source-text tokens remain for LIME attribution.")
+    inseq_model._lima_text_perturbation_contract = {
+        "prompt_token_ids": token_ids,
+        "text_token_positions": positions,
+    }
+
+
 def _patch_inseq_lime_bfloat16_numpy() -> None:
     """Patch Inseq 0.7.x LIME so bf16 tensors are cast before numpy conversion."""
     global _INSEQ_LIME_BFLOAT16_PATCHED
@@ -489,7 +586,10 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
     from inseq.attr.feat.ops.lime import Lime
 
     current = getattr(Lime, "perturb_func", None)
-    if getattr(current, "_lima_bfloat16_safe", False):
+    if (
+        getattr(current, "_lima_bfloat16_safe", False)
+        and getattr(current, "_lima_task_prompt_safe", False)
+    ):
         _INSEQ_LIME_BFLOAT16_PATCHED = True
         return
 
@@ -504,6 +604,16 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
 
         perturbed_inputs = []
         for original_input_tensor in original_input_tuple:
+            input_ids = [
+                int(value)
+                for value in _tensor_to_numpy_list_for_inseq_lime(
+                    original_input_tensor[0]
+                )
+            ]
+            perturbable_positions = _lime_perturbable_positions(
+                self.attribution_model,
+                input_ids,
+            )
             mask_value_probs = torch.tensor([mask_prob, 1 - mask_prob])
             mask_multinomial_binary = torch.multinomial(
                 mask_value_probs, len(original_input_tensor[0]), replacement=True
@@ -511,8 +621,13 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
 
             mask_special_token_ids = torch.Tensor(
                 [
-                    1 if id_ in self.attribution_model.special_tokens_ids else 0
-                    for id_ in _tensor_to_numpy_list_for_inseq_lime(original_input_tensor[0])
+                    1
+                    if (
+                        id_ in self.attribution_model.special_tokens_ids
+                        or index not in perturbable_positions
+                    )
+                    else 0
+                    for index, id_ in enumerate(input_ids)
                 ]
             ).int()
 
@@ -543,6 +658,7 @@ def _patch_inseq_lime_bfloat16_numpy() -> None:
         return tuple(perturbed_inputs)
 
     perturb_func._lima_bfloat16_safe = True  # type: ignore[attr-defined]
+    perturb_func._lima_task_prompt_safe = True  # type: ignore[attr-defined]
     Lime.perturb_func = perturb_func
     _INSEQ_LIME_BFLOAT16_PATCHED = True
 
@@ -847,8 +963,13 @@ def _explain_sample(
 
     target_label, full_probs = _sample_target_label(sample, bundle, backbone, args.target_mode)
     target_label_text = str(bundle.verbalizers[target_label])
-    target_text = _label_target_text(target_label_text)
-    target_token_ids = _encode_target_token_ids(tokenizer, target_label_text, max_length=int(args.max_length))
+    target_text = backbone.label_completion_text(target_label_text)
+    target_token_ids = _encode_target_token_ids(
+        tokenizer,
+        target_label_text,
+        max_length=int(args.max_length),
+        label_prefix=backbone.label_prefix,
+    )
 
     truncation = _truncate_text_for_prompt(
         tokenizer=tokenizer,
@@ -856,10 +977,23 @@ def _explain_sample(
         chunks=chunks,
         target_token_ids=target_token_ids,
         max_length=int(args.max_length),
+        prompt_prefix=backbone.prompt_prefix,
+        prompt_suffix=backbone.prompt_suffix,
+        label_token_reserve=backbone.label_token_reserve(),
     )
     kept_text = str(truncation["kept_text"])
     kept_start_char = int(truncation["kept_start_char"])
-    prompt_text = PROMPT_PREFIX + kept_text + PROMPT_SUFFIX
+    prompt_text = backbone.render_prompt(kept_text)
+    prompt_text_start = len(backbone.prompt_prefix)
+    prompt_text_end = prompt_text_start + len(kept_text)
+    if method_name == "lime":
+        _configure_lime_text_perturbations(
+            inseq_model,
+            tokenizer,
+            prompt_text,
+            prompt_text_start,
+            prompt_text_end,
+        )
 
     forward_calls = 0
 
@@ -893,8 +1027,6 @@ def _explain_sample(
     # tensor is indexed over, then project only the review/text span back to chunks.
     score_text = prompt_text if attribution_side == "source" else prompt_text + target_text
     prompt_offsets = _choose_offsets_for_scores(tokenizer, score_text, score_len=len(source_scores))
-    prompt_text_start = len(PROMPT_PREFIX)
-    prompt_text_end = prompt_text_start + len(kept_text)
     full_scores = _project_prompt_scores_to_text_chunks(
         source_scores=source_scores,
         prompt_offsets=prompt_offsets,
@@ -950,9 +1082,10 @@ def _explain_sample(
         "full_label_probabilities": [float(x) for x in full_probs.tolist()],
         "truncation": {**truncation, "dropped_left_char_count": dropped_left_char_count},
         "active_chunk_ids": active_ids,
-        "prompt_template": "Text:\\n{text}\\nLabel:",
-        "prompt_prefix": PROMPT_PREFIX,
-        "prompt_suffix": PROMPT_SUFFIX,
+        "prompt": backbone.prompt_metadata(),
+        "prompt_prefix": backbone.prompt_prefix,
+        "prompt_suffix": backbone.prompt_suffix,
+        "fixed_prompt_tokens_during_perturbation": method_name == "lime",
         "segmentation_strategy": segmentation_strategy,
         "raw_seq_attr": list(float(x) for x in full_scores),
         "source_score_count": int(len(source_scores)),
@@ -1149,17 +1282,29 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"[config] methods={methods}")
     print(f"[config] model={args.model_path}")
 
-    backbone = _load_backbone(args)
-
-    aggregate_rows: List[Dict[str, Any]] = []
-    for dataset_name in datasets:
-        bundle = load_dataset_bundle(
+    bundles = [
+        load_dataset_bundle(
             dataset_name=dataset_name,
             split=args.split,
             max_samples=args.max_samples,
             eraser_root=args.eraser_root,
             sst2_source=args.sst2_source,
             dataset_cache_dir=args.dataset_cache_dir,
+        )
+        for dataset_name in datasets
+    ]
+    backbone = _load_backbone(args, bundles[0])
+
+    aggregate_rows: List[Dict[str, Any]] = []
+    for bundle in bundles:
+        prompt_config = build_classification_prompt(
+            dataset_name=bundle.dataset_name,
+            verbalizers=bundle.verbalizers,
+        ).to_config()
+        backbone.configure_task(
+            verbalizers=bundle.verbalizers,
+            dataset_name=bundle.dataset_name,
+            prompt_config=prompt_config,
         )
         for method_name in methods:
             payload = _run_method_dataset(

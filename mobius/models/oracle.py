@@ -105,7 +105,7 @@ class ValueOracle:
         *,
         model_fingerprint: object,
         batch_size: int = 16,
-        prompt_version: str = "mobius_verbalizer_v2",
+        prompt_version: str = "task_classification_v1",
     ) -> None:
         """Open a process-safe SQLite cache for one scoring contract."""
 
@@ -122,6 +122,7 @@ class ValueOracle:
                 "prompt_version": str(prompt_version),
                 "verbalizers": [str(value) for value in scorer.verbalizers],
                 "score_semantics": "mean_conditional_log_probability",
+                "scorer_contract": scorer.scoring_contract(),
             }
         )
         self.connection = sqlite3.connect(str(self.cache_path), timeout=60.0)

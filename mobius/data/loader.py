@@ -33,6 +33,13 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "labels": ["sadness", "joy", "love", "anger", "fear", "surprise"],
         "cache_names": ["emotion", "dair-ai___emotion"],
     },
+    "ag_news": {
+        "hf_id": "wangrongsheng/ag_news",
+        "hf_config": None,
+        "labels": ["world", "sports", "business", "technology"],
+        "cache_names": ["ag_news", "wangrongsheng___ag_news"],
+        "fixed_verbalizers": True,
+    },
     "imdb": {
         "hf_id": "imdb",
         "hf_config": None,
@@ -58,6 +65,8 @@ def _canonical_name(name: str) -> str:
     aliases = {
         "glue_sst2": "sst2",
         "rtn": "rotten_tomatoes",
+        "agnews": "ag_news",
+        "agn": "ag_news",
         "eraser": "eraser_movie_reviews",
     }
     return aliases.get(normalized, normalized)
@@ -288,7 +297,11 @@ def load_dataset_bundle(
             dataset = load_dataset(spec["hf_id"], spec["hf_config"], **kwargs)
         else:
             dataset = load_dataset(spec["hf_id"], **kwargs)
-    labels = _label_names(dataset, spec["labels"])
+    labels = (
+        [str(value) for value in spec["labels"]]
+        if bool(spec.get("fixed_verbalizers"))
+        else _label_names(dataset, spec["labels"])
+    )
     return _bundle_from_rows(
         dataset,
         dataset_name=name,

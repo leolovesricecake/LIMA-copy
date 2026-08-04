@@ -32,6 +32,7 @@ from mobius.core.config import load_json_object
 from mobius.core.artifacts import (
     normalize_observation_artifact,
     normalize_surrogate_artifact,
+    predict_surrogate,
 )
 from mobius.core.results import ResultStore, default_run_dir
 from mobius.core.runtime import set_seed
@@ -39,6 +40,7 @@ from mobius.core.schema import AttributionResult, TextChunk
 from mobius.data import load_dataset_bundle
 from mobius.evaluation.evaluator import evaluate_run
 from mobius.models.hf import HFBackbone
+from mobius.models.prompting import build_classification_prompt
 from mobius.text.chunks import (
     build_chunks,
     compose_text,
@@ -97,7 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset",
         type=str,
         required=True,
-        choices=["sst2", "eraser_movie_reviews", "imdb", "rotten_tomatoes", "emotion"],
+        choices=[
+            "sst2",
+            "eraser_movie_reviews",
+            "imdb",
+            "rotten_tomatoes",
+            "emotion",
+            "ag_news",
+        ],
     )
     parser.add_argument("--split", type=str, default="validation")
     parser.add_argument("--eraser-root", type=str, default=None)
@@ -125,8 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
             "full-input predicted class."
         ),
     )
-    parser.add_argument("--eval-q-values", type=str, default="1,5,10,20,50")
-    parser.add_argument("--eval-granularity", type=str, default="token", choices=["token", "word"])
+    parser.add_argument("--eval-q-values", type=str, default="5,10,20,50")
+    parser.add_argument("--eval-granularity", type=str, default="word", choices=["token", "word"])
     parser.add_argument(
         "--chunker",
         type=str,
@@ -261,6 +270,15 @@ def _effective_target_mode(value_function: str, requested_target_mode: str) -> s
 def _result_config(args, bundle=None) -> Dict[str, Any]:
     """Build the scientific ProxySPEX configuration written once per run."""
 
+    verbalizers = list(bundle.verbalizers) if bundle is not None else []
+    prompt = (
+        build_classification_prompt(
+            dataset_name=str(args.dataset),
+            verbalizers=verbalizers,
+        ).to_config()
+        if verbalizers
+        else {}
+    )
     return {
         "method": METHOD_NAME,
         "output_level": str(getattr(args, "output_level", "standard")),
@@ -269,7 +287,7 @@ def _result_config(args, bundle=None) -> Dict[str, Any]:
             "split": str(args.split),
             "max_samples": args.max_samples,
             "dataset_cache_dir": args.dataset_cache_dir,
-            "verbalizers": list(bundle.verbalizers) if bundle is not None else [],
+            "verbalizers": verbalizers,
         },
         "model": {
             "type": "hf_causal_lm",
@@ -279,6 +297,7 @@ def _result_config(args, bundle=None) -> Dict[str, Any]:
             "max_length": int(args.max_length),
             "trust_remote_code": bool(args.trust_remote_code),
         },
+        "prompt": prompt,
         "budget": int(args.budget),
         "seed": int(args.seed),
         "max_order": int(args.max_order),
@@ -847,6 +866,14 @@ def _explain_sample(
         text=sample.text,
         label_text=target_label_text,
         max_length=int(args.max_length),
+        prompt_prefix=str(getattr(backbone, "prompt_prefix", "Text:\n")),
+        prompt_suffix=str(getattr(backbone, "prompt_suffix", "\nLabel:")),
+        label_token_reserve=(
+            int(backbone.label_token_reserve())
+            if callable(getattr(backbone, "label_token_reserve", None))
+            else None
+        ),
+        label_prefix=str(getattr(backbone, "label_prefix", " ")),
     )
     active_chunk_ids = _active_unit_ids_from_visible_span(
         units,
@@ -859,6 +886,7 @@ def _explain_sample(
     proxy_hpo_cv_splits = None
     tree_conversion_backends: List[str] = []
     tree_fourier_validation_max_abs_error = None
+    serialized_fourier_validation_max_abs_error = None
     attribution_counter_before = backbone.snapshot_counters()
 
     if len(player_to_chunk_id) == 0:
@@ -1004,8 +1032,7 @@ def _explain_sample(
     )
     unrefined_payload = _spectral_terms_payload(unrefined_fourier)
     refined_payload = _spectral_terms_payload(refined_fourier)
-    surrogate_artifact = normalize_surrogate_artifact(
-        {
+    surrogate_payload = {
             "sample_id": sample.sample_id,
             "method": METHOD_NAME,
             "n_features": len(player_to_chunk_id),
@@ -1045,7 +1072,49 @@ def _explain_sample(
                 ),
             },
         }
-    )
+    if player_to_chunk_id:
+        # Validate the portable predictor on native training and local anchor masks.
+        n_players = len(player_to_chunk_id)
+        full_row = np.ones((1, n_players), dtype=bool)
+        empty_row = np.zeros((1, n_players), dtype=bool)
+        singleton_deletions = np.repeat(full_row, n_players, axis=0)
+        singleton_deletions[np.arange(n_players), np.arange(n_players)] = False
+        validation_matrix = np.unique(
+            np.vstack(
+                [
+                    np.asarray(training_matrix, dtype=bool),
+                    empty_row,
+                    full_row,
+                    singleton_deletions,
+                ]
+            ),
+            axis=0,
+        )
+        portable = normalize_surrogate_artifact(surrogate_payload)
+        native_predictions = np.asarray(
+            approximator.predict_refined_fourier(validation_matrix),
+            dtype=np.float64,
+        )
+        serialized_predictions = np.asarray(
+            predict_surrogate(portable, validation_matrix),
+            dtype=np.float64,
+        )
+        serialized_fourier_validation_max_abs_error = float(
+            np.max(np.abs(native_predictions - serialized_predictions))
+        )
+        if serialized_fourier_validation_max_abs_error > 1e-9:
+            raise RuntimeError(
+                "Serialized refined Fourier predictor differs from native "
+                "ProxySPEX prediction: max_abs_error="
+                f"{serialized_fourier_validation_max_abs_error:.3e}."
+            )
+    surrogate_payload["fit_config"][
+        "serialized_fourier_validation_max_abs_error"
+    ] = serialized_fourier_validation_max_abs_error
+    surrogate_payload["fit_config"][
+        "serialized_fourier_validation_tolerance"
+    ] = 1e-9
+    surrogate_artifact = normalize_surrogate_artifact(surrogate_payload)
 
     metadata = {
         "proxyspex_method": METHOD_NAME,
@@ -1069,6 +1138,9 @@ def _explain_sample(
         "proxyspex_tree_conversion_backends": tree_conversion_backends,
         "proxyspex_tree_fourier_validation_max_abs_error": (
             tree_fourier_validation_max_abs_error
+        ),
+        "proxyspex_serialized_fourier_validation_max_abs_error": (
+            serialized_fourier_validation_max_abs_error
         ),
         "proxyspex_pairing_trick": bool(args.pairing_trick),
         "proxyspex_top_order": bool(args.top_order),
@@ -1237,6 +1309,8 @@ def run(args, raw_argv: Sequence[str]) -> None:
         dtype=args.dtype,
         trust_remote_code=bool(args.trust_remote_code),
         batch_size=16,
+        dataset_name=bundle.dataset_name,
+        prompt_config=dict(config.get("prompt", {})),
     )
 
     pending_samples = [

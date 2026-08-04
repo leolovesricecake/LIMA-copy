@@ -28,6 +28,11 @@ def main(argv: list[str] | None = None) -> None:
     run_dir = Path(args.run_dir)
     run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     config = dict(run_payload["scientific_config"])
+    if not config.get("prompt"):
+        raise RuntimeError(
+            "This run predates the task-aware prompt protocol and cannot be "
+            "re-evaluated as a valid classification run. Re-run attribution first."
+        )
     dataset_config = dict(config["dataset"])
     model_config = dict(config["model"])
     if args.device:
@@ -37,14 +42,19 @@ def main(argv: list[str] | None = None) -> None:
         model_config,
         bundle.verbalizers,
         batch_size=int(config.get("batch_size", 16)),
+        dataset_name=bundle.dataset_name,
+        prompt_config=dict(config.get("prompt", {})),
     )
     report = evaluate_run(
         run_dir,
         bundle,
         scorer,
         target=args.target,
-        eval_granularity=str(config.get("eval_granularity", "token")),
-        q_values=[int(value) for value in config.get("eval_q_values", [1, 5, 10, 20, 50])],
+        eval_granularity=str(config.get("eval_granularity", "word")),
+        q_values=[
+            int(value)
+            for value in config.get("eval_q_values", [5, 10, 20, 50])
+        ],
     )
     print(
         f"[evaluated] target={report['target']} samples={report['evaluated_count']} "
@@ -54,4 +64,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

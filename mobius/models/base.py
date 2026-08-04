@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Sequence
+from typing import Any, Dict, Sequence
 
 import numpy as np
 
@@ -37,3 +37,10 @@ class RawTextScorer(ABC):
 
         return {}
 
+    def scoring_contract(self) -> Dict[str, Any]:
+        """Return scientific scorer semantics used to isolate cached values."""
+
+        return {
+            "scorer": f"{type(self).__module__}.{type(self).__qualname__}",
+            "verbalizers": [str(value) for value in self.verbalizers],
+        }

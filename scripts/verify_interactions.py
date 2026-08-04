@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
 import numpy as np
-from scipy.stats import pearsonr, spearmanr
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -258,9 +257,33 @@ def _correlation(
     right = np.asarray(exact, dtype=np.float64)
     if np.std(left) <= 1e-15 or np.std(right) <= 1e-15:
         return {"pearson": None, "spearman": None}
+    def ranks(values: np.ndarray) -> np.ndarray:
+        """Assign stable average ranks to tied values."""
+
+        order = np.argsort(values, kind="mergesort")
+        output = np.empty(len(values), dtype=np.float64)
+        start = 0
+        while start < len(order):
+            end = start + 1
+            while (
+                end < len(order)
+                and values[order[end]] == values[order[start]]
+            ):
+                end += 1
+            output[order[start:end]] = 0.5 * (start + end - 1)
+            start = end
+        return output
+
+    left_ranks = ranks(left)
+    right_ranks = ranks(right)
     return {
-        "pearson": float(pearsonr(left, right).statistic),
-        "spearman": float(spearmanr(left, right).statistic),
+        "pearson": float(np.corrcoef(left, right)[0, 1]),
+        "spearman": (
+            float(np.corrcoef(left_ranks, right_ranks)[0, 1])
+            if np.std(left_ranks) > 1e-15
+            and np.std(right_ranks) > 1e-15
+            else None
+        ),
     }
 
 
@@ -319,6 +342,8 @@ def verify_runs(
         first_model,
         verbalizers,
         batch_size=int(configs[0].get("batch_size", 16)),
+        dataset_name=str(first_dataset.get("name", "dataset")),
+        prompt_config=dict(configs[0].get("prompt", {})),
     )
     oracle = ValueOracle(
         scorer,
@@ -354,7 +379,9 @@ def verify_runs(
                         )
                     )
                     singleton_support = {
-                        term for term in selection_support if term.bit_count() == 1
+                        term
+                        for term in selection_support
+                        if bin(int(term)).count("1") == 1
                     }
                     selected_sources: Dict[Tuple[int, int], set[str]] = {
                         pair: {"global_top"} for pair in global_pairs

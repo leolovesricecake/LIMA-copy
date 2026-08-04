@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
 
 import numpy as np
 
 from .base import RawTextScorer
+from .prompting import build_classification_prompt
 
 
 class HFVerbalizerScorer(RawTextScorer):
@@ -24,6 +25,8 @@ class HFVerbalizerScorer(RawTextScorer):
         max_length: int = 2048,
         trust_remote_code: bool = False,
         batch_size: int | None = None,
+        dataset_name: str | None = None,
+        prompt_config: Mapping[str, Any] | None = None,
     ) -> None:
         """Load the tokenizer and model on one explicit device."""
 
@@ -34,6 +37,12 @@ class HFVerbalizerScorer(RawTextScorer):
             raise RuntimeError("HF scoring requires torch and transformers.") from exc
         self.torch = torch
         self.verbalizers = [str(value) for value in verbalizers]
+        self.dataset_name = str(dataset_name or "unknown")
+        self.prompt_spec = build_classification_prompt(
+            dataset_name=self.dataset_name,
+            verbalizers=self.verbalizers,
+            prompt_config=prompt_config,
+        )
         self.max_length = int(max_length)
         self.device = torch.device(device)
         if self.device.type == "cuda":
@@ -52,6 +61,7 @@ class HFVerbalizerScorer(RawTextScorer):
             use_fast=True,
             trust_remote_code=bool(trust_remote_code),
         )
+        self._configure_prompt_layout()
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -85,21 +95,36 @@ class HFVerbalizerScorer(RawTextScorer):
 
         maximum = max(1, self.max_length - 1)
         return {
-            label: self._token_ids(" " + label)[-maximum:]
+            label: self._token_ids(self.label_prefix + label)[-maximum:]
             for label in self.verbalizers
         }
 
-    def _prefix_ids(self, texts: Sequence[str]) -> List[List[int]]:
-        """Batch-tokenize the fixed classification prompt prefixes."""
+    def _prefix_ids(
+        self,
+        texts: Sequence[str],
+        label_length: int,
+    ) -> List[List[int]]:
+        """Tokenize prompts while truncating only the source text from the left."""
 
-        prompts = [f"Text:\n{text}\nLabel:" for text in texts]
         encoded = self.tokenizer(
-            prompts,
+            list(texts),
             add_special_tokens=False,
             padding=False,
             truncation=False,
         )
-        return [[int(value) for value in row] for row in encoded["input_ids"]]
+        prefix = self._token_ids(self.prompt_prefix)
+        suffix = self._token_ids(self.prompt_suffix)
+        available_text = self.max_length - int(label_length) - len(prefix) - len(suffix)
+        if available_text < 0:
+            raise ValueError(
+                "max_length is too small for the task prompt, candidate labels, and verbalizer."
+            )
+        rows = []
+        for raw_text_ids in encoded["input_ids"]:
+            text_ids = [int(value) for value in raw_text_ids]
+            kept = text_ids[-available_text:] if available_text else []
+            rows.append(prefix + kept + suffix)
+        return rows
 
     def _score_label(
         self,
@@ -168,7 +193,8 @@ class HFVerbalizerScorer(RawTextScorer):
         while cursor < len(texts):
             batch = list(texts[cursor : cursor + batch_size])
             try:
-                prefixes = self._prefix_ids(batch)
+                label_reserve = max(len(value) for value in labels.values())
+                prefixes = self._prefix_ids(batch, label_reserve)
                 columns = [
                     self._score_label(prefixes, labels[label])
                     for label in self.verbalizers
@@ -194,7 +220,12 @@ class HFVerbalizerScorer(RawTextScorer):
     ) -> np.ndarray:
         """Provide the historical backbone API for retained baselines."""
 
-        self.verbalizers = [str(value) for value in verbalizers]
+        requested = [str(value) for value in verbalizers]
+        if requested != self.verbalizers:
+            self.configure_task(
+                verbalizers=requested,
+                dataset_name=self.dataset_name,
+            )
         return self.score_texts(texts)
 
     def predict_label_scores(
@@ -232,6 +263,130 @@ class HFVerbalizerScorer(RawTextScorer):
 
         return max(1, len(self._token_ids(text)))
 
+    def label_token_reserve(self) -> int:
+        """Reserve one shared target length so every class sees identical source text."""
+
+        labels = self._label_ids()
+        return max(len(value) for value in labels.values())
+
+    def configure_task(
+        self,
+        *,
+        verbalizers: Sequence[str],
+        dataset_name: str | None = None,
+        prompt_config: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Configure one dataset task before scoring or attribution."""
+
+        self.verbalizers = [str(value) for value in verbalizers]
+        self.dataset_name = str(dataset_name or self.dataset_name or "unknown")
+        self.prompt_spec = build_classification_prompt(
+            dataset_name=self.dataset_name,
+            verbalizers=self.verbalizers,
+            prompt_config=prompt_config,
+        )
+        self._configure_prompt_layout()
+
+    def _configure_prompt_layout(self) -> None:
+        """Render a model-native non-thinking chat prefix with a plain fallback."""
+
+        marker = "__LIMA_CLASSIFICATION_TEXT_SLOT_7F3A9C__"
+        apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
+        chat_template = getattr(self.tokenizer, "chat_template", None)
+        if callable(apply_chat_template) and chat_template:
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"{self.prompt_spec.prefix}{marker}",
+                }
+            ]
+            try:
+                rendered = apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+                thinking_disabled = True
+            except TypeError:
+                rendered = apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                thinking_disabled = None
+            if marker not in rendered:
+                raise RuntimeError("Chat template removed the classification text marker.")
+            self._prompt_prefix, self._prompt_suffix = rendered.split(marker, 1)
+            self._uses_chat_template = True
+            self._thinking_disabled = thinking_disabled
+            self._label_prefix = ""
+            return
+        self._prompt_prefix = self.prompt_spec.prefix
+        self._prompt_suffix = self.prompt_spec.suffix
+        self._uses_chat_template = False
+        self._thinking_disabled = None
+        self._label_prefix = " "
+
+    @property
+    def prompt_prefix(self) -> str:
+        """Expose the exact prompt prefix for truncation and attribution alignment."""
+
+        return self._prompt_prefix
+
+    @property
+    def prompt_suffix(self) -> str:
+        """Expose the exact prompt suffix for truncation and attribution alignment."""
+
+        return self._prompt_suffix
+
+    @property
+    def label_prefix(self) -> str:
+        """Return the exact separator before a forced class verbalizer."""
+
+        return self._label_prefix
+
+    def render_prompt(self, text: str) -> str:
+        """Render the exact classifier prompt used for one text."""
+
+        return f"{self.prompt_prefix}{text}{self.prompt_suffix}"
+
+    def label_completion_text(self, label: str) -> str:
+        """Render one forced assistant label exactly as it is scored."""
+
+        return f"{self.label_prefix}{label}"
+
+    def prompt_metadata(self) -> Dict[str, Any]:
+        """Serialize the resolved model-specific prompt layout."""
+
+        return {
+            **self.prompt_spec.to_config(),
+            "dataset_name": self.dataset_name,
+            "candidate_labels": list(self.verbalizers),
+            "template": (
+                f"{self.prompt_prefix}{{text}}{self.prompt_suffix}"
+                f"{self.label_prefix}{{class_verbalizer}}"
+            ),
+            "label_prefix": self.label_prefix,
+            "add_special_tokens": False,
+            "use_chat_template": bool(self._uses_chat_template),
+            "enable_thinking": (
+                False if self._thinking_disabled else None
+            ),
+            "score_semantics": "mean_conditional_log_probability",
+        }
+
+    def scoring_contract(self) -> Dict[str, Any]:
+        """Return prompt and score semantics that define cached model values."""
+
+        return {
+            "scorer": f"{type(self).__module__}.{type(self).__qualname__}",
+            "prompt": self.prompt_metadata(),
+            "verbalizers": list(self.verbalizers),
+            "max_length": int(self.max_length),
+            "score_semantics": "mean_conditional_log_probability",
+        }
+
     def snapshot_counters(self) -> Dict[str, float | int]:
         """Return an immutable counter snapshot."""
 
@@ -243,6 +398,8 @@ def build_scorer(
     verbalizers: Sequence[str],
     *,
     batch_size: int = 16,
+    dataset_name: str | None = None,
+    prompt_config: Mapping[str, Any] | None = None,
 ) -> RawTextScorer:
     """Construct a mock or Hugging Face scorer from resolved config."""
 
@@ -259,6 +416,8 @@ def build_scorer(
         max_length=int(config.get("max_length", 2048)),
         trust_remote_code=bool(config.get("trust_remote_code", False)),
         batch_size=int(batch_size),
+        dataset_name=dataset_name,
+        prompt_config=prompt_config,
     )
 
 

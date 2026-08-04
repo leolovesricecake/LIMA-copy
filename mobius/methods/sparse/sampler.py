@@ -63,7 +63,7 @@ def _finalize(
     """Sort masks and build common cardinality/source diagnostics."""
 
     ordered = sorted({int(mask) for mask in masks})
-    keep_counts = [mask.bit_count() for mask in ordered]
+    keep_counts = [bin(int(mask)).count("1") for mask in ordered]
     diagnostics: Dict[str, object] = {
         "sampler": name,
         "requested_budget": int(budget),

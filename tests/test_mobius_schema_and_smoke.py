@@ -125,6 +125,9 @@ def test_default_sampler_is_uniform_size() -> None:
 
     resolved = resolve_config({})
     assert resolved["sampler"] == {"name": "uniform_size"}
+    assert resolved["value_function"] == "predicted_probability"
+    assert resolved["chunker"] == "word"
+    assert resolved["eval_granularity"] == "word"
 
 
 def test_result_store_honors_minimal_and_debug_output_levels(tmp_path: Path) -> None:

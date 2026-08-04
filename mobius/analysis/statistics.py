@@ -21,7 +21,11 @@ def aggregate_numeric(values: Sequence[float | None]) -> Dict[str, Any]:
     return {
         "count": int(len(array)),
         "mean": float(np.mean(array)) if len(array) else None,
-        "std": float(np.std(array)) if len(array) else None,
+        "std": (
+            float(np.std(array, ddof=1))
+            if len(array) > 1
+            else (0.0 if len(array) == 1 else None)
+        ),
         "median": float(np.median(array)) if len(array) else None,
     }
 
@@ -106,7 +110,7 @@ def paired_cluster_summary(
                 if np.allclose(sample_means, 0.0)
                 else float(wilcoxon(sample_means).pvalue)
             )
-        except ValueError:
+        except (ImportError, ValueError):
             p_value = None
     return {
         **summary,
