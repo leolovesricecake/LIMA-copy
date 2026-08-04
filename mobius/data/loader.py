@@ -15,12 +15,16 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "sst2": {
         "hf_id": "nyu-mll/glue",
         "hf_config": "sst2",
+        "cache_configs": ["sst2"],
+        "text_field": "sentence",
         "labels": ["negative", "positive"],
         "cache_names": ["glue", "nyu-mll___glue"],
     },
     "rotten_tomatoes": {
         "hf_id": "cornell-movie-review-data/rotten_tomatoes",
         "hf_config": None,
+        "cache_configs": ["default"],
+        "text_field": "text",
         "labels": ["negative", "positive"],
         "cache_names": [
             "rotten_tomatoes",
@@ -30,12 +34,16 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "emotion": {
         "hf_id": "dair-ai/emotion",
         "hf_config": None,
+        "cache_configs": ["split", "default"],
+        "text_field": "text",
         "labels": ["sadness", "joy", "love", "anger", "fear", "surprise"],
         "cache_names": ["emotion", "dair-ai___emotion"],
     },
     "ag_news": {
         "hf_id": "wangrongsheng/ag_news",
         "hf_config": None,
+        "cache_configs": ["default"],
+        "text_field": "text",
         "labels": ["world", "sports", "business", "technology"],
         "cache_names": ["ag_news", "wangrongsheng___ag_news"],
         "fixed_verbalizers": True,
@@ -43,12 +51,16 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "imdb": {
         "hf_id": "imdb",
         "hf_config": None,
+        "cache_configs": ["plain_text", "default"],
+        "text_field": "text",
         "labels": ["negative", "positive"],
         "cache_names": ["imdb"],
     },
     "eraser_movie_reviews": {
         "hf_id": "eraser-benchmark/movie_rationales",
         "hf_config": None,
+        "cache_configs": ["default"],
+        "text_field": "review",
         "labels": ["negative", "positive"],
         "cache_names": [
             "movie_rationales",
@@ -93,8 +105,10 @@ def _cached_arrow_files(
     cache_dir: str | None,
     cache_names: Sequence[str],
     split: str,
+    *,
+    cache_configs: Sequence[str] | None = None,
 ) -> List[Path]:
-    """Find the newest complete cached Arrow split without contacting the Hub."""
+    """Find the newest cached split within the requested dataset configuration."""
 
     root = _cache_root(cache_dir)
     if root is None:
@@ -107,9 +121,20 @@ def _cached_arrow_files(
             candidate = search_root / cache_name
             if not candidate.is_dir():
                 continue
-            for arrow_path in candidate.rglob("*.arrow"):
-                if split_pattern.search(arrow_path.stem):
-                    groups.setdefault(arrow_path.parent, []).append(arrow_path)
+            # A Hugging Face cache stores configurations directly below the
+            # dataset directory. Restricting this level prevents, for example,
+            # SST-2 from accidentally selecting a newer MRPC cache under GLUE.
+            config_roots = (
+                [candidate / str(config_name) for config_name in cache_configs]
+                if cache_configs
+                else [candidate]
+            )
+            for config_root in config_roots:
+                if not config_root.is_dir():
+                    continue
+                for arrow_path in config_root.rglob("*.arrow"):
+                    if split_pattern.search(arrow_path.stem):
+                        groups.setdefault(arrow_path.parent, []).append(arrow_path)
     if not groups:
         return []
     newest = max(
@@ -123,10 +148,18 @@ def _load_cached_arrow(
     cache_dir: str | None,
     cache_names: Sequence[str],
     split: str,
+    *,
+    cache_configs: Sequence[str] | None = None,
+    text_field: str,
 ):
-    """Load cached Arrow shards directly to avoid Hub metadata requests."""
+    """Load cached Arrow shards and validate their configured text schema."""
 
-    files = _cached_arrow_files(cache_dir, cache_names, split)
+    files = _cached_arrow_files(
+        cache_dir,
+        cache_names,
+        split,
+        cache_configs=cache_configs,
+    )
     if not files:
         return None
     try:
@@ -135,18 +168,21 @@ def _load_cached_arrow(
         raise RuntimeError("Loading datasets requires the `datasets` package.") from exc
     shards = [Dataset.from_file(str(path)) for path in files]
     dataset = shards[0] if len(shards) == 1 else concatenate_datasets(shards)
+    columns = set(getattr(dataset, "column_names", ()))
+    if text_field not in columns:
+        raise ValueError(
+            "Cached dataset schema does not match its configured text field: "
+            f"expected {text_field!r}, found {sorted(columns)!r} under {files[0].parent}."
+        )
     print(f"[dataset-cache] loaded {split} from {files[0].parent}")
     return dataset
 
 
-def _extract_text(row: Mapping[str, Any]) -> str:
-    """Read text from common text-classification field names."""
+def _extract_text(row: Mapping[str, Any], text_field: str) -> str:
+    """Read text only from the field declared by the dataset specification."""
 
-    for key in ("sentence", "text", "review", "document"):
-        value = row.get(key)
-        if value is not None and str(value) != "":
-            return str(value)
-    return ""
+    value = row.get(text_field)
+    return "" if value is None else str(value)
 
 
 def _label_names(dataset, fallback: Sequence[str]) -> List[str]:
@@ -165,6 +201,7 @@ def _bundle_from_rows(
     dataset_name: str,
     split: str,
     labels: Sequence[str],
+    text_field: str,
     max_samples: int | None,
     source: str,
 ) -> DatasetBundle:
@@ -172,7 +209,7 @@ def _bundle_from_rows(
 
     samples: List[TextSample] = []
     for row_index, row in enumerate(rows):
-        text = _extract_text(row)
+        text = _extract_text(row, text_field)
         raw_label = row.get("label", row.get("classification"))
         try:
             label = int(raw_label)
@@ -276,6 +313,7 @@ def load_dataset_bundle(
             dataset_name=name,
             split=resolved_split,
             labels=spec["labels"],
+            text_field=spec["text_field"],
             max_samples=max_samples,
             source=str(path),
         )
@@ -284,6 +322,8 @@ def load_dataset_bundle(
         dataset_cache_dir,
         spec["cache_names"],
         resolved_split,
+        cache_configs=spec["cache_configs"],
+        text_field=spec["text_field"],
     )
     if dataset is None:
         try:
@@ -307,6 +347,7 @@ def load_dataset_bundle(
         dataset_name=name,
         split=resolved_split,
         labels=labels,
+        text_field=spec["text_field"],
         max_samples=max_samples,
         source=f"hf://{spec['hf_id']}",
     )
